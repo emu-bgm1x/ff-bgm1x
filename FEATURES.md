@@ -43,12 +43,6 @@
 | Azahar | NoCrypto 표시가 꺼져 있지만 실제로는 평문인 롬 덤프도 열리게 |
 | mGBA | 공식 배포본처럼 실행 파일 하나로 빌드 (정적 빌드용 초기화), SDL 출력 쪽 섞기 지원 |
 
-## 확인한 게임
-
-- mGBA: 포켓몬 GBA 계열, 골드(GB)
-- melonDS: 포켓몬 플래티넘(엔딩까지), 하트골드(도입부)
-- Azahar: 포켓몬 오메가루비, 울트라썬, X·Y(BGM), 레이튼 교수 시리즈(BGM), 동물의 숲(BGM)
-
 ## 새 버전에 대한 생각
 
 기능의 동작 규칙(무엇을 1배속으로 하고 무엇을 게임 속도로 둘지, 팡파레·연출·효과음을 어떻게 다룰지)은 만든 사람이 직접 정했고,
@@ -102,12 +96,6 @@ music and sound effects play at 1x speed and original pitch.
 | melonDS | Non-ASCII ROM paths passed on the command line were garbled (Windows) |
 | Azahar | Opens ROM dumps whose NoCrypto flag is off but whose content is actually plaintext |
 | mGBA | Single-executable build like the official release (static build init), mixing support for SDL output |
-
-## Tested games
-
-- mGBA: Pokémon GBA titles, Gold (GB)
-- melonDS: Pokémon Platinum (to the ending), HeartGold (opening)
-- Azahar: Pokémon Omega Ruby, Ultra Sun, X/Y (BGM), Professor Layton series (BGM), Animal Crossing (BGM)
 
 ## About new versions
 
