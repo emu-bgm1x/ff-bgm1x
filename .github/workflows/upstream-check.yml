@@ -1,0 +1,21 @@
+# 매주 세 에뮬레이터의 공식 최신 릴리스에 hooks.patch 가 그대로 들어가는지 시험하고 결과를 이슈로 남긴다
+name: upstream-check
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"  # 매주 월요일 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upstream releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/check_upstream.sh
