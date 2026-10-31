@@ -23,8 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "audio_core/hle/ctr_synth.h"
-#include "audio_core/hle/seq_tracker.h"
+#include "audio_core/audio_types.h"
+#include "audio_core/hle/sfx_mirror.h"
 #include "common/common_types.h"
 
 namespace FileSys {
@@ -44,9 +44,9 @@ public:
     void SetEmulationRunning(bool running);
     // 연출(반복 없는 긴 곡이 나오는 장면) 중에도 배속할지. 끄면(기본) 연출 동안 배속을 잠시 멈춘다
     void SetFastForwardCutscenes(bool on);
-    // "대사·효과음 1배속": BGM 위에 겹쳐 트는 소리(대사 등)를 1배속으로 낼지. 끄면 게임 속도로 둔다
+    // "대사·효과음 1배속": BGM 위에 겹쳐 트는 소리(대사 등)와 효과음을 1배속으로 낼지. 끄면 게임 속도로 둔다
     void SetVoices1x(bool on);
-    // 1배속으로 내는 효과음(재생기·파형 대체)의 볼륨 (0~1)
+    // 1배속으로 내는 효과음(음성 미러)의 볼륨 (0~1)
     void SetSfxVolume(float volume);
     // 동영상 연출 감지 (어느 스레드에서든 불릴 수 있다)
     // 게임이 RomFS 의 동영상 파일(.moflex)을 읽을 때
@@ -70,6 +70,13 @@ public:
     bool OnPcmBuffer(std::size_t source_id, u32 address, u32 length, u32 channels);
     void UpdateSourceGain(std::size_t source_id, const std::array<std::array<float, 4>, 3>& gain);
     void UpdateMixerVolumes(const std::array<float, 3>& volumes);
+    // 효과음 음성 미러 (sfx_mirror.h). 음성이 새 소리를 시작할 때: 배속 중이면 녹음을 시작하고 true
+    // (그 소리는 원본 믹스에서 뺀다)
+    bool MirrorBegin(std::size_t source_id);
+    void MirrorEnd(std::size_t source_id);
+    // 녹음 중인 음성의 이번 프레임 출력. 녹음이 끝났으면(메뉴에서 끔 등) false -> 원본으로 돌아간다
+    bool MirrorFeed(std::size_t source_id, const StereoFrame16& frame,
+                    const std::array<std::array<float, 4>, 3>& gain);
 
     // ---- 오디오 출력 스레드 ----
     void Mix(s16* buffer, std::size_t frames, u32 sample_rate);
@@ -140,33 +147,6 @@ private:
         u32 end = 0;
     };
 
-    // ---- 효과음 1배속 ----
-    // 사운드 아카이브에서 이름에 System 이 들어간 플레이어로 나오는 시퀀스 효과음의 악기 파형을 색인한다.
-    // 게임이 그 파형을 DSP 음성에 넣으면 원본은 빼고, 같은 파형을 1배속으로 끝까지 낸다
-    struct SfxWave {
-        std::string name;  // 그 파형을 쓰는 효과음 이름 (기록용)
-        bool system = false;  // 시스템 효과음 플레이어의 파형 (트랙 칸을 찾기 전에도 파형 단위로 바꿔 낸다)
-        u32 sample_rate = 0;
-        u32 frames = 0;
-        std::vector<u64> data_offset;  // 채널별 표본 시작 (RomFS level3 기준)
-        std::vector<std::array<s16, 16>> coeffs;
-        std::vector<std::array<s16, 2>> history;
-    };
-    struct SfxPlay {
-        int wave = -1;
-        u32 channel = 0;
-        int source = -1;  // 원본 음성 (게임이 그 음성을 놓으면 -1, 마지막 볼륨 유지)
-        std::shared_ptr<const std::vector<s16>> pcm;
-        double position = 0;
-        float gl = 0, gr = 0;
-    };
-    void IndexSystemSfx(FileSys::RomFSReader& romfs, u64 offset, u64 size);
-    std::shared_ptr<const std::vector<s16>> SfxPcm(int wave, u32 channel);
-    void StartSfx(std::size_t source_id, int wave, u32 channel);
-    static u64 SfxKey(u64 coeff_key, u64 head) {
-        return coeff_key * 0x9E3779B97F4A7C15ULL ^ head;
-    }
-
     bool BuildIndex();
     void IndexAacFile(FileSys::RomFSReader& romfs, StreamFile& f);
     // .bcsar 의 스트림 사운드 정보에서 외부 스트림 파일별 반복 지점을 읽는다
@@ -195,25 +175,16 @@ private:
     std::atomic<bool> ff_cutscenes{false};
     std::atomic<bool> voices_1x{true};
     std::atomic<float> sfx_volume{1.0f};
-    // 시퀀스 효과음 1배속: 게임 메모리에서 효과음 시퀀스 시작을 감지해 롬의 같은 시퀀스를 자체 재생기로 1배속 연주하고,
-    // 원본 효과음 음성은 끈다. 트랙 칸을 찾기 전에는 시스템 효과음만 파형 단위로 바꿔 낸다
-    std::vector<std::unique_ptr<CtrSynth>> seq_synths;  // 사운드 아카이브마다 (mutex)
-    SeqTracker seq_tracker;                             // 에뮬레이션 스레드
-    std::vector<SeqTracker::Start> seq_starts;
-    std::atomic<u32> seq_rate{0};  // 출력 샘플레이트 (Mix 가 알려 줌)
-    void StartSeqSfx(const SeqTracker::Start& start);
-    void StopSeqSfx();
+    // 지금 배속 중인지 (실제 속도 제한이 100% 를 넘거나 제한 없음). 효과음은 배속 중에만 미러로 낸다
+    static bool FastForwarding();
+    SfxMirror sfx_mirror;
+    std::array<float, 3> mirror_mixer_volume{1.0f, 0.0f, 0.0f};  // 에뮬레이션 스레드
     std::mutex mutex;
     bool index_built = false;
     bool index_ok = false;
     std::vector<StreamFile> files;
     std::unordered_multimap<u64, std::pair<int, u32>> coeff_index;  // 계수 -> (파일, 채널)
     std::array<Binding, 24> bindings{};
-    std::vector<SfxWave> sfx_waves;
-    std::unordered_map<u64, std::pair<int, u32>> sfx_index;  // (계수, 첫 8바이트) -> (파형, 채널)
-    std::unordered_map<u64, std::shared_ptr<const std::vector<s16>>> sfx_cache;
-    std::vector<SfxPlay> sfx_plays;
-    std::array<std::pair<int, u32>, 24> sfx_source{};  // 음성 -> 지금 대체 중인 (파형, 채널), 없으면 파형 -1
     std::unordered_map<int, Playback> playbacks;
     std::array<float, 3> mixer_volume{1.0f, 0.0f, 0.0f};
 

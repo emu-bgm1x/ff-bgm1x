@@ -1,5 +1,5 @@
 diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
-index 4728526..28549bd 100755
+index 4728526..fac8b8d 100755
 --- a/src/audio_core/hle/source.cpp
 +++ b/src/audio_core/hle/source.cpp
 @@ -5,6 +5,7 @@
@@ -10,7 +10,7 @@ index 4728526..28549bd 100755
  #include "audio_core/hle/common.h"
  #include "audio_core/hle/source.h"
  #include "audio_core/interpolate.h"
-@@ -28,6 +29,20 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+@@ -28,6 +29,46 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
  void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
      const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
      if (!state.enabled) {
@@ -20,6 +20,10 @@ index 4728526..28549bd 100755
 +            bgm_replaced = false;
 +            BgmReplacer::Instance().OnSourceIdle(source_id);
 +        }
++        if (mirrored) {
++            mirrored = false;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
 +        return;
 +    }
 +
@@ -28,10 +32,32 @@ index 4728526..28549bd 100755
 +        if (intermediate_mix_id == 0) {
 +            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
 +        }
++        if (mirrored) {
++            mirrored = false;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        return;
++    }
++
++    // ff-bgm1x: 효과음 음성 미러. 배속 중에 시작한 소리는 이 음성의 출력(볼륨 포함)을 녹음해 1배속으로 내고,
++    // 원본 믹스에서는 뺀다 (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
++    if (intermediate_mix_id == 0) {
++        if (mirror_new) {
++            mirror_new = false;
++            if (mirrored) BgmReplacer::Instance().MirrorEnd(source_id);
++            mirrored = BgmReplacer::Instance().MirrorBegin(source_id);
++        }
++        if (mirrored && !BgmReplacer::Instance().MirrorFeed(source_id, current_frame, state.gain)) {
++            mirrored = false;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
++        }
++    }
++    if (mirrored) {
          state.gain_ramp_start.at(intermediate_mix_id) = gains;
          state.gain_ramp_active.at(intermediate_mix_id) = false;
          return;
-@@ -64,6 +79,10 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+@@ -64,6 +105,15 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
  void Source::Reset() {
      current_frame.fill({});
      state = {};
@@ -39,10 +65,31 @@ index 4728526..28549bd 100755
 +        bgm_replaced = false;
 +        BgmReplacer::Instance().OnSourceIdle(source_id);
 +    }
++    if (mirrored) {
++        mirrored = false;
++        BgmReplacer::Instance().MirrorEnd(source_id);
++    }
++    mirror_new = true;
  }
  
  void Source::Sleep() {
-@@ -462,13 +481,28 @@ bool Source::DequeueBuffer() {
+@@ -102,6 +152,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.enable_dirty) {
+         config.enable_dirty.Assign(0);
++        if (config.enable != 0 && !state.enabled) mirror_new = true;  // ff-bgm1x: 새 소리
+         state.enabled = config.enable != 0;
+         LOG_TRACE(Audio_DSP, "source_id={} enable={}", source_id, state.enabled);
+     }
+@@ -281,6 +332,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.embedded_buffer_dirty) {
+         config.embedded_buffer_dirty.Assign(0);
++        mirror_new = true;  // ff-bgm1x: 새 소리
+         // HACK
+         // Luigi's Mansion Dark Moon configures the embedded buffer with an extremely large value
+         // for length, causing the Dequeue method to allocate a buffer of that size, eating up all
+@@ -462,13 +514,28 @@ bool Source::DequeueBuffer() {
          const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
          switch (buf.format) {
          case Format::PCM8:

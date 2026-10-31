@@ -119,10 +119,8 @@ void BgmReplacer::SetEnabled(bool on) {
         std::lock_guard lock(mutex);
         playbacks.clear();
         bindings = {};
-        for (auto& synth : seq_synths) {
-            for (int slot = 0; slot < CtrSynth::kSlots; ++slot) synth->Stop(slot);
-        }
     }
+    if (!on) sfx_mirror.Clear();
 }
 
 bool BgmReplacer::IsEnabled() const {
@@ -157,13 +155,7 @@ void BgmReplacer::Reset() {
     natural_end_file = -1;
     natural_end_time = 0;
     overlay_prefixes.clear();
-    sfx_waves.clear();
-    sfx_index.clear();
-    sfx_cache.clear();
-    sfx_plays.clear();
-    seq_synths.clear();
-    seq_tracker.Reset();
-    for (auto& x : sfx_source) x = {-1, 0};
+    sfx_mirror.Clear();
     natural_end_set_frame = 0;
     aac_index.clear();
     aac_outputs.clear();
@@ -297,7 +289,6 @@ bool BgmReplacer::BuildIndex() {
     if (aac_count) {
         for (const auto& [off, size] : archives) ReadArchiveLoops(*romfs, off, size);
     }
-    for (const auto& [off, size] : archives) IndexSystemSfx(*romfs, off, size);
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();
@@ -308,7 +299,7 @@ bool BgmReplacer::BuildIndex() {
              "색인했습니다 ({}ms)",
              files.size() - aac_count, aac_count, aac_index.size(), known, ms);
     LoadSongSettings();
-    return !files.empty() || !sfx_index.empty();
+    return !files.empty();
 }
 
 void BgmReplacer::LoadSongSettings() {
@@ -622,43 +613,13 @@ bool BgmReplacer::DecodeAac(const StreamFile& f, const std::vector<u8>& raw, Pla
     return true;
 }
 
-void BgmReplacer::StartSeqSfx(const SeqTracker::Start& start) {
-    std::lock_guard lock(mutex);
-    for (auto& synth : seq_synths) {
-        const std::vector<int>* list = synth->SoundsWithFile(start.file_hash);
-        if (!list) continue;
-        // 같은 파일을 쓰는 사운드 중, 시작 위치가 감지한 읽기 위치 이하인 것 가운데 가장 가까운 것
-        int sound = -1;
-        for (int s : *list) {
-            if (!synth->IsSfx(s) || synth->SoundStart(s) > start.cursor) continue;
-            if (sound < 0 || synth->SoundStart(s) > synth->SoundStart(sound)) sound = s;
-        }
-        if (sound < 0) return;
-        // 같은 효과음을 아주 짧은 간격(60ms)으로 다시 내면 건너뛴다: 배속 중에 매번 다시 틀면 소리가 나기도 전에 끊긴다
-        const u64 min_age = static_cast<u64>(seq_rate.load()) * 60 / 1000;
-        for (int slot = 0; slot < CtrSynth::kSlots; ++slot) {
-            if (synth->Active(slot) && synth->SlotSound(slot) == sound && synth->SlotAge(slot) < min_age) return;
-        }
-        synth->Start(synth->FreeSlot(), sound);
-        LOG_DEBUG(Audio_DSP, "ff-bgm1x: 효과음 {} 1배속 연주", synth->SoundName(sound));
-        return;
-    }
-}
-
-void BgmReplacer::StopSeqSfx() {
-    std::lock_guard lock(mutex);
-    for (auto& synth : seq_synths) {
-        for (int slot = 0; slot < CtrSynth::kSlots; ++slot) synth->Stop(slot);
-    }
+bool BgmReplacer::FastForwarding() {
+    const double limit = Settings::GetFrameLimit();
+    return limit == 0 || limit > 100;
 }
 
 void BgmReplacer::OnDspFrame() {
     ++dsp_frames;
-    if (enabled && voices_1x) {
-        seq_starts.clear();
-        seq_tracker.OnDspFrame(dsp_frames, seq_starts);
-        for (const auto& s : seq_starts) StartSeqSfx(s);
-    }
     // 연출 음악이 나오는 동안에는 배속을 멈춘다 (메뉴 "연출 중에도 배속" 이 꺼져 있을 때)
     const double now = static_cast<double>(dsp_frames) * samples_per_frame / native_sample_rate;
     const bool video = dsp_frames < video_until_frame;
@@ -739,7 +700,7 @@ void BgmReplacer::BuildVideoRanges(FileSys::RomFSReader& reader) {
 void BgmReplacer::SetVoices1x(bool on) {
     voices_1x = on;
     LOG_INFO(Audio_DSP, "ff-bgm1x: 대사·효과음 1배속 {}", on ? "켜짐" : "꺼짐 (게임 속도)");
-    if (!on) StopSeqSfx();
+    if (!on) sfx_mirror.Clear();
 }
 
 void BgmReplacer::SetSfxVolume(float volume) {
@@ -800,24 +761,6 @@ bool BgmReplacer::OnAdpcmBuffer(std::size_t source_id, const std::array<s16, 16>
 
     const u64 key = CoeffKey(coeffs);
     const u64 head = Head8(data);
-    if (voices_1x && !sfx_index.empty()) {
-        auto sfx = sfx_index.find(SfxKey(key, head));
-        if (sfx != sfx_index.end()) {
-            if (seq_tracker.Ready()) {
-                // 시퀀스 효과음 1배속: 원본 음성은 끄고, 소리는 감지한 시퀀스를 재생기가 낸다
-                sfx_source[source_id] = {sfx->second.first, sfx->second.second};
-                return true;
-            }
-            // 트랙 칸을 찾기 전: 시스템 효과음만 파형 단위로 바꿔 내고, 나머지는 원본 그대로
-            if (!sfx_waves[sfx->second.first].system) return false;
-            StartSfx(source_id, sfx->second.first, sfx->second.second);
-            return true;
-        }
-        // 긴 효과음 파형이 버퍼 여러 개로 나뉘어 들어오는 경우: 같은 음성, 같은 계수면 이어지는 부분으로 본다
-        const auto [w, ch] = sfx_source[source_id];
-        if (w >= 0 && CoeffKey(sfx_waves[w].coeffs[ch]) == key) return true;
-        sfx_source[source_id] = {-1, 0};
-    }
     int match_file = -1;
     u32 match_channel = 0, match_block = 0;
     auto range = coeff_index.equal_range(key);
@@ -1238,13 +1181,6 @@ void BgmReplacer::OnSourceIdle(std::size_t source_id) {
     if (source_id >= bindings.size()) return;
     {
         std::lock_guard lock(mutex);
-        // 효과음: 게임은 음성을 놓았지만(배속이면 1배속보다 먼저) 대체 재생은 끝까지 한다
-        if (sfx_source[source_id].first >= 0) {
-            sfx_source[source_id] = {-1, 0};
-            for (SfxPlay& p : sfx_plays) {
-                if (p.source == static_cast<int>(source_id)) p.source = -1;
-            }
-        }
         if (bindings[source_id].file < 0) return;
         bindings[source_id].file = -1;
     }
@@ -1259,439 +1195,31 @@ void BgmReplacer::UpdateSourceGain(std::size_t source_id,
 }
 
 void BgmReplacer::UpdateMixerVolumes(const std::array<float, 3>& volumes) {
+    mirror_mixer_volume = volumes;
     std::lock_guard lock(mutex);
     mixer_volume = volumes;
 }
 
-void BgmReplacer::IndexSystemSfx(FileSys::RomFSReader& romfs, u64 offset, u64 size) {
-    if (size < 0x40 || size > 256ULL * 1024 * 1024) return;
-    std::vector<u8> d(static_cast<std::size_t>(size));
-    if (romfs.ReadFile(offset, d.size(), d.data()) != d.size() || std::memcmp(d.data(), "CSAR", 4) != 0) return;
-    {
-        auto synth = std::make_unique<CtrSynth>();
-        if (synth->Load(d)) {
-            std::lock_guard lock(mutex);
-            seq_synths.push_back(std::move(synth));
-        }
-    }
-    const std::size_t n = d.size();
-    auto ok = [&](std::size_t o, std::size_t len) { return o + len <= n; };
-    auto u16_ = [&](std::size_t o) { return ok(o, 2) ? R16(d.data() + o) : 0u; };
-    auto u32_ = [&](std::size_t o) { return ok(o, 4) ? R32(d.data() + o) : 0u; };
-    auto s32_ = [&](std::size_t o) { return static_cast<s32>(u32_(o)); };
-    // NW4C 파일 안의 블록 표 {u16 id, u16, u32 offset, u32 size}
-    auto blocks = [&](std::size_t base, std::size_t len) {
-        std::unordered_map<u16, std::pair<std::size_t, std::size_t>> out;
-        const u16 nb = u16_(base + 0x10);
-        for (u16 i = 0; i < nb && i < 16; ++i) {
-            const std::size_t e = base + 0x14 + 12 * i;
-            const std::size_t o = u32_(e + 4), l = u32_(e + 8);
-            if (o + l <= len) out[u16_(e)] = {base + o, l};
-        }
-        return out;
-    };
-    const auto sar = blocks(0, n);
-    if (!sar.count(0x2000) || !sar.count(0x2001) || !sar.count(0x2002)) return;
-
-    // 문자열 표
-    std::vector<std::string> strings;
-    {
-        const std::size_t body = sar.at(0x2000).first + 8;
-        std::size_t tab = 0;
-        for (int i = 0; i < 2; ++i) {
-            if (u16_(body + 8 * i) == 0x2400) tab = body + s32_(body + 8 * i + 4);
-        }
-        const u32 cnt = tab ? u32_(tab) : 0;
-        for (u32 i = 0; i < cnt && ok(tab + 4 + 12 * i, 12); ++i) {
-            const std::size_t e = tab + 4 + 12 * i;
-            const std::size_t so = tab + s32_(e + 4);
-            std::string str;
-            for (std::size_t k = so; k < n && d[k] && str.size() < 128; ++k) str.push_back(static_cast<char>(d[k]));
-            strings.push_back(std::move(str));
-        }
-    }
-    auto name_of = [&](std::size_t opt) -> std::string {
-        if (!(u32_(opt) & 1)) return {};
-        const u32 sid = u32_(opt + 4);
-        return sid < strings.size() ? strings[sid] : std::string();
-    };
-    // INFO 표들
-    std::unordered_map<u16, std::size_t> tables;
-    {
-        const std::size_t body = sar.at(0x2001).first + 8;
-        for (int i = 0; i < 8; ++i) tables[static_cast<u16>(u16_(body + 8 * i))] = body + s32_(body + 8 * i + 4);
-    }
-    auto entries = [&](u16 type) {
-        std::vector<std::size_t> out;
-        if (!tables.count(type)) return out;
-        const std::size_t t = tables[type];
-        const u32 cnt = u32_(t);
-        for (u32 i = 0; i < cnt && ok(t + 4 + 8 * i, 8); ++i) out.push_back(t + s32_(t + 4 + 8 * i + 4));
-        return out;
-    };
-    const auto players = entries(0x2102);
-    const auto banks = entries(0x2101);
-    const auto warcs = entries(0x2103);
-    const auto file_entries = entries(0x2106);
-    const std::size_t file_body = sar.at(0x2002).first + 8;
-    // 내부 파일: (위치, 크기). 외부·없음이면 크기 0
-    auto file_of = [&](u32 fid) -> std::pair<std::size_t, std::size_t> {
-        if (fid >= file_entries.size()) return {0, 0};
-        const std::size_t e = file_entries[fid];
-        if (u16_(e) != 0x220C) return {0, 0};
-        const std::size_t loc = e + s32_(e + 4);
-        const s32 off = s32_(loc + 4);
-        const u32 len = u32_(loc + 8);
-        if (off < 0 || len == 0xFFFFFFFF || !ok(file_body + off, len)) return {0, 0};
-        return {file_body + off, len};
-    };
-
-    // 효과음 플레이어 (음악·스트림·울음소리·음성 플레이어를 뺀 전부): 원본 음성을 끄려고 파형을 색인한다
-    // 그중 이름에 system 이 든 플레이어는 한 번 울리고 끝나는 단순한 소리라, 트랙 칸을 찾기 전에도 파형 단위로 바꿔 낸다
-    std::set<u32> system_players;  // 효과음 플레이어 전체
-    std::set<u32> plain_players;   // 그중 system
-    for (std::size_t i = 0; i < players.size(); ++i) {
-        std::string nm = name_of(players[i] + 4);
-        std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
-        if (nm.find("bgm") != std::string::npos || nm.find("strm") != std::string::npos ||
-            nm.find("pv") != std::string::npos || nm.find("voice") != std::string::npos)
-            continue;
-        system_players.insert(static_cast<u32>(i));
-        if (nm.find("system") != std::string::npos) plain_players.insert(static_cast<u32>(i));
-    }
-    if (system_players.empty()) return;
-
-    // 시퀀스를 훑는다: 음표를 내는 악기 번호, 반복(뒤로 가는 점프) 여부, 대략의 길이(틱)
-    // (트랙 열기·호출·점프를 따라간다)
-    struct SeqScan {
-        std::set<u32> progs;
-        bool loop = false;
-        u32 ticks = 0;  // 가장 긴 트랙
-        u32 tempo = 0;  // 처음 만난 템포 (분당 4분음표)
-    };
-    auto collect_programs = [&](std::size_t data, std::size_t len, u32 start) {
-        SeqScan scan;
-        std::set<u32>& progs = scan.progs;
-        std::vector<u32> todo{start};
-        std::set<u32> seen;
-        while (!todo.empty() && seen.size() < 64) {
-            u32 p = todo.back();
-            todo.pop_back();
-            if (!seen.insert(p).second) continue;
-            u32 prg = 0;
-            u32 ticks = 0;
-            bool note_wait = true;
-            std::vector<u32> stack;
-            auto varlen = [&](u32& q) {
-                u32 v = 0;
-                for (int k = 0; k < 4 && q < len; ++k) {
-                    const u8 b = d[data + q++];
-                    v = (v << 7) | (b & 0x7F);
-                    if (!(b & 0x80)) break;
-                }
-                return v;
-            };
-            for (int steps = 0; steps < 4096 && p < len; ++steps) {
-                const u8 cmd = d[data + p++];
-                if (cmd < 0x80) {  // 음표: 세기 u8, 길이 가변
-                    progs.insert(prg);
-                    ++p;
-                    const u32 length = varlen(p);
-                    if (note_wait) ticks += length;
-                } else if (cmd == 0x80) {  // 대기
-                    ticks += varlen(p);
-                } else if (cmd == 0x81) {
-                    prg = varlen(p);
-                } else if (cmd == 0x88) {  // 트랙 열기: u8 트랙, u24 위치
-                    if (p + 4 <= len) todo.push_back((d[data + p + 1] << 16) | (d[data + p + 2] << 8) | d[data + p + 3]);
-                    p += 4;
-                } else if (cmd == 0x89 || cmd == 0x8A) {  // 점프 / 호출: u24
-                    if (p + 3 > len) break;
-                    const u32 at = p - 1;
-                    const u32 to = (d[data + p] << 16) | (d[data + p + 1] << 8) | d[data + p + 2];
-                    p += 3;
-                    if (cmd == 0x8A) stack.push_back(p);
-                    if (cmd == 0x89 && to <= at) {  // 뒤로 가는 점프 = 반복 구간
-                        scan.loop = true;
-                        break;
-                    }
-                    if (cmd == 0x89 && seen.count(to)) break;
-                    p = to;
-                } else if (cmd == 0xFD) {
-                    if (stack.empty()) break;
-                    p = stack.back();
-                    stack.pop_back();
-                } else if (cmd == 0xFF) {
-                    break;
-                } else if (cmd == 0xFE) {
-                    p += 2;
-                } else if (cmd == 0xE0 || cmd == 0xE1 || cmd == 0xE3) {
-                    if (cmd == 0xE1 && !scan.tempo && p + 2 <= len) scan.tempo = d[data + p] | (d[data + p + 1] << 8);
-                    p += 2;
-                } else if (cmd >= 0xB0 && cmd <= 0xDF) {
-                    if (cmd == 0xC7 && p < len) note_wait = d[data + p] != 0;  // 음표마다 기다릴지
-                    p += 1;
-                } else if (cmd == 0xFB || cmd == 0xFC) {
-                } else {
-                    break;  // 조건·무작위·변수 명령 등은 여기서 멈춘다 (앞에서 모은 것만 쓴다)
-                }
-            }
-            scan.ticks = std::max(scan.ticks, ticks);
-        }
-        return scan;
-    };
-
-    // 뱅크의 악기 하나가 쓰는 파형 id 번호들 (참조를 따라 속도 영역 정보 0x5902 까지 내려간다)
-    std::function<void(std::size_t, std::size_t, u16, s32, std::set<u32>&, int)> walk;
-    walk = [&](std::size_t fb, std::size_t flen, u16 type, s32 at, std::set<u32>& out, int depth) {
-        if (depth > 8 || at < 0 || static_cast<std::size_t>(at) + 8 > flen) return;
-        const std::size_t p = fb + at;
-        switch (type) {
-        case 0x5902:  // 속도 영역 정보: u32 파형 id 번호
-            out.insert(u32_(p));
-            return;
-        case 0x5900:  // 악기: 참조 하나
-        case 0x5901:  // 키 영역: 참조 하나
-        case 0x6000:  // 하나짜리 표
-            walk(fb, flen, static_cast<u16>(u16_(p)), at + s32_(p + 4), out, depth + 1);
-            return;
-        case 0x6001: {  // 범위 표: u32 개수, u8 경계[개수](4바이트 정렬), 참조[개수]
-            const u32 cnt = u32_(p);
-            if (cnt > 128) return;
-            const std::size_t refs = p + 4 + ((cnt + 3) & ~3u);
-            for (u32 k = 0; k < cnt; ++k)
-                walk(fb, flen, static_cast<u16>(u16_(refs + 8 * k)), at + s32_(refs + 8 * k + 4), out, depth + 1);
-            return;
-        }
-        case 0x6002: {  // 번호 표: u8 처음, u8 끝, u16, 참조[끝-처음+1]
-            const u32 cnt = static_cast<u32>(d[p + 1]) - d[p] + 1;
-            if (d[p + 1] < d[p] || cnt > 128) return;
-            for (u32 k = 0; k < cnt; ++k)
-                walk(fb, flen, static_cast<u16>(u16_(p + 4 + 8 * k)), at + s32_(p + 4 + 8 * k + 4), out, depth + 1);
-            return;
-        }
-        default:
-            return;
-        }
-    };
-
-    std::size_t sounds = 0;
-    std::map<std::pair<u32, u32>, std::string> waves_needed;  // (파형 아카이브 id, 파형 번호) -> 효과음 이름
-    std::set<std::pair<u32, u32>> music_waves;                 // BGM·연출곡도 쓰는 파형 (대체하지 않는다)
-    std::set<std::pair<u32, u32>> plain_waves;                 // 시스템 효과음 플레이어가 쓰는 파형
-    for (std::size_t e : entries(0x2100)) {
-        if (!system_players.count(u32_(e + 4) & 0xFFFFFF) || u16_(e + 0xC) != 0x2203) continue;
-        const bool plain = plain_players.count(u32_(e + 4) & 0xFFFFFF) != 0;
-        const std::size_t det = e + s32_(e + 0x10);
-        const std::string sname = name_of(e + 0x14);
-        const auto [seq, seq_len] = file_of(u32_(e));
-        if (!seq_len || std::memcmp(d.data() + seq, "CSEQ", 4) != 0) continue;
-        const auto sb = blocks(seq, seq_len);
-        if (!sb.count(0x5000)) continue;
-        const std::size_t seq_data = sb.at(0x5000).first + 8;
-        const std::size_t seq_data_len = sb.at(0x5000).second > 8 ? sb.at(0x5000).second - 8 : 0;
-        const SeqScan scan = collect_programs(seq_data, seq_data_len, u32_(det + 0x10));
-        const std::set<u32>& progs = scan.progs;
-        const bool sfx = true;
-        const std::size_t bt = det + s32_(det + 4);
-        const u32 nbank = u32_(bt);
-        for (u32 k = 0; k < nbank && k < 4; ++k) {
-            const u32 bank = u32_(bt + 4 + 4 * k) & 0xFFFFFF;
-            if (bank >= banks.size()) continue;
-            const auto [bnk, bnk_len] = file_of(u32_(banks[bank]));
-            if (!bnk_len || std::memcmp(d.data() + bnk, "CBNK", 4) != 0) continue;
-            const auto bb = blocks(bnk, bnk_len);
-            if (!bb.count(0x5800)) continue;
-            const std::size_t body = bb.at(0x5800).first + 8;
-            std::size_t wave_ids = 0, insts = 0;
-            for (int r = 0; r < 2; ++r) {
-                if (u16_(body + 8 * r) == 0x0100) wave_ids = body + s32_(body + 8 * r + 4);
-                if (u16_(body + 8 * r) == 0x0101) insts = body + s32_(body + 8 * r + 4);
-            }
-            if (!wave_ids || !insts) continue;
-            for (u32 prg : progs) {
-                if (prg >= u32_(insts)) continue;
-                const std::size_t ref = insts + 4 + 8 * prg;
-                std::set<u32> ids;
-                walk(insts, bnk + bnk_len - insts, static_cast<u16>(u16_(ref)), s32_(ref + 4), ids, 0);
-                for (u32 id : ids) {
-                    if (id >= u32_(wave_ids)) continue;
-                    const u32 warc = u32_(wave_ids + 4 + 8 * id) & 0xFFFFFF;
-                    const u32 idx = u32_(wave_ids + 8 + 8 * id);
-                    if (sfx) {
-                        waves_needed.emplace(std::make_pair(warc, idx), sname);
-                        if (plain) plain_waves.insert(std::make_pair(warc, idx));
-                    }
-                    else
-                        music_waves.insert(std::make_pair(warc, idx));
-                }
-            }
-        }
-        sounds += sfx;
-    }
-    for (const auto& w : music_waves) waves_needed.erase(w);
-
-    // 파형 아카이브(CWAR) 안의 파형(CWAV)을 읽어 색인한다
-    std::size_t added = 0;
-    for (const auto& [wk, sname] : waves_needed) {
-        const auto [warc, idx] = wk;
-        if (warc >= warcs.size()) continue;
-        const auto [war, war_len] = file_of(u32_(warcs[warc]));
-        if (!war_len || std::memcmp(d.data() + war, "CWAR", 4) != 0) continue;
-        const auto wb = blocks(war, war_len);
-        if (!wb.count(0x6800) || !wb.count(0x6801)) continue;
-        const std::size_t winfo = wb.at(0x6800).first + 8, wfile = wb.at(0x6801).first + 8;
-        if (idx >= u32_(winfo)) continue;
-        const std::size_t we = winfo + 4 + 12 * idx;
-        const std::size_t cwav = wfile + s32_(we + 4);
-        const std::size_t cwav_len = u32_(we + 8);
-        if (!ok(cwav, cwav_len) || std::memcmp(d.data() + cwav, "CWAV", 4) != 0) continue;
-        const auto cb = blocks(cwav, cwav_len);
-        if (!cb.count(0x7000) || !cb.count(0x7001)) continue;
-        const std::size_t ci = cb.at(0x7000).first + 8;
-        const std::size_t data_body = cb.at(0x7001).first + 8;
-        if (d[ci] != 2) continue;  // DSP-ADPCM 만
-        SfxWave w;
-        w.name = sname;
-        w.sample_rate = u32_(ci + 4);
-        w.frames = u32_(ci + 12);
-        const std::size_t ct = ci + 0x14;
-        const u32 nch = u32_(ct);
-        if (nch == 0 || nch > 2 || !w.sample_rate || !w.frames) continue;
-        bool good = true;
-        for (u32 c = 0; c < nch && good; ++c) {
-            const std::size_t chi = ct + s32_(ct + 4 + 8 * c + 4);
-            const std::size_t samples = data_body + s32_(chi + 4);
-            const std::size_t ai = chi + s32_(chi + 12);
-            if (!ok(samples, 8) || !ok(ai, 0x2E)) {
-                good = false;
-                break;
-            }
-            std::array<s16, 16> co;
-            for (int k = 0; k < 16; ++k) co[k] = static_cast<s16>(u16_(ai + 2 * k));
-            w.coeffs.push_back(co);
-            w.history.push_back({static_cast<s16>(u16_(ai + 34)), static_cast<s16>(u16_(ai + 36))});
-            w.data_offset.push_back(offset + samples);
-        }
-        if (!good) continue;
-        w.system = plain_waves.count(wk) != 0;
-        const int id = static_cast<int>(sfx_waves.size());
-        for (u32 c = 0; c < nch; ++c) {
-            const std::size_t samples = static_cast<std::size_t>(w.data_offset[c] - offset);
-            sfx_index[SfxKey(CoeffKey(w.coeffs[c]), Head8(d.data() + samples))] = {id, c};
-        }
-        sfx_waves.push_back(std::move(w));
-        ++added;
-    }
-    LOG_INFO(Audio_DSP, "ff-bgm1x: 시스템 효과음 {}개(플레이어 {}개)에서 파형 {}개를 색인했습니다", sounds,
-             system_players.size(), added);
+bool BgmReplacer::MirrorBegin(std::size_t source_id) {
+    if (!enabled || !voices_1x || !FastForwarding()) return false;
+    sfx_mirror.Begin(source_id);
+    return true;
 }
 
-std::shared_ptr<const std::vector<s16>> BgmReplacer::SfxPcm(int wave, u32 channel) {
-    const u64 key = (static_cast<u64>(wave) << 8) | channel;
-    {
-        std::lock_guard lock(mutex);
-        auto it = sfx_cache.find(key);
-        if (it != sfx_cache.end()) return it->second;
-    }
-    const SfxWave& w = sfx_waves[wave];
-    std::shared_ptr<FileSys::RomFSReader> romfs;
-    if (Core::System::GetInstance().GetAppLoader().ReadRomFS(romfs) != Loader::ResultStatus::Success || !romfs) {
-        return nullptr;
-    }
-    std::vector<u8> raw((w.frames + 13) / 14 * 8);
-    raw.resize(romfs->ReadFile(w.data_offset[channel], raw.size(), raw.data()));
-    auto pcm = std::make_shared<std::vector<s16>>();
-    pcm->reserve(w.frames);
-    s32 h1 = w.history[channel][0], h2 = w.history[channel][1];
-    const auto& co = w.coeffs[channel];
-    for (std::size_t fo = 0; fo + 8 <= raw.size() && pcm->size() < w.frames; fo += 8) {
-        const u8 ps = raw[fo];
-        const s32 scale = 1 << (ps & 0xF);
-        const u32 pred = (ps >> 4) & 7;
-        const s32 c1 = co[pred * 2], c2 = co[pred * 2 + 1];
-        for (u32 k = 0; k < 14 && pcm->size() < w.frames; ++k) {
-            const u8 byte = raw[fo + 1 + k / 2];
-            s32 nib = (k & 1) ? (byte & 0xF) : (byte >> 4);
-            if (nib >= 8) nib -= 16;
-            s32 v = (((nib * scale) << 11) + 1024 + c1 * h1 + c2 * h2) >> 11;
-            v = std::clamp(v, -32768, 32767);
-            h2 = h1;
-            h1 = v;
-            pcm->push_back(static_cast<s16>(v));
-        }
-    }
-    std::lock_guard lock(mutex);
-    sfx_cache[key] = pcm;
-    return pcm;
+void BgmReplacer::MirrorEnd(std::size_t source_id) {
+    sfx_mirror.End(source_id);
 }
 
-void BgmReplacer::StartSfx(std::size_t source_id, int wave, u32 channel) {
-    auto pcm = SfxPcm(wave, channel);
-    if (!pcm || pcm->size() < 2) return;
-    std::lock_guard lock(mutex);
-    // 같은 파형이 아직 울리고 있으면 끊고 새로 낸다. 이 음성으로 내던 다른 효과음도 끝낸다
-    sfx_plays.erase(std::remove_if(sfx_plays.begin(), sfx_plays.end(),
-                                   [&](const SfxPlay& p) {
-                                       return (p.wave == wave && p.channel == channel) ||
-                                              p.source == static_cast<int>(source_id);
-                                   }),
-                    sfx_plays.end());
-    SfxPlay p;
-    p.wave = wave;
-    p.channel = channel;
-    p.source = static_cast<int>(source_id);
-    p.pcm = std::move(pcm);
-    sfx_plays.push_back(std::move(p));
-    sfx_source[source_id] = {wave, channel};
-    if (!sfx_waves[wave].name.empty() && sfx_plays.size() == 1) {
-        LOG_DEBUG(Audio_DSP, "ff-bgm1x: 효과음 {} 1배속", sfx_waves[wave].name);
-    }
+bool BgmReplacer::MirrorFeed(std::size_t source_id, const StereoFrame16& frame,
+                             const std::array<std::array<float, 4>, 3>& gain) {
+    return sfx_mirror.Feed(source_id, frame, gain, mirror_mixer_volume);
 }
 
 void BgmReplacer::Mix(s16* buffer, std::size_t frames, u32 sample_rate) {
     if (!enabled || !emulation_running) return;
+    sfx_mirror.Mix(buffer, frames, sample_rate, sfx_volume);  // 효과음 (게임 출력을 1배속으로)
     std::lock_guard lock(mutex);
     if (sample_rate == 0) return;
-    seq_rate = sample_rate;
-    const float sv = sfx_volume;
-    for (auto& synth : seq_synths) {
-        synth->SetVolume(sv);
-        synth->Render(buffer, static_cast<int>(frames), sample_rate);
-    }
-    // 효과음 (1배속, 끝까지)
-    for (auto it = sfx_plays.begin(); it != sfx_plays.end();) {
-        SfxPlay& p = *it;
-        const SfxWave& w = sfx_waves[p.wave];
-        if (p.source >= 0) {
-            const Binding& b = bindings[p.source];
-            float l = 0, r = 0;
-            for (int m = 0; m < 3; ++m) {
-                l += mixer_volume[m] * (b.gain[m][0] + b.gain[m][2]);
-                r += mixer_volume[m] * (b.gain[m][1] + b.gain[m][3]);
-            }
-            p.gl = l;
-            p.gr = r;
-        }
-        const std::vector<s16>& pcm = *p.pcm;
-        const double step = static_cast<double>(w.sample_rate) / sample_rate;
-        bool done = false;
-        for (std::size_t i = 0; i < frames; ++i) {
-            const std::size_t idx = static_cast<std::size_t>(p.position);
-            if (idx + 1 >= pcm.size()) {
-                done = true;
-                break;
-            }
-            const float frac = static_cast<float>(p.position - idx);
-            const float v = pcm[idx] + (pcm[idx + 1] - pcm[idx]) * frac;
-            const s32 ol = buffer[i * 2] + static_cast<s32>(v * p.gl * sv);
-            const s32 or_ = buffer[i * 2 + 1] + static_cast<s32>(v * p.gr * sv);
-            buffer[i * 2] = static_cast<s16>(std::clamp(ol, -32768, 32767));
-            buffer[i * 2 + 1] = static_cast<s16>(std::clamp(or_, -32768, 32767));
-            p.position += step;
-        }
-        it = done ? sfx_plays.erase(it) : std::next(it);
-    }
     if (playbacks.empty()) return;
 
     // 끝까지 재생 중인 팡파레가 있으면 다른 곡은 기다렸다가, 끝나면 게임이 재생 중인 위치로 맞춘다

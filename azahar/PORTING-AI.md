@@ -4,18 +4,20 @@
 
 ## 1. 구조 한눈에
 
-새 코드는 거의 전부 `src/audio_core/hle/` 의 새 파일 세 묶음에 있고, 원본 파일에는 그 코드를 부르는 짧은 연결부만 있습니다.
+새 코드는 `src/audio_core/hle/` 의 새 파일 두 묶음에 있고, 원본 파일에는 그 코드를 부르는 짧은 연결부만 있습니다.
 
 | 새 파일 (`module/`) | 하는 일 |
 |---|---|
-| `bgm_replacer.cpp/.h` | 중심. 게임 RomFS 의 BGM 파일(.bcstm, .aac)을 색인하고, DSP 음성에 들어오는 버퍼를 보고 BGM 인지 알아낸 뒤, 그 음성은 원본 믹스에서 빼고 같은 곡을 직접 해독해 실제 시간 기준(1배속)으로 출력에 섞는다. 곡 분류(반복 곡, 팡파레, 연출 곡), 대사 겹침 소리, 효과음 대체, 효과음 볼륨, 연출 중 배속 멈춤 판단도 여기서 한다. 싱글턴 `BgmReplacer::Instance()`. |
-| `ctr_synth.cpp/.h` | 3DS 사운드 아카이브(.bcsar)의 시퀀스(CSEQ)·뱅크(CBNK)·파형(CWAR/CWAV) 재생기. 효과음을 1배속으로 연주한다. |
-| `seq_tracker.cpp/.h` | 게임 메모리(선형 힙)에서 사운드 라이브러리의 시퀀스 트랙 칸(0x138 간격 배열, +0 = 시퀀스 DATA 시작, +4 = 읽는 위치)을 찾아, 효과음 시퀀스가 새로 시작되는 순간을 알려 준다. |
+| `bgm_replacer.cpp/.h` | 중심. 게임 RomFS 의 BGM 파일(.bcstm, .aac)을 색인하고, DSP 음성에 들어오는 버퍼를 보고 BGM 인지 알아낸 뒤, 그 음성은 원본 믹스에서 빼고 같은 곡을 직접 해독해 실제 시간 기준(1배속)으로 출력에 섞는다. 곡 분류(반복 곡, 팡파레, 연출 곡), 대사 겹침 소리, 연출 중 배속 멈춤 판단, 효과음 미러의 켜고 끄기·볼륨도 여기서 한다. 싱글턴 `BgmReplacer::Instance()`. |
+| `sfx_mirror.cpp/.h` | 효과음 음성 미러. 배속 중에 DSP 음성이 새 소리를 시작하면, 그 음성의 실제 출력(해독·음높이·필터 적용 후, 게임이 준 믹스별 볼륨 × 믹서 볼륨을 곱해 스테레오로 접은 것)을 게임 시간 그대로 쌓고, 출력 쪽에서 원래 샘플레이트로(=1배속) 다시 낸다. 게임이 계속 내는 소리가 2.5초 넘게 밀리면 따라잡는다. 사운드 라이브러리(시퀀스, 뱅크)는 해석하지 않는다. |
+
+효과음 쪽은 **게임 데이터를 해석하지 않고 DSP 음성의 출력만 다시 낸다** 는 것이 핵심이다. 새 버전에서도 이 원칙을 지킬 것
+(악보·뱅크를 읽어 다시 연주하는 방식은 v3 에서 시도했다가, 변형·볼륨·멈춤을 게임마다 맞히지 못해 버렸다).
 
 에뮬레이터 내부 의존 (새 버전에서 이름이 바뀌었는지 먼저 확인할 것):
 `Core::System::GetInstance().GetAppLoader().ReadRomFS / ReadProgramId`, `FileSys::RomFSReader`,
-`Kernel::Process::vm_manager.vma_map` 와 `VMAType::BackingMemory`, `Memory::LINEAR_HEAP_VADDR*`,
-`FileUtil::GetExeDirectory / GetUserPath(ConfigDir)`, `Settings::` (아래 `cutscene_speed_hold`), `LOG_*` 매크로, FAAD2(`neaacdec.h`).
+`FileUtil::GetExeDirectory / GetUserPath(ConfigDir)`, `Settings::GetFrameLimit` 와 아래 `cutscene_speed_hold`,
+`StereoFrame16`·`native_sample_rate`·`samples_per_frame` (`audio_core/audio_types.h`), `LOG_*` 매크로, FAAD2(`neaacdec.h`).
 
 ## 2. 원본에 끼우는 지점 (`hooks/`)
 
@@ -23,21 +25,23 @@
 
 | 원본 파일 | 끼우는 곳 | 역할 |
 |---|---|---|
-| `audio_core/CMakeLists.txt` | `audio_core` 라이브러리 소스 목록 | 새 파일 6개를 빌드에 넣는다 |
-| `audio_core/dsp_interface.cpp` | `DspInterface::OutputCallback`, 하드웨어 볼륨 적용 **직전** | 오디오 장치가 요청한 분량 전체에 `Mix(buffer, frames, native_rate)` — 1배속 소리를 출력에 더한다. 에뮬레이션이 멈칫해도 끊기지 않게 출력 콜백에서 한다 |
+| `audio_core/CMakeLists.txt` | `audio_core` 라이브러리 소스 목록 | 새 파일 4개를 빌드에 넣는다 |
+| `audio_core/dsp_interface.cpp` | `DspInterface::OutputCallback`, 하드웨어 볼륨 적용 **직전** | 오디오 장치가 요청한 분량 전체에 `Mix(buffer, frames, native_rate)` — 1배속 BGM·효과음을 출력에 더한다. 에뮬레이션이 멈칫해도 끊기지 않게 출력 콜백에서 한다 |
 | `audio_core/hle/hle.cpp` | `DspHle::Impl::Initialize` | `Reset()` — 게임을 새로 켤 때 상태 초기화 |
 | 〃 | `GenerateCurrentFrame` 맨 앞 | `OnDspFrame()` — DSP 오디오 프레임(160 샘플)마다. **게임 시간**의 기준 |
-| `audio_core/hle/mixers.cpp` | `Mixers::ParseConfig` | `UpdateMixerVolumes(intermediate_mixer_volume)` — 대체 소리도 게임 믹서 볼륨을 따르게 |
-| `audio_core/hle/source.h` | `Source` 멤버 | `bool bgm_replaced` |
-| `audio_core/hle/source.cpp` | `Source::DequeueBuffer` 의 ADPCM 분기 | `OnAdpcmBuffer(...)` 결과로 `bgm_replaced` 설정 (계수+데이터로 BGM 스트림 판별) |
+| `audio_core/hle/mixers.cpp` | `Mixers::ParseConfig` | `UpdateMixerVolumes(intermediate_mixer_volume)` — 대체 BGM·효과음 미러도 게임 믹서 볼륨을 따르게 |
+| `audio_core/hle/source.h` | `Source` 멤버 | `bool bgm_replaced`, `bool mirror_new`, `bool mirrored` |
+| `audio_core/hle/source.cpp` | `Source::ParseConfig` 의 enable 처리 | 꺼져 있던 음성이 켜지면 `mirror_new = true` (새 소리) |
+| 〃 | `ParseConfig` 의 `embedded_buffer_dirty` 처리 | `mirror_new = true` (새 임베디드 버퍼 = 음 하나의 시작) |
+| 〃 | `Source::DequeueBuffer` 의 ADPCM 분기 | `OnAdpcmBuffer(...)` 결과로 `bgm_replaced` 설정 (계수+데이터로 BGM 스트림 판별) |
 | 〃 | 같은 함수 PCM16 분기 | `OnPcmBuffer(...)` (AAC 를 푼 버퍼 판별), 아니면 `OnSourceIdle` |
 | 〃 | PCM8 분기 | `bgm_replaced` 해제 + `OnSourceIdle` |
-| 〃 | `Source::MixInto` | `bgm_replaced` 인 음성은 원본 믹스에 넣지 않고 `UpdateSourceGain(id, gain)` 만 알린다. 비활성 음성은 `OnSourceIdle` |
-| 〃 | `Source::Reset` | `OnSourceIdle` |
+| 〃 | `Source::MixInto` | 비활성 음성: `OnSourceIdle`, 미러 중이면 `MirrorEnd`. `bgm_replaced` 음성: 원본 믹스에 넣지 않고 `UpdateSourceGain(id, gain)` 만. 그 밖의 음성: 믹스 0 을 처리할 때 `mirror_new` 면 `MirrorBegin(id)` (배속 중이면 true), 미러 중이면 `MirrorFeed(id, current_frame, gain)` 하고 원본 믹스에 넣지 않는다 |
+| 〃 | `Source::Reset` | `OnSourceIdle`, 미러 중이면 `MirrorEnd`, `mirror_new = true` |
 | `audio_core/hle/aac_decoder.cpp` | `AACDecoder::Decode`, 실제 해독 직전 | `OnAacDecode(data, len, dst_ch0, dst_ch1)` — AAC 프레임이 어느 파일 몇 번째인지, 어디로 풀리는지 |
 | `core/file_sys/romfs_reader.cpp` | `DirectRomFSReader::ReadFile` 맨 앞 | `OnRomFsRead(*this, offset, length)` — 동영상(.moflex) 읽기 = 연출 감지 |
 | `core/hle/service/cam/y2r_u.cpp` | `Y2R_U::StartConversion` 맨 앞 | `OnVideoFrame()` — 동영상 화면 변환 = 연출 감지 |
-| `common/settings.h/.cpp` | `GetFrameLimit()` | 전역 `std::atomic<bool> cutscene_speed_hold`. 켜져 있으면 제한 없음(0)이나 100 초과 속도를 100 으로 — 연출 중 배속 멈춤. BgmReplacer 가 켜고 끈다 |
+| `common/settings.h/.cpp` | `GetFrameLimit()` | 전역 `std::atomic<bool> cutscene_speed_hold`. 켜져 있으면 제한 없음(0)이나 100 초과 속도를 100 으로 — 연출 중 배속 멈춤. BgmReplacer 가 켜고 끈다. 효과음 미러는 `GetFrameLimit()` 가 0 이거나 100 초과일 때(=배속 중)만 켠다 |
 | `citra_qt/bootmanager.h` | `EmuThread::SetRunning` | `SetEmulationRunning(running)` — 사용자 일시정지 때만 1배속 소리도 멈춤 |
 | `citra_qt/citra_qt.cpp` | `GMainWindow::ConnectMenuEvents` 맨 앞 | Emulation 메뉴에 체크 항목 3개 (BGM 1배속 유지 / 연출 중에도 배속 / 대사·효과음 1배속). `QSettings("ff-bgm1x","azahar")` 에 저장, 시작 때 읽어 `SetEnabled / SetFastForwardCutscenes / SetVoices1x / SetSfxVolume` |
 | 〃 | `InitializeHotkeys` | 단축키 3개가 위 메뉴 항목(objectName `ff_bgm1x_*`)을 토글 |
@@ -56,26 +60,26 @@
 
 ## 4. 확인 방법 (게임 필요, 사람이 듣고 판단)
 
-로그(`user/log/azahar_log.txt`)에 `ff-bgm1x:` 로 시작하는 줄이 나온다. 먼저 이것을 본다:
-- 게임 시작 직후 BGM 파일 색인 수, 시스템 효과음 색인 수가 0 이 아닌지.
-- 효과음을 몇 번 낸 뒤 `효과음 시퀀스 트랙 칸 N개를 찾음` 이 나오는지 (N > 0).
+로그(`user/log/azahar_log.txt`)에 `ff-bgm1x:` 로 시작하는 줄이 나온다. 먼저 게임 시작 직후 BGM 파일 색인 수가 0 이 아닌지 본다.
 
 그다음 배속을 켜고:
 - 필드 BGM 이 1배속으로 들리고 음정이 원래와 같다.
 - 팡파레(아이템 획득 등)는 끝까지 1배속, 그 뒤 곡은 게임이 진행된 위치에서 이어진다.
 - 연출 곡·동영상 동안은 배속이 멈춘다 ("연출 중에도 배속" 꺼짐 기본).
-- 메뉴음·대화 넘김음·발소리 등 효과음이 1배속으로, 끊기지 않고 끝까지 난다.
+- 메뉴음·대화 넘김음·발소리·기술음·능력 변화음·울음소리가 1배속으로, 원래 음높이로, 배속 없을 때와 같은 소리로 난다.
+- 게임이 아주 작게 트는 주변음이 커지지 않고, 게임이 멈춘 반복음이 계속 울리지 않는다.
+- 배속을 끄면 효과음은 게임 원본 그대로다.
 - 설정 > 오디오의 효과음 볼륨이 효과음에만 적용된다.
 - "BGM 1배속 유지" 를 끄면 원본 에뮬레이터와 똑같다.
 
-원래 확인한 게임: 포켓몬스터 오메가루비/알파사파이어, X·Y(AAC), 레이튼 교수 시리즈, 동물의 숲.
+효과음 미러를 확인한 게임: 포켓몬스터 울트라썬, 오메가루비. BGM 을 확인한 게임: 포켓몬스터 오메가루비/알파사파이어, X·Y(AAC), 울트라썬, 레이튼 교수 시리즈, 동물의 숲.
 
 ## 5. 알려진 함정
 
 - **Qt 매크로 충돌**: `audio_core` 헤더가 `citra_qt` 에서도 포함된다. 멤버나 변수 이름을 `slots`, `signals`, `emit` 으로 지으면 Qt 매크로 때문에 빌드가 깨진다.
 - **HLE 오디오 전용**: 오디오 에뮬레이션을 LLE 로 바꾸면 동작하지 않는다 (연결부가 HLE 경로에만 있다).
-- **CSEQ 시퀀스 데이터는 빅엔디언**(u16/u24 인자). 다른 NW4C 블록은 리틀엔디언.
-- 효과음 감지는 게임이 효과음을 몇 번 낸 뒤에야 트랙 칸을 찾는다. 그 전에는 이름에 `system` 이 든 플레이어의 효과음만 파형 단위로 바꿔 낸다 — 의도된 동작.
-- 효과음 재생기의 음량 보정 `kOutputGain = 1/0.7` 은 오메가루비 녹음 비교로 맞춘 값이다.
-- 오래 켜 두면(18시간) 메모리 사용이 크게 늘어난 사례가 있다. 원인은 밝히지 못했다.
+- **스레드**: `MixInto`·`Mirror*` 는 에뮬레이션(DSP) 스레드, `Mix` 는 오디오 출력 스레드, 메뉴 설정은 UI 스레드에서 불린다. `SfxMirror` 는 자체 mutex 로 모든 상태를 지킨다.
+- **배속 중 밀림**: 게임은 배속 배수만큼 빨리 소리를 만든다. 짧은 소리는 다 쌓인 뒤 1배속으로 끝까지 나지만, 게임이 계속 내는 소리는 밀리므로 `kMaxLag`(2.5초)를 넘으면 건너뛴다. 이 값을 줄이면 긴 효과음이 잘리고, 늘리면 주변음이 화면보다 오래 남는다.
+- **반향(aux) 믹스**: 게임이 믹스 1·2 로 보내는 소리는 실제로는 게임의 반향 효과를 거쳐 돌아오지만, 미러는 그 볼륨만큼 원래 소리로 더한다.
+- 오래 켜 두면(18시간) 메모리 사용이 크게 늘어난 사례가 있다 (v3 이전, 원인은 밝히지 못했다).
 - 줄바꿈: 이 자료는 LF. Windows 에서 `core.autocrlf` 때문에 패치가 통째로 다르게 보이면 줄바꿈 차이부터 의심한다.

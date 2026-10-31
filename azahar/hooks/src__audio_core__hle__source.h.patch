@@ -1,12 +1,14 @@
 diff --git a/src/audio_core/hle/source.h b/src/audio_core/hle/source.h
-index 1223f68..6178a46 100755
+index 1223f68..5c857b6 100755
 --- a/src/audio_core/hle/source.h
 +++ b/src/audio_core/hle/source.h
-@@ -69,6 +69,7 @@ public:
+@@ -69,6 +69,9 @@ public:
  
  private:
      const std::size_t source_id;
 +    bool bgm_replaced = false;  // ff-bgm1x: 이 음성을 1배속 대체 재생 중
++    bool mirror_new = false;    // ff-bgm1x: 새 소리 시작 (켜짐, 리셋, 새 임베디드 버퍼)
++    bool mirrored = false;      // ff-bgm1x: 이 소리를 효과음 미러로 1배속 재생 중 (원본 믹스에서 뺀다)
      Memory::MemorySystem* memory_system{};
      StereoFrame16 current_frame;
      StereoFrame16 backup_frame; // TODO(PabloMK7): Check if we actually need this
