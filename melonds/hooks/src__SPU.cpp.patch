@@ -1,0 +1,15 @@
+diff --git a/src/SPU.cpp b/src/SPU.cpp
+index 3c4aca7..261d6d1 100644
+--- a/src/SPU.cpp
++++ b/src/SPU.cpp
+@@ -335,7 +335,9 @@ void SPU::SetDegrade10Bit(AudioBitDepth depth)
+     switch (depth)
+     {
+     case AudioBitDepth::Auto:
+-        Degrade10Bit = (NDS.ConsoleType == 0);
++        // ff-bgm1x: 처음 켤 때(생성자)는 항상 16비트로 시작하는데, 롬을 다시 불러오면 이 함수가 불려
++        // DS 에서는 10비트로 바뀌었다. 같은 설정에서 소리가 달라지지 않게 자동은 16비트로 맞춘다
++        Degrade10Bit = false;
+         break;
+     case AudioBitDepth::_10Bit:
+         Degrade10Bit = true;

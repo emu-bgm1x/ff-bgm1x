@@ -1,0 +1,72 @@
+diff --git a/src/citra_qt/configuration/configure_audio.cpp b/src/citra_qt/configuration/configure_audio.cpp
+index d67f84a..4b86046 100644
+--- a/src/citra_qt/configuration/configure_audio.cpp
++++ b/src/citra_qt/configuration/configure_audio.cpp
+@@ -2,8 +2,14 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <memory>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QSettings>
++#include <QSlider>
+ #include <QtGlobal>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/input_details.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+@@ -42,6 +48,39 @@ ConfigureAudio::ConfigureAudio(bool is_powered_on, QWidget* parent)
+     ui->volume_label->setVisible(Settings::IsConfiguringGlobal());
+     ui->volume_combo_box->setVisible(!Settings::IsConfiguringGlobal());
+ 
++    // ff-bgm1x: 볼륨 슬라이더 아래 한 줄 (1배속으로 내는 효과음의 볼륨, 설정은 ff-bgm1x 레지스트리에 저장)
++    if (Settings::IsConfiguringGlobal()) {
++        if (auto* parent_layout = qobject_cast<QBoxLayout*>(ui->volume_layout->parentWidget()->layout())) {
++            sfx_volume_row = new QWidget(this);
++            auto* row = new QHBoxLayout(sfx_volume_row);
++            row->setContentsMargins(0, 0, 0, 0);
++            // 기존 볼륨 줄과 같은 구성 (이름 칸 너비를 맞추고, 늘어나는 빈칸 + 슬라이더)
++            auto* sfx_label = new QLabel(tr("효과음 볼륨:"), sfx_volume_row);
++            const int label_width =
++                std::max(sfx_label->sizeHint().width(), ui->volume_label->sizeHint().width());
++            sfx_label->setMinimumWidth(label_width);
++            ui->volume_label->setMinimumWidth(label_width);
++            row->addWidget(sfx_label);
++            row->addItem(new QSpacerItem(30, 20, QSizePolicy::Expanding, QSizePolicy::Minimum));
++            sfx_volume_slider = new QSlider(Qt::Horizontal, sfx_volume_row);
++            sfx_volume_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++            sfx_volume_slider->setMaximum(100);
++            sfx_volume_slider->setPageStep(5);
++            row->addWidget(sfx_volume_slider);
++            sfx_volume_indicator = new QLabel(sfx_volume_row);
++            sfx_volume_indicator->setMinimumWidth(32);
++            sfx_volume_indicator->setAlignment(Qt::AlignCenter);
++            row->addWidget(sfx_volume_indicator);
++            parent_layout->insertWidget(parent_layout->indexOf(ui->volume_layout) + 1, sfx_volume_row);
++            connect(sfx_volume_slider, &QSlider::valueChanged, this, [this](int percentage) {
++                sfx_volume_indicator->setText(QStringLiteral("%1%").arg(percentage));
++            });
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            sfx_volume_slider->setValue(s.value(QStringLiteral("sfx_volume"), 100).toInt());
++            sfx_volume_indicator->setText(QStringLiteral("%1%").arg(sfx_volume_slider->value()));
++        }
++    }
++
+     SetupPerGameUI();
+     SetConfiguration();
+ 
+@@ -181,6 +220,12 @@ void ConfigureAudio::ApplyConfiguration() {
+                                              ui->simulate_headphones_plugged,
+                                              simulate_headphones_plugged);
+ 
++    if (sfx_volume_slider) {
++        QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        s.setValue(QStringLiteral("sfx_volume"), sfx_volume_slider->value());
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(sfx_volume_slider->value() / 100.0f);
++    }
++
+     if (Settings::IsConfiguringGlobal()) {
+         Settings::values.output_type =
+             static_cast<AudioCore::SinkType>(ui->output_type_combo_box->currentData().toUInt());

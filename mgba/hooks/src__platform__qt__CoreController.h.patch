@@ -1,0 +1,21 @@
+diff --git a/src/platform/qt/CoreController.h b/src/platform/qt/CoreController.h
+index e2cd03c..e92ec0e 100644
+--- a/src/platform/qt/CoreController.h
++++ b/src/platform/qt/CoreController.h
+@@ -12,6 +12,7 @@
+ #include <QObject>
+ #include <QSize>
+ 
++#include "BgmReplacer.h"
+ #include "VFileDevice.h"
+ 
+ #include <functional>
+@@ -259,6 +260,8 @@ private:
+ 
+ 	std::unique_ptr<mCacheSet> m_cacheSet;
+ 	std::unique_ptr<Override> m_override;
++	std::unique_ptr<BgmReplacer> m_bgm;
++	bool m_bgmSpeedHold = false;  // ff-bgm1x: 연출 중이라 배속을 멈춘 상태
+ 
+ 	uint64_t m_frameCounter;
+ 	QList<std::function<void()>> m_resetActions;

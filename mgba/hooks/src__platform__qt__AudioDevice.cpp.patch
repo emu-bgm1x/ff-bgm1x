@@ -1,0 +1,28 @@
+diff --git a/src/platform/qt/AudioDevice.cpp b/src/platform/qt/AudioDevice.cpp
+index 74f8634..035634e 100644
+--- a/src/platform/qt/AudioDevice.cpp
++++ b/src/platform/qt/AudioDevice.cpp
+@@ -5,6 +5,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "AudioDevice.h"
+ 
++#include "BgmReplacer.h"
+ #include "LogController.h"
+ 
+ #include <mgba/core/blip_buf.h>
+@@ -26,6 +27,7 @@ void AudioDevice::setFormat(const QAudioFormat& format) {
+ 		LOG(QT, INFO) << tr("Can't set format of context-less audio device");
+ 		return;
+ 	}
++	m_sampleRate = format.sampleRate();
+ 	double fauxClock = GBAAudioCalculateRatio(1, m_context->impl->sync.fpsTarget, 1);
+ 	mCoreSyncLockAudio(&m_context->impl->sync);
+ 	blip_set_rates(m_context->core->getAudioChannel(m_context->core, 0),
+@@ -55,6 +57,7 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 0), &reinterpret_cast<mStereoSample*>(data)->left, available, true);
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 1), &reinterpret_cast<mStereoSample*>(data)->right, available, true);
+ 	mCoreSyncConsumeAudio(&m_context->impl->sync);
++	BgmReplacer::mixActive(reinterpret_cast<int16_t*>(data), available, m_sampleRate);
+ 	return available * sizeof(mStereoSample);
+ }
+ 

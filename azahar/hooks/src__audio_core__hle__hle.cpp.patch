@@ -1,0 +1,28 @@
+diff --git a/src/audio_core/hle/hle.cpp b/src/audio_core/hle/hle.cpp
+index 05ff9d7..7e915f4 100644
+--- a/src/audio_core/hle/hle.cpp
++++ b/src/audio_core/hle/hle.cpp
+@@ -15,6 +15,7 @@
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/decoder.h"
+ #include "audio_core/hle/hle.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/mixers.h"
+ #include "audio_core/hle/shared_memory.h"
+ #include "audio_core/hle/source.h"
+@@ -303,6 +304,7 @@ void DspHle::Impl::Initialize() {
+     // is clean and consistent every time the HW is initialized,
+     // but what is exactly reset needs to be figured out.
+     dsp_memory->raw_memory.fill(0);
++    HLE::BgmReplacer::Instance().Reset();  // ff-bgm1x
+     mixers.Reset();
+     for (auto& s : sources) {
+         s.Reset();
+@@ -412,6 +414,7 @@ HLE::SharedMemory& DspHle::Impl::WriteRegion() {
+ }
+ 
+ StereoFrame16 DspHle::Impl::GenerateCurrentFrame() {
++    HLE::BgmReplacer::Instance().OnDspFrame();  // ff-bgm1x: 게임 시간 기준
+     HLE::SharedMemory& read = ReadRegion();
+     HLE::SharedMemory& write = WriteRegion();
+ 

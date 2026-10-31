@@ -1,0 +1,20 @@
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.h b/src/frontend/qt_sdl/AudioSettingsDialog.h
+index 946e47f..b4789b6 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.h
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.h
+@@ -67,6 +67,7 @@ private slots:
+     void on_cbInterpolation_currentIndexChanged(int idx);
+     void on_cbBitDepth_currentIndexChanged(int idx);
+     void on_slVolume_valueChanged(int val);
++    void on_slSfxVolume_valueChanged(int val);
+     void on_chkSyncDSiVolume_clicked(bool checked);
+     void onChangeMicMode(int mode);
+     void on_btnMicWavBrowse_clicked();
+@@ -79,6 +80,7 @@ private:
+     int oldInterp;
+     int oldBitDepth;
+     int oldVolume;
++    int oldSfxVolume;
+     bool oldDSiSync;
+     QButtonGroup* grpMicMode;
+ 

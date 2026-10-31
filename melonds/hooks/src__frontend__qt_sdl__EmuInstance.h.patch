@@ -1,0 +1,35 @@
+diff --git a/src/frontend/qt_sdl/EmuInstance.h b/src/frontend/qt_sdl/EmuInstance.h
+index f143496..2c67da9 100755
+--- a/src/frontend/qt_sdl/EmuInstance.h
++++ b/src/frontend/qt_sdl/EmuInstance.h
+@@ -55,6 +55,8 @@ enum
+     HK_GuitarGripRed,
+     HK_GuitarGripYellow,
+     HK_GuitarGripBlue,
++    HK_BgmToggle,  // ff-bgm1x: BGM 1배속 유지 켜기/끄기
++    HK_CutsceneFfToggle,  // ff-bgm1x: 연출 중에도 배속 켜기/끄기
+     HK_MAX
+ };
+ 
+@@ -80,6 +82,8 @@ enum
+ bool isRightModKey(QKeyEvent* event);
+ int getEventKeyVal(QKeyEvent* event);
+ 
++class BgmReplacer;
++
+ class EmuInstance
+ {
+ public:
+@@ -372,8 +376,12 @@ private:
+     bool isTouching;
+     melonDS::u16 touchX, touchY;
+ 
++    BgmReplacer* bgmReplacer = nullptr;  // ff-bgm1x
++
+     friend class EmuThread;
+     friend class MainWindow;
++    friend class BgmReplacer;
++    friend class AudioSettingsDialog;  // ff-bgm1x: 효과음 볼륨
+ };
+ 
+ #endif //EMUINSTANCE_H

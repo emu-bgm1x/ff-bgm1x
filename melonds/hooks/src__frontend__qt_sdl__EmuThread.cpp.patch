@@ -1,0 +1,72 @@
+diff --git a/src/frontend/qt_sdl/EmuThread.cpp b/src/frontend/qt_sdl/EmuThread.cpp
+index e754d98..8a2f706 100755
+--- a/src/frontend/qt_sdl/EmuThread.cpp
++++ b/src/frontend/qt_sdl/EmuThread.cpp
+@@ -53,6 +53,7 @@
+ #include "GPU3D_Compute.h"
+ 
+ #include "Savestate.h"
++#include "BgmReplacer.h"
+ 
+ #include "EmuInstance.h"
+ 
+@@ -307,6 +308,7 @@ void EmuThread::run()
+             else
+             {
+                 nlines = emuInstance->nds->RunFrame();
++                emuInstance->bgmReplacer->afterMainFrame();  // ff-bgm1x
+             }
+ 
+             if (emuInstance->ndsSave)
+@@ -343,8 +345,32 @@ void EmuThread::run()
+             
+             if (emuInstance->hotkeyPressed(HK_FastForwardToggle)) emuInstance->fastForwardToggled = !emuInstance->fastForwardToggled;
+             if (emuInstance->hotkeyPressed(HK_SlowMoToggle)) emuInstance->slowmoToggled = !emuInstance->slowmoToggled;
++            if (emuInstance->hotkeyPressed(HK_BgmToggle))
++            {
++                // ff-bgm1x: BGM 1배속 유지 켜기/끄기 (다음 곡부터 적용)
++                const bool on = !emuInstance->bgmReplacer->isEnabled();
++                emuInstance->bgmReplacer->setEnabled(on);
++                emuInstance->getLocalConfig().SetBool("Bgm1x", on);
++                Config::Save();
++                emuInstance->osdAddMessage(0, on ? "BGM at 1x speed: on" : "BGM at 1x speed: off");
++            }
++
++            if (emuInstance->hotkeyPressed(HK_CutsceneFfToggle))
++            {
++                // ff-bgm1x: 연출 중에도 배속 켜기/끄기
++                const bool on = !emuInstance->bgmReplacer->fastForwardCutscenes();
++                emuInstance->bgmReplacer->setFastForwardCutscenes(on);
++                emuInstance->getLocalConfig().SetBool("FfCutscenes", on);
++                Config::Save();
++                emuInstance->osdAddMessage(0, on ? "Fast forward during cutscenes: on" : "Fast forward during cutscenes: off");
++            }
++
++            // ff-bgm1x: 연출 중이고 "연출 중에도 배속" 이 꺼져 있으면 배속을 걸어도 1배속으로 돈다
++            const bool cutsceneHold = emuInstance->bgmReplacer->isEnabled() &&
++                                      !emuInstance->bgmReplacer->fastForwardCutscenes() &&
++                                      emuInstance->bgmReplacer->cutsceneActive();
+ 
+-            bool enablefastforward = emuInstance->hotkeyDown(HK_FastForward) | emuInstance->fastForwardToggled;
++            bool enablefastforward = (emuInstance->hotkeyDown(HK_FastForward) | emuInstance->fastForwardToggled) && !cutsceneHold;
+             bool enableslowmo = emuInstance->hotkeyDown(HK_SlowMo) | emuInstance->slowmoToggled;
+ 
+             if (useOpenGL)
+@@ -365,7 +391,7 @@ void EmuThread::run()
+ 
+             if (slowmo) emuInstance->curFPS = emuInstance->slowmoFPS;
+             else if (fastforward) emuInstance->curFPS = emuInstance->fastForwardFPS;
+-            else if (!emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
++            else if (!cutsceneHold && !emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
+             else emuInstance->curFPS = emuInstance->targetFPS;
+ 
+             if (emuInstance->audioDSiVolumeSync && emuInstance->nds->ConsoleType == 1)
+@@ -388,7 +414,7 @@ void EmuThread::run()
+ 
+             if (frametimeStep < 0.001) frametimeStep = 0.001;
+ 
+-            if (emuInstance->doLimitFPS)
++            if (emuInstance->doLimitFPS || cutsceneHold)
+             {
+                 double curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+ 

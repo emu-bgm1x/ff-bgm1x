@@ -1,0 +1,14 @@
+diff --git a/src/platform/sdl/sdl-audio.h b/src/platform/sdl/sdl-audio.h
+index 2ae920a..5c556a5 100644
+--- a/src/platform/sdl/sdl-audio.h
++++ b/src/platform/sdl/sdl-audio.h
+@@ -46,6 +46,9 @@ void mSDLDeinitAudio(struct mSDLAudio* context);
+ void mSDLPauseAudio(struct mSDLAudio* context);
+ void mSDLResumeAudio(struct mSDLAudio* context);
+ 
++// ff-bgm1x: 실시간 출력(스테레오 int16)에 덧붙여 섞을 훅. NULL 이면 사용하지 않는다.
++extern void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate);
++
+ CXX_GUARD_END
+ 
+ #endif

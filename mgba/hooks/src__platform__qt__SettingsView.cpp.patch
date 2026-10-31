@@ -1,0 +1,22 @@
+diff --git a/src/platform/qt/SettingsView.cpp b/src/platform/qt/SettingsView.cpp
+index a5acc67..996a753 100644
+--- a/src/platform/qt/SettingsView.cpp
++++ b/src/platform/qt/SettingsView.cpp
+@@ -474,6 +474,8 @@ void SettingsView::updateConfig() {
+ 	saveSetting("volume", m_ui.volume);
+ 	saveSetting("mute", m_ui.mute);
+ 	saveSetting("fastForwardVolume", m_ui.volumeFf);
++	saveSetting("bgmSfxVolume", m_ui.sfxVolume);
++	saveSetting("bgmSfxMute", m_ui.sfxMute);
+ 	saveSetting("fastForwardMute", m_ui.muteFf);
+ 	saveSetting("rewindEnable", m_ui.rewind);
+ 	saveSetting("rewindBufferCapacity", m_ui.rewindCapacity);
+@@ -701,6 +703,8 @@ void SettingsView::reloadConfig() {
+ 	loadSetting("volume", m_ui.volume, 0x100);
+ 	loadSetting("mute", m_ui.mute, false);
+ 	loadSetting("fastForwardVolume", m_ui.volumeFf, m_ui.volume->value());
++	loadSetting("bgmSfxVolume", m_ui.sfxVolume, 0x100);
++	loadSetting("bgmSfxMute", m_ui.sfxMute, false);
+ 	loadSetting("fastForwardMute", m_ui.muteFf, m_ui.mute->isChecked());
+ 	loadSetting("rewindEnable", m_ui.rewind);
+ 	loadSetting("rewindBufferCapacity", m_ui.rewindCapacity);

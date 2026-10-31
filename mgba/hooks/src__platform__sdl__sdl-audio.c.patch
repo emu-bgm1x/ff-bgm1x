@@ -1,0 +1,23 @@
+diff --git a/src/platform/sdl/sdl-audio.c b/src/platform/sdl/sdl-audio.c
+index f1666aa..14400f3 100644
+--- a/src/platform/sdl/sdl-audio.c
++++ b/src/platform/sdl/sdl-audio.c
+@@ -18,6 +18,8 @@ mLOG_DEFINE_CATEGORY(SDL_AUDIO, "SDL Audio", "platform.sdl.audio");
+ 
+ static void _mSDLAudioCallback(void* context, Uint8* data, int len);
+ 
++void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate) = NULL;
++
+ bool mSDLInitAudio(struct mSDLAudio* context, struct mCoreThread* threadContext) {
+ #if defined(_WIN32) && SDL_VERSION_ATLEAST(2, 0, 8)
+ 	if (!getenv("SDL_AUDIODRIVER")) {
+@@ -127,6 +129,9 @@ static void _mSDLAudioCallback(void* context, Uint8* data, int len) {
+ 	if (audioContext->sync) {
+ 		mCoreSyncConsumeAudio(audioContext->sync);
+ 	}
++	if (mSDLAudioPostMix && audioContext->obtainedSpec.channels == 2) {
++		mSDLAudioPostMix((int16_t*) data, available, audioContext->obtainedSpec.freq);
++	}
+ 	if (available < len) {
+ 		memset(((short*) data) + audioContext->obtainedSpec.channels * available, 0, (len - available) * audioContext->obtainedSpec.channels * sizeof(short));
+ 	}

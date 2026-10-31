@@ -1,0 +1,22 @@
+diff --git a/src/audio_core/hle/aac_decoder.cpp b/src/audio_core/hle/aac_decoder.cpp
+index 33682a9..555a1b9 100644
+--- a/src/audio_core/hle/aac_decoder.cpp
++++ b/src/audio_core/hle/aac_decoder.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <neaacdec.h>
+ #include "audio_core/hle/aac_decoder.h"
++#include "audio_core/hle/bgm_replacer.h"
+ 
+ namespace AudioCore::HLE {
+ 
+@@ -91,6 +92,9 @@ BinaryMessage AACDecoder::Decode(const BinaryMessage& request) {
+     }
+     u8* data = memory.GetFCRAMPointer(request.decode_aac_request.src_addr - Memory::FCRAM_PADDR);
+     u32 data_len = request.decode_aac_request.size;
++    // ff-bgm1x: 어떤 BGM 파일의 몇 번째 프레임인지, 어디로 풀리는지 알려 준다
++    BgmReplacer::Instance().OnAacDecode(data, data_len, request.decode_aac_request.dst_addr_ch0,
++                                        request.decode_aac_request.dst_addr_ch1);
+ 
+     if (!decoder_initialized) {
+         unsigned long sample_rate;

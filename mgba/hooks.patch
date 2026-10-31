@@ -1,0 +1,391 @@
+diff --git a/src/platform/qt/AudioDevice.cpp b/src/platform/qt/AudioDevice.cpp
+index 74f8634..035634e 100644
+--- a/src/platform/qt/AudioDevice.cpp
++++ b/src/platform/qt/AudioDevice.cpp
+@@ -5,6 +5,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "AudioDevice.h"
+ 
++#include "BgmReplacer.h"
+ #include "LogController.h"
+ 
+ #include <mgba/core/blip_buf.h>
+@@ -26,6 +27,7 @@ void AudioDevice::setFormat(const QAudioFormat& format) {
+ 		LOG(QT, INFO) << tr("Can't set format of context-less audio device");
+ 		return;
+ 	}
++	m_sampleRate = format.sampleRate();
+ 	double fauxClock = GBAAudioCalculateRatio(1, m_context->impl->sync.fpsTarget, 1);
+ 	mCoreSyncLockAudio(&m_context->impl->sync);
+ 	blip_set_rates(m_context->core->getAudioChannel(m_context->core, 0),
+@@ -55,6 +57,7 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 0), &reinterpret_cast<mStereoSample*>(data)->left, available, true);
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 1), &reinterpret_cast<mStereoSample*>(data)->right, available, true);
+ 	mCoreSyncConsumeAudio(&m_context->impl->sync);
++	BgmReplacer::mixActive(reinterpret_cast<int16_t*>(data), available, m_sampleRate);
+ 	return available * sizeof(mStereoSample);
+ }
+ 
+diff --git a/src/platform/qt/AudioDevice.h b/src/platform/qt/AudioDevice.h
+index 0794b37..657b5cd 100644
+--- a/src/platform/qt/AudioDevice.h
++++ b/src/platform/qt/AudioDevice.h
+@@ -27,6 +27,7 @@ protected:
+ 
+ private:
+ 	mCoreThread* m_context;
++	int m_sampleRate = 48000;
+ };
+ 
+ }
+diff --git a/src/platform/qt/CMakeLists.txt b/src/platform/qt/CMakeLists.txt
+index 19ab351..dfe34b3 100644
+--- a/src/platform/qt/CMakeLists.txt
++++ b/src/platform/qt/CMakeLists.txt
+@@ -74,7 +74,24 @@ if(QT_TYPE STREQUAL STATIC_LIBRARY)
+ 	list(APPEND QT_DEFINES QT_STATIC)
+ endif()
+ 
++# ff-bgm1x: MP2K BGM 재생기 (C++17 로 따로 빌드)
++# 소스 트리 밖 파일은 오브젝트 경로에 한글 절대경로가 들어가 빌드가 깨지므로 빌드 폴더로 복사해 쓴다
++set(GBA_BGM_DIR ${CMAKE_SOURCE_DIR}/../common)
++set(GBA_BGM_COPY ${CMAKE_CURRENT_BINARY_DIR}/gbabgm)
++set(GBA_BGM_SRC)
++foreach(f rom.h rom.cpp mp2k_engine.h mp2k_engine.cpp bgm_mirror.h bgm_mirror.cpp winutil.h)
++	configure_file(${GBA_BGM_DIR}/${f} ${GBA_BGM_COPY}/${f} COPYONLY)
++	if(f MATCHES "[.]cpp$")
++		list(APPEND GBA_BGM_SRC ${GBA_BGM_COPY}/${f})
++	endif()
++endforeach()
++add_library(gbabgm STATIC ${GBA_BGM_SRC})
++set_target_properties(gbabgm PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON AUTOMOC OFF)
++include_directories(${GBA_BGM_COPY})
++
+ set(SOURCE_FILES
++	BgmReplacer.cpp
++	GbDriverBgm.cpp
+ 	AboutScreen.cpp
+ 	AbstractUpdater.cpp
+ 	Action.cpp
+@@ -249,6 +266,11 @@ if(USE_DISCORD_RPC)
+ 	list(APPEND SOURCE_FILES DiscordCoordinator.cpp)
+ endif()
+ 
++# ff-bgm1x: 정적 libepoxy 를 실행 파일에 넣을 때 필요한 초기화 (EpoxyStaticInit.cpp 참고)
++if(WIN32 AND USE_EPOXY AND EPOXY_LIBRARIES MATCHES "libepoxy[.]a$")
++	list(APPEND SOURCE_FILES EpoxyStaticInit.cpp)
++endif()
++
+ if(ENABLE_SCRIPTING)
+ 	list(APPEND SOURCE_FILES
+ 		scripting/ScriptingController.cpp
+@@ -419,7 +441,7 @@ if(QT_STATIC)
+ 		list(APPEND QT_LIBRARIES ${QT}::FontDatabaseSupport ${QT}::XcbQpa ${QT}::QWaylandIntegrationPlugin)
+ 	endif()
+ endif()
+-target_link_libraries(${BINARY_NAME}-qt ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
++target_link_libraries(${BINARY_NAME}-qt gbabgm ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
+ set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}" PARENT_SCOPE)
+ 
+ if(UNIX AND NOT APPLE)
+diff --git a/src/platform/qt/CoreController.cpp b/src/platform/qt/CoreController.cpp
+index f6281d5..cc19f00 100644
+--- a/src/platform/qt/CoreController.cpp
++++ b/src/platform/qt/CoreController.cpp
+@@ -44,6 +44,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 	m_threadContext.core = core;
+ 	m_threadContext.userData = this;
+ 	updateROMInfo();
++	m_bgm.reset(new BgmReplacer(core));
+ 
+ #ifdef M_CORE_GBA
+ 	GBASIODolphinCreate(&m_dolphin);
+@@ -91,6 +92,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 
+ 		controller->m_resetActions.clear();
+ 		controller->m_frameCounter = -1;
++		controller->m_bgm->onReset(context->core);
+ 
+ 		if (!controller->m_hwaccel) {
+ 			context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
+@@ -115,6 +117,15 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 		}
+ 		++controller->m_autosaveCounter;
+ 
++		controller->m_bgm->onFrame(context->core);
++		// ff-bgm1x: 연출 곡이 나오는 동안은 배속을 멈춘다 ("연출 중에도 배속" 이 꺼져 있을 때)
++		const bool hold = controller->m_bgm->speedHold();
++		if (hold != controller->m_bgmSpeedHold) {
++			controller->m_bgmSpeedHold = hold;
++			if (controller->m_fastForward || controller->m_fastForwardForced) {
++				controller->updateFastForward();
++			}
++		}
+ 		controller->finishFrame();
+ 	};
+ 
+@@ -288,6 +299,11 @@ void CoreController::loadConfig(ConfigController* config) {
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "volume");
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "mute");
+ 	m_preload = config->getOption("preload").toInt();
++	m_bgm->setEnabled(config->getOption("bgmReplace", 1).toInt());
++	m_bgm->setFastForwardCutscenes(config->getOption("bgmFfCutscenes", 0).toInt());
++	m_bgm->setSfx1x(config->getOption("bgmSfx1x", 1).toInt());
++	m_bgm->setSfxVolume(config->getOption("bgmSfxMute", 0).toInt() ? 0 : config->getOption("bgmSfxVolume", 0x100).toInt());
++	m_bgm->setOutputVolume(config->getOption("volume", 0x100).toInt(), config->getOption("mute", 0).toInt());
+ 
+ 	QSize sizeBefore = screenDimensions();
+ 	m_activeBuffer.resize(256 * 224 * sizeof(color_t));
+@@ -1085,12 +1101,13 @@ void CoreController::setBattleChipFlavor(int flavor) {
+ 
+ void CoreController::setAVStream(mAVStream* stream) {
+ 	Interrupter interrupter(this);
+-	m_threadContext.core->setAVStream(m_threadContext.core, stream);
++	m_threadContext.core->setAVStream(m_threadContext.core, m_bgm->wrapStream(stream, m_threadContext.core));
+ }
+ 
+ void CoreController::clearAVStream() {
+ 	Interrupter interrupter(this);
+ 	m_threadContext.core->setAVStream(m_threadContext.core, nullptr);
++	m_bgm->unwrapStream();
+ }
+ 
+ void CoreController::clearOverride() {
+@@ -1241,7 +1258,7 @@ void CoreController::updatePlayerSave() {
+ void CoreController::updateFastForward() {
+ 	// If we have "Fast forward" checked in the menu (m_fastForwardForced)
+ 	// or are holding the fast forward button (m_fastForward):
+-	if (m_fastForward || m_fastForwardForced) {
++	if ((m_fastForward || m_fastForwardForced) && !m_bgmSpeedHold) {
+ 		if (m_fastForwardVolume >= 0) {
+ 			m_threadContext.core->opts.volume = m_fastForwardVolume;
+ 		}
+diff --git a/src/platform/qt/CoreController.h b/src/platform/qt/CoreController.h
+index e2cd03c..e92ec0e 100644
+--- a/src/platform/qt/CoreController.h
++++ b/src/platform/qt/CoreController.h
+@@ -12,6 +12,7 @@
+ #include <QObject>
+ #include <QSize>
+ 
++#include "BgmReplacer.h"
+ #include "VFileDevice.h"
+ 
+ #include <functional>
+@@ -259,6 +260,8 @@ private:
+ 
+ 	std::unique_ptr<mCacheSet> m_cacheSet;
+ 	std::unique_ptr<Override> m_override;
++	std::unique_ptr<BgmReplacer> m_bgm;
++	bool m_bgmSpeedHold = false;  // ff-bgm1x: 연출 중이라 배속을 멈춘 상태
+ 
+ 	uint64_t m_frameCounter;
+ 	QList<std::function<void()>> m_resetActions;
+diff --git a/src/platform/qt/SettingsView.cpp b/src/platform/qt/SettingsView.cpp
+index a5acc67..996a753 100644
+--- a/src/platform/qt/SettingsView.cpp
++++ b/src/platform/qt/SettingsView.cpp
+@@ -474,6 +474,8 @@ void SettingsView::updateConfig() {
+ 	saveSetting("volume", m_ui.volume);
+ 	saveSetting("mute", m_ui.mute);
+ 	saveSetting("fastForwardVolume", m_ui.volumeFf);
++	saveSetting("bgmSfxVolume", m_ui.sfxVolume);
++	saveSetting("bgmSfxMute", m_ui.sfxMute);
+ 	saveSetting("fastForwardMute", m_ui.muteFf);
+ 	saveSetting("rewindEnable", m_ui.rewind);
+ 	saveSetting("rewindBufferCapacity", m_ui.rewindCapacity);
+@@ -701,6 +703,8 @@ void SettingsView::reloadConfig() {
+ 	loadSetting("volume", m_ui.volume, 0x100);
+ 	loadSetting("mute", m_ui.mute, false);
+ 	loadSetting("fastForwardVolume", m_ui.volumeFf, m_ui.volume->value());
++	loadSetting("bgmSfxVolume", m_ui.sfxVolume, 0x100);
++	loadSetting("bgmSfxMute", m_ui.sfxMute, false);
+ 	loadSetting("fastForwardMute", m_ui.muteFf, m_ui.mute->isChecked());
+ 	loadSetting("rewindEnable", m_ui.rewind);
+ 	loadSetting("rewindBufferCapacity", m_ui.rewindCapacity);
+diff --git a/src/platform/qt/SettingsView.ui b/src/platform/qt/SettingsView.ui
+index 6e8e822..12d7b93 100644
+--- a/src/platform/qt/SettingsView.ui
++++ b/src/platform/qt/SettingsView.ui
+@@ -319,14 +319,54 @@
+             </item>
+            </layout>
+           </item>
+-          <item row="7" column="0">
++          <item row="6" column="0">
++           <widget class="QLabel" name="labelSfxVolume">
++            <property name="text">
++             <string notr="true">효과음 볼륨:</string>
++            </property>
++           </widget>
++          </item>
++          <item row="6" column="1">
++           <layout class="QHBoxLayout" name="horizontalLayoutSfxVolume">
++            <item>
++             <widget class="QSlider" name="sfxVolume">
++              <property name="minimumSize">
++               <size>
++                <width>128</width>
++                <height>0</height>
++               </size>
++              </property>
++              <property name="maximum">
++               <number>256</number>
++              </property>
++              <property name="pageStep">
++               <number>16</number>
++              </property>
++              <property name="value">
++               <number>256</number>
++              </property>
++              <property name="orientation">
++               <enum>Qt::Horizontal</enum>
++              </property>
++             </widget>
++            </item>
++            <item>
++             <widget class="QCheckBox" name="sfxMute">
++              <property name="text">
++               <string>Mute</string>
++              </property>
++             </widget>
++            </item>
++           </layout>
++          </item>
++          <item row="8" column="0">
+            <widget class="QLabel" name="label_43">
+             <property name="text">
+              <string>Audio in multiplayer:</string>
+             </property>
+            </widget>
+           </item>
+-          <item row="7" column="1">
++          <item row="8" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioAll">
+             <property name="text">
+              <string>All windows</string>
+@@ -339,7 +379,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="8" column="1">
++          <item row="9" column="1">
+            <widget class="QRadioButton" name="multiplayerAudio1">
+             <property name="text">
+              <string>Player 1 window only</string>
+@@ -349,7 +389,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="9" column="1">
++          <item row="10" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioActive">
+             <property name="text">
+              <string>Currently active player window</string>
+@@ -366,7 +406,7 @@
+             </property>
+            </widget>
+           </item>
+-          <item row="6" column="0" colspan="2">
++          <item row="7" column="0" colspan="2">
+            <widget class="Line" name="line_5">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+diff --git a/src/platform/qt/Window.cpp b/src/platform/qt/Window.cpp
+index 54a69ec..d64996a 100644
+--- a/src/platform/qt/Window.cpp
++++ b/src/platform/qt/Window.cpp
+@@ -1613,6 +1613,39 @@ void Window::setupMenu(QMenuBar* menubar) {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 배속 중에도 BGM 을 1배속으로 재생 (기본값 켜짐)
++	if (m_config->getOption("bgmReplace").isNull()) {
++		m_config->setOption("bgmReplace", 1);
++	}
++	ConfigOption* bgmReplace = m_config->addOption("bgmReplace");
++	Action* bgmReplaceAction = bgmReplace->addBoolean(QString::fromUtf8("BGM 1배속 유지"), &m_actions, "av");
++	bgmReplaceAction->setActive(m_config->getOption("bgmReplace").toInt());
++	bgmReplace->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: 연출(반복 없는 긴 곡)이 나오는 동안에도 배속할지 (기본값 꺼짐: 연출은 1배속)
++	if (m_config->getOption("bgmFfCutscenes").isNull()) {
++		m_config->setOption("bgmFfCutscenes", 0);
++	}
++	ConfigOption* bgmFfCutscenes = m_config->addOption("bgmFfCutscenes");
++	Action* bgmFfCutscenesAction = bgmFfCutscenes->addBoolean(QString::fromUtf8("연출 중에도 배속"), &m_actions, "av");
++	bgmFfCutscenesAction->setActive(m_config->getOption("bgmFfCutscenes").toInt());
++	bgmFfCutscenes->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: GBA 게임의 효과음도 1배속으로 (기본값 켜짐)
++	if (m_config->getOption("bgmSfx1x").isNull()) {
++		m_config->setOption("bgmSfx1x", 1);
++	}
++	ConfigOption* bgmSfx1x = m_config->addOption("bgmSfx1x");
++	Action* bgmSfx1xAction = bgmSfx1x->addBoolean(QString::fromUtf8("효과음 1배속"), &m_actions, "av");
++	bgmSfx1xAction->setActive(m_config->getOption("bgmSfx1x").toInt());
++	bgmSfx1x->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
+ 	m_actions.addMenu(tr("FPS target"),"target", "av");
+ 	ConfigOption* fpsTargetOption = m_config->addOption("fpsTarget");
+ 	QMap<double, Action*> fpsTargets;
+@@ -1836,6 +1869,16 @@ void Window::setupOptions() {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 효과음 볼륨
++	ConfigOption* sfxVolume = m_config->addOption("bgmSfxVolume");
++	sfxVolume->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++	ConfigOption* sfxMute = m_config->addOption("bgmSfxMute");
++	sfxMute->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
+ 	ConfigOption* muteFf = m_config->addOption("fastForwardMute");
+ 	muteFf->connect([this](const QVariant&) {
+ 		reloadConfig();
+diff --git a/src/platform/sdl/sdl-audio.c b/src/platform/sdl/sdl-audio.c
+index f1666aa..14400f3 100644
+--- a/src/platform/sdl/sdl-audio.c
++++ b/src/platform/sdl/sdl-audio.c
+@@ -18,6 +18,8 @@ mLOG_DEFINE_CATEGORY(SDL_AUDIO, "SDL Audio", "platform.sdl.audio");
+ 
+ static void _mSDLAudioCallback(void* context, Uint8* data, int len);
+ 
++void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate) = NULL;
++
+ bool mSDLInitAudio(struct mSDLAudio* context, struct mCoreThread* threadContext) {
+ #if defined(_WIN32) && SDL_VERSION_ATLEAST(2, 0, 8)
+ 	if (!getenv("SDL_AUDIODRIVER")) {
+@@ -127,6 +129,9 @@ static void _mSDLAudioCallback(void* context, Uint8* data, int len) {
+ 	if (audioContext->sync) {
+ 		mCoreSyncConsumeAudio(audioContext->sync);
+ 	}
++	if (mSDLAudioPostMix && audioContext->obtainedSpec.channels == 2) {
++		mSDLAudioPostMix((int16_t*) data, available, audioContext->obtainedSpec.freq);
++	}
+ 	if (available < len) {
+ 		memset(((short*) data) + audioContext->obtainedSpec.channels * available, 0, (len - available) * audioContext->obtainedSpec.channels * sizeof(short));
+ 	}
+diff --git a/src/platform/sdl/sdl-audio.h b/src/platform/sdl/sdl-audio.h
+index 2ae920a..5c556a5 100644
+--- a/src/platform/sdl/sdl-audio.h
++++ b/src/platform/sdl/sdl-audio.h
+@@ -46,6 +46,9 @@ void mSDLDeinitAudio(struct mSDLAudio* context);
+ void mSDLPauseAudio(struct mSDLAudio* context);
+ void mSDLResumeAudio(struct mSDLAudio* context);
+ 
++// ff-bgm1x: 실시간 출력(스테레오 int16)에 덧붙여 섞을 훅. NULL 이면 사용하지 않는다.
++extern void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate);
++
+ CXX_GUARD_END
+ 
+ #endif

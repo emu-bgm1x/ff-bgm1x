@@ -1,0 +1,73 @@
+diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
+index 4728526..28549bd 100755
+--- a/src/audio_core/hle/source.cpp
++++ b/src/audio_core/hle/source.cpp
+@@ -5,6 +5,7 @@
+ #include <algorithm>
+ #include <array>
+ #include "audio_core/codec.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/source.h"
+ #include "audio_core/interpolate.h"
+@@ -28,6 +29,20 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
+     if (!state.enabled) {
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        if (bgm_replaced) {
++            bgm_replaced = false;
++            BgmReplacer::Instance().OnSourceIdle(source_id);
++        }
++        return;
++    }
++
++    // ff-bgm1x: 1배속으로 대체 재생 중인 BGM 음성은 원본 믹스에 넣지 않고 볼륨만 알려 준다
++    if (bgm_replaced && BgmReplacer::Instance().IsEnabled()) {
++        if (intermediate_mix_id == 0) {
++            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
++        }
+         state.gain_ramp_start.at(intermediate_mix_id) = gains;
+         state.gain_ramp_active.at(intermediate_mix_id) = false;
+         return;
+@@ -64,6 +79,10 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+ void Source::Reset() {
+     current_frame.fill({});
+     state = {};
++    if (bgm_replaced) {
++        bgm_replaced = false;
++        BgmReplacer::Instance().OnSourceIdle(source_id);
++    }
+ }
+ 
+ void Source::Sleep() {
+@@ -462,13 +481,28 @@ bool Source::DequeueBuffer() {
+         const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
+         switch (buf.format) {
+         case Format::PCM8:
++            if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM8(num_channels, memory, buf.length);
+             break;
+         case Format::PCM16:
++            // ff-bgm1x: AAC 디코더가 BGM 을 풀어 놓은 버퍼인지 확인
++            if (BgmReplacer::Instance().OnPcmBuffer(source_id, buf.physical_address, buf.length,
++                                                    num_channels)) {
++                bgm_replaced = true;
++            } else if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM16(num_channels, memory, buf.length);
+             break;
+         case Format::ADPCM:
+             DEBUG_ASSERT(num_channels == 1);
++            // ff-bgm1x: BGM 스트림 버퍼인지 확인
++            bgm_replaced = BgmReplacer::Instance().OnAdpcmBuffer(source_id, state.adpcm_coeffs,
++                                                                 memory, buf.length);
+             state.current_buffer =
+                 Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
+             break;

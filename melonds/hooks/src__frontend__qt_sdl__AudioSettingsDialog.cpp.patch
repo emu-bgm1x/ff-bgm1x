@@ -1,0 +1,53 @@
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.cpp b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+index 9a13f4a..c636f09 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.cpp
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+@@ -28,6 +28,7 @@
+ #include "AudioSettingsDialog.h"
+ #include "ui_AudioSettingsDialog.h"
+ #include "main.h"
++#include "BgmReplacer.h"
+ 
+ using namespace melonDS;
+ AudioSettingsDialog* AudioSettingsDialog::currentDlg = nullptr;
+@@ -47,6 +48,7 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+     oldBitDepth = cfg.GetInt("Audio.BitDepth");
+     oldVolume = instcfg.GetInt("Audio.Volume");
+     oldDSiSync = instcfg.GetBool("Audio.DSiVolumeSync");
++    oldSfxVolume = instcfg.GetInt("SfxVolume");
+ 
+     volume = oldVolume;
+     dsiSync = oldDSiSync;
+@@ -67,6 +69,10 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+     ui->slVolume->setValue(oldVolume);
+     ui->slVolume->blockSignals(state);
+ 
++    state = ui->slSfxVolume->blockSignals(true);
++    ui->slSfxVolume->setValue(oldSfxVolume);
++    ui->slSfxVolume->blockSignals(state);
++
+     ui->chkSyncDSiVolume->setChecked(oldDSiSync);
+ 
+     // Setup volume slider accordingly
+@@ -182,6 +188,8 @@ void AudioSettingsDialog::on_AudioSettingsDialog_rejected()
+     cfg.SetInt("Audio.BitDepth", oldBitDepth);
+     instcfg.SetInt("Audio.Volume", oldVolume);
+     instcfg.SetBool("Audio.DSiVolumeSync", oldDSiSync);
++    instcfg.SetInt("SfxVolume", oldSfxVolume);
++    emuInstance->bgmReplacer->setSfxVolume(oldSfxVolume);
+ 
+     emit updateAudioVolume(oldVolume, oldDSiSync);
+     emit updateAudioSettings();
+@@ -227,6 +235,12 @@ void AudioSettingsDialog::on_slVolume_valueChanged(int val)
+     emit updateAudioVolume(val, dsiSync);
+ }
+ 
++void AudioSettingsDialog::on_slSfxVolume_valueChanged(int val)
++{
++    emuInstance->getLocalConfig().SetInt("SfxVolume", val);
++    emuInstance->bgmReplacer->setSfxVolume(val);
++}
++
+ void AudioSettingsDialog::on_chkSyncDSiVolume_clicked(bool checked)
+ {
+     dsiSync = checked;

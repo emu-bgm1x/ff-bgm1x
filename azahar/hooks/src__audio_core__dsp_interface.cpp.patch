@@ -1,0 +1,23 @@
+diff --git a/src/audio_core/dsp_interface.cpp b/src/audio_core/dsp_interface.cpp
+index e0ce087..21d72bf 100644
+--- a/src/audio_core/dsp_interface.cpp
++++ b/src/audio_core/dsp_interface.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <cstddef>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+ #include "common/assert.h"
+@@ -107,6 +108,10 @@ void DspInterface::OutputCallback(s16* buffer, std::size_t num_frames) {
+         std::memcpy(buffer + 2 * i, &last_frame[0], 2 * sizeof(s16));
+     }
+ 
++    // ff-bgm1x: 오디오 장치가 요청한 전체 분량만큼 1배속 BGM 을 섞는다.
++    // 에뮬레이션이 성능 때문에 멈칫해 원본 소리가 비어도 BGM 은 끊기지 않는다 (일시정지는 따로 처리).
++    HLE::BgmReplacer::Instance().Mix(buffer, num_frames, sink->GetNativeSampleRate());
++
+     // Implementation of the hardware volume slider
+     // A cubic curve is used to approximate a linear change in human-perceived loudness
+     const float linear_volume = std::clamp(Settings::Volume(), 0.0f, 1.0f);

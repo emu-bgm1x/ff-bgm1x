@@ -1,0 +1,92 @@
+diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
+index f75e16f..ae8aedf 100644
+--- a/src/citra_qt/citra_qt.cpp
++++ b/src/citra_qt/citra_qt.cpp
+@@ -45,6 +45,8 @@
+ #include "citra_qt/camera/qt_multimedia_camera.h"
+ #include "citra_qt/camera/still_image_camera.h"
+ #include "citra_qt/citra_qt.h"
++#include "audio_core/hle/bgm_replacer.h"
++#include <QSettings>
+ #include "citra_qt/compatibility_list.h"
+ #include "citra_qt/configuration/config.h"
+ #include "citra_qt/configuration/configure_dialog.h"
+@@ -951,6 +953,22 @@ void GMainWindow::InitializeHotkeys() {
+     connect_shortcut(QStringLiteral("Toggle Turbo Mode"),
+                      [&] { GMainWindow::SetTurboEnabled(!GMainWindow::IsTurboEnabled()); });
+ 
++    // ff-bgm1x: 메뉴의 체크 항목을 단축키로 켜고 끈다 (설정 저장은 메뉴 항목이 한다)
++    for (const auto& [hotkey, object] :
++         {std::pair{QStringLiteral("Toggle BGM at 1x Speed"), QStringLiteral("ff_bgm1x_1x")},
++          std::pair{QStringLiteral("Toggle Fast Forward During Cutscenes"), QStringLiteral("ff_bgm1x_ff_cutscenes")},
++          std::pair{QStringLiteral("Toggle Voices at 1x Speed"), QStringLiteral("ff_bgm1x_voices_1x")}}) {
++        const QString name = object;
++        connect_shortcut(hotkey, [this, name] {
++            if (QAction* action = findChild<QAction*>(name)) {
++                action->toggle();
++                statusBar()->showMessage(
++                    QStringLiteral("%1: %2").arg(action->text(), action->isChecked() ? tr("켜짐") : tr("꺼짐")),
++                    3000);
++            }
++        });
++    }
++
+     connect_shortcut(QStringLiteral("Increase Speed Limit"), [&] { AdjustSpeedLimit(true); });
+     connect_shortcut(QStringLiteral("Decrease Speed Limit"), [&] { AdjustSpeedLimit(false); });
+ 
+@@ -1115,6 +1133,55 @@ void GMainWindow::ConnectWidgetEvents() {
+ }
+ 
+ void GMainWindow::ConnectMenuEvents() {
++    // ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생 (기본 켜짐, 설정 유지)
++    {
++        QSettings bgm_settings(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        const bool bgm_on = bgm_settings.value(QStringLiteral("bgm_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetEnabled(bgm_on);
++        QAction* bgm_action = new QAction(tr("BGM 1배속 유지 (배속 중)"), this);
++        bgm_action->setObjectName(QStringLiteral("ff_bgm1x_1x"));
++        bgm_action->setCheckable(true);
++        bgm_action->setChecked(bgm_on);
++        ui->menu_Emulation->addSeparator();
++        ui->menu_Emulation->addAction(bgm_action);
++        connect(bgm_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("bgm_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetEnabled(checked);
++        });
++
++        // 연출(연출 음악이 나오는 장면) 중에도 배속할지 (기본 꺼짐: 연출은 1배속으로 본다)
++        const bool ff_cutscenes = bgm_settings.value(QStringLiteral("ff_cutscenes"), false).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(ff_cutscenes);
++        QAction* cutscene_action = new QAction(tr("연출 중에도 배속"), this);
++        cutscene_action->setObjectName(QStringLiteral("ff_bgm1x_ff_cutscenes"));
++        cutscene_action->setCheckable(true);
++        cutscene_action->setChecked(ff_cutscenes);
++        ui->menu_Emulation->addAction(cutscene_action);
++        connect(cutscene_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("ff_cutscenes"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(checked);
++        });
++
++        // 대사처럼 BGM 위에 겹쳐 트는 소리를 1배속으로 낼지 (기본 켜짐)
++        const bool voices_1x = bgm_settings.value(QStringLiteral("voices_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(voices_1x);
++        // 효과음 볼륨 (설정 > 오디오 에서 바꾼다)
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(
++            bgm_settings.value(QStringLiteral("sfx_volume"), 100).toInt() / 100.0f);
++        QAction* voices_action = new QAction(tr("대사·효과음 1배속"), this);
++        voices_action->setObjectName(QStringLiteral("ff_bgm1x_voices_1x"));
++        voices_action->setCheckable(true);
++        voices_action->setChecked(voices_1x);
++        ui->menu_Emulation->addAction(voices_action);
++        connect(voices_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("voices_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(checked);
++        });
++    }
++
+     const auto connect_menu = [&](QAction* action, const auto& event_fn,
+                                   QAction::MenuRole role = QAction::NoRole) {
+         action->setMenuRole(role);

@@ -1,0 +1,61 @@
+diff --git a/src/platform/qt/Window.cpp b/src/platform/qt/Window.cpp
+index 54a69ec..d64996a 100644
+--- a/src/platform/qt/Window.cpp
++++ b/src/platform/qt/Window.cpp
+@@ -1613,6 +1613,39 @@ void Window::setupMenu(QMenuBar* menubar) {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 배속 중에도 BGM 을 1배속으로 재생 (기본값 켜짐)
++	if (m_config->getOption("bgmReplace").isNull()) {
++		m_config->setOption("bgmReplace", 1);
++	}
++	ConfigOption* bgmReplace = m_config->addOption("bgmReplace");
++	Action* bgmReplaceAction = bgmReplace->addBoolean(QString::fromUtf8("BGM 1배속 유지"), &m_actions, "av");
++	bgmReplaceAction->setActive(m_config->getOption("bgmReplace").toInt());
++	bgmReplace->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: 연출(반복 없는 긴 곡)이 나오는 동안에도 배속할지 (기본값 꺼짐: 연출은 1배속)
++	if (m_config->getOption("bgmFfCutscenes").isNull()) {
++		m_config->setOption("bgmFfCutscenes", 0);
++	}
++	ConfigOption* bgmFfCutscenes = m_config->addOption("bgmFfCutscenes");
++	Action* bgmFfCutscenesAction = bgmFfCutscenes->addBoolean(QString::fromUtf8("연출 중에도 배속"), &m_actions, "av");
++	bgmFfCutscenesAction->setActive(m_config->getOption("bgmFfCutscenes").toInt());
++	bgmFfCutscenes->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: GBA 게임의 효과음도 1배속으로 (기본값 켜짐)
++	if (m_config->getOption("bgmSfx1x").isNull()) {
++		m_config->setOption("bgmSfx1x", 1);
++	}
++	ConfigOption* bgmSfx1x = m_config->addOption("bgmSfx1x");
++	Action* bgmSfx1xAction = bgmSfx1x->addBoolean(QString::fromUtf8("효과음 1배속"), &m_actions, "av");
++	bgmSfx1xAction->setActive(m_config->getOption("bgmSfx1x").toInt());
++	bgmSfx1x->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
+ 	m_actions.addMenu(tr("FPS target"),"target", "av");
+ 	ConfigOption* fpsTargetOption = m_config->addOption("fpsTarget");
+ 	QMap<double, Action*> fpsTargets;
+@@ -1836,6 +1869,16 @@ void Window::setupOptions() {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 효과음 볼륨
++	ConfigOption* sfxVolume = m_config->addOption("bgmSfxVolume");
++	sfxVolume->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++	ConfigOption* sfxMute = m_config->addOption("bgmSfxMute");
++	sfxMute->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
+ 	ConfigOption* muteFf = m_config->addOption("fastForwardMute");
+ 	muteFf->connect([this](const QVariant&) {
+ 		reloadConfig();

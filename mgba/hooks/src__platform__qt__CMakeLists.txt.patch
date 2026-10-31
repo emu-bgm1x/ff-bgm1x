@@ -1,0 +1,50 @@
+diff --git a/src/platform/qt/CMakeLists.txt b/src/platform/qt/CMakeLists.txt
+index 19ab351..dfe34b3 100644
+--- a/src/platform/qt/CMakeLists.txt
++++ b/src/platform/qt/CMakeLists.txt
+@@ -74,7 +74,24 @@ if(QT_TYPE STREQUAL STATIC_LIBRARY)
+ 	list(APPEND QT_DEFINES QT_STATIC)
+ endif()
+ 
++# ff-bgm1x: MP2K BGM 재생기 (C++17 로 따로 빌드)
++# 소스 트리 밖 파일은 오브젝트 경로에 한글 절대경로가 들어가 빌드가 깨지므로 빌드 폴더로 복사해 쓴다
++set(GBA_BGM_DIR ${CMAKE_SOURCE_DIR}/../common)
++set(GBA_BGM_COPY ${CMAKE_CURRENT_BINARY_DIR}/gbabgm)
++set(GBA_BGM_SRC)
++foreach(f rom.h rom.cpp mp2k_engine.h mp2k_engine.cpp bgm_mirror.h bgm_mirror.cpp winutil.h)
++	configure_file(${GBA_BGM_DIR}/${f} ${GBA_BGM_COPY}/${f} COPYONLY)
++	if(f MATCHES "[.]cpp$")
++		list(APPEND GBA_BGM_SRC ${GBA_BGM_COPY}/${f})
++	endif()
++endforeach()
++add_library(gbabgm STATIC ${GBA_BGM_SRC})
++set_target_properties(gbabgm PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON AUTOMOC OFF)
++include_directories(${GBA_BGM_COPY})
++
+ set(SOURCE_FILES
++	BgmReplacer.cpp
++	GbDriverBgm.cpp
+ 	AboutScreen.cpp
+ 	AbstractUpdater.cpp
+ 	Action.cpp
+@@ -249,6 +266,11 @@ if(USE_DISCORD_RPC)
+ 	list(APPEND SOURCE_FILES DiscordCoordinator.cpp)
+ endif()
+ 
++# ff-bgm1x: 정적 libepoxy 를 실행 파일에 넣을 때 필요한 초기화 (EpoxyStaticInit.cpp 참고)
++if(WIN32 AND USE_EPOXY AND EPOXY_LIBRARIES MATCHES "libepoxy[.]a$")
++	list(APPEND SOURCE_FILES EpoxyStaticInit.cpp)
++endif()
++
+ if(ENABLE_SCRIPTING)
+ 	list(APPEND SOURCE_FILES
+ 		scripting/ScriptingController.cpp
+@@ -419,7 +441,7 @@ if(QT_STATIC)
+ 		list(APPEND QT_LIBRARIES ${QT}::FontDatabaseSupport ${QT}::XcbQpa ${QT}::QWaylandIntegrationPlugin)
+ 	endif()
+ endif()
+-target_link_libraries(${BINARY_NAME}-qt ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
++target_link_libraries(${BINARY_NAME}-qt gbabgm ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
+ set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}" PARENT_SCOPE)
+ 
+ if(UNIX AND NOT APPLE)

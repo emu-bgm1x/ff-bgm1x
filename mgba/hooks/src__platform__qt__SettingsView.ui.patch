@@ -1,0 +1,88 @@
+diff --git a/src/platform/qt/SettingsView.ui b/src/platform/qt/SettingsView.ui
+index 6e8e822..12d7b93 100644
+--- a/src/platform/qt/SettingsView.ui
++++ b/src/platform/qt/SettingsView.ui
+@@ -319,14 +319,54 @@
+             </item>
+            </layout>
+           </item>
+-          <item row="7" column="0">
++          <item row="6" column="0">
++           <widget class="QLabel" name="labelSfxVolume">
++            <property name="text">
++             <string notr="true">효과음 볼륨:</string>
++            </property>
++           </widget>
++          </item>
++          <item row="6" column="1">
++           <layout class="QHBoxLayout" name="horizontalLayoutSfxVolume">
++            <item>
++             <widget class="QSlider" name="sfxVolume">
++              <property name="minimumSize">
++               <size>
++                <width>128</width>
++                <height>0</height>
++               </size>
++              </property>
++              <property name="maximum">
++               <number>256</number>
++              </property>
++              <property name="pageStep">
++               <number>16</number>
++              </property>
++              <property name="value">
++               <number>256</number>
++              </property>
++              <property name="orientation">
++               <enum>Qt::Horizontal</enum>
++              </property>
++             </widget>
++            </item>
++            <item>
++             <widget class="QCheckBox" name="sfxMute">
++              <property name="text">
++               <string>Mute</string>
++              </property>
++             </widget>
++            </item>
++           </layout>
++          </item>
++          <item row="8" column="0">
+            <widget class="QLabel" name="label_43">
+             <property name="text">
+              <string>Audio in multiplayer:</string>
+             </property>
+            </widget>
+           </item>
+-          <item row="7" column="1">
++          <item row="8" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioAll">
+             <property name="text">
+              <string>All windows</string>
+@@ -339,7 +379,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="8" column="1">
++          <item row="9" column="1">
+            <widget class="QRadioButton" name="multiplayerAudio1">
+             <property name="text">
+              <string>Player 1 window only</string>
+@@ -349,7 +389,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="9" column="1">
++          <item row="10" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioActive">
+             <property name="text">
+              <string>Currently active player window</string>
+@@ -366,7 +406,7 @@
+             </property>
+            </widget>
+           </item>
+-          <item row="6" column="0" colspan="2">
++          <item row="7" column="0" colspan="2">
+            <widget class="Line" name="line_5">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>

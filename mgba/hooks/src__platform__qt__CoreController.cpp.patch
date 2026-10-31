@@ -1,0 +1,72 @@
+diff --git a/src/platform/qt/CoreController.cpp b/src/platform/qt/CoreController.cpp
+index f6281d5..cc19f00 100644
+--- a/src/platform/qt/CoreController.cpp
++++ b/src/platform/qt/CoreController.cpp
+@@ -44,6 +44,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 	m_threadContext.core = core;
+ 	m_threadContext.userData = this;
+ 	updateROMInfo();
++	m_bgm.reset(new BgmReplacer(core));
+ 
+ #ifdef M_CORE_GBA
+ 	GBASIODolphinCreate(&m_dolphin);
+@@ -91,6 +92,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 
+ 		controller->m_resetActions.clear();
+ 		controller->m_frameCounter = -1;
++		controller->m_bgm->onReset(context->core);
+ 
+ 		if (!controller->m_hwaccel) {
+ 			context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
+@@ -115,6 +117,15 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 		}
+ 		++controller->m_autosaveCounter;
+ 
++		controller->m_bgm->onFrame(context->core);
++		// ff-bgm1x: 연출 곡이 나오는 동안은 배속을 멈춘다 ("연출 중에도 배속" 이 꺼져 있을 때)
++		const bool hold = controller->m_bgm->speedHold();
++		if (hold != controller->m_bgmSpeedHold) {
++			controller->m_bgmSpeedHold = hold;
++			if (controller->m_fastForward || controller->m_fastForwardForced) {
++				controller->updateFastForward();
++			}
++		}
+ 		controller->finishFrame();
+ 	};
+ 
+@@ -288,6 +299,11 @@ void CoreController::loadConfig(ConfigController* config) {
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "volume");
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "mute");
+ 	m_preload = config->getOption("preload").toInt();
++	m_bgm->setEnabled(config->getOption("bgmReplace", 1).toInt());
++	m_bgm->setFastForwardCutscenes(config->getOption("bgmFfCutscenes", 0).toInt());
++	m_bgm->setSfx1x(config->getOption("bgmSfx1x", 1).toInt());
++	m_bgm->setSfxVolume(config->getOption("bgmSfxMute", 0).toInt() ? 0 : config->getOption("bgmSfxVolume", 0x100).toInt());
++	m_bgm->setOutputVolume(config->getOption("volume", 0x100).toInt(), config->getOption("mute", 0).toInt());
+ 
+ 	QSize sizeBefore = screenDimensions();
+ 	m_activeBuffer.resize(256 * 224 * sizeof(color_t));
+@@ -1085,12 +1101,13 @@ void CoreController::setBattleChipFlavor(int flavor) {
+ 
+ void CoreController::setAVStream(mAVStream* stream) {
+ 	Interrupter interrupter(this);
+-	m_threadContext.core->setAVStream(m_threadContext.core, stream);
++	m_threadContext.core->setAVStream(m_threadContext.core, m_bgm->wrapStream(stream, m_threadContext.core));
+ }
+ 
+ void CoreController::clearAVStream() {
+ 	Interrupter interrupter(this);
+ 	m_threadContext.core->setAVStream(m_threadContext.core, nullptr);
++	m_bgm->unwrapStream();
+ }
+ 
+ void CoreController::clearOverride() {
+@@ -1241,7 +1258,7 @@ void CoreController::updatePlayerSave() {
+ void CoreController::updateFastForward() {
+ 	// If we have "Fast forward" checked in the menu (m_fastForwardForced)
+ 	// or are holding the fast forward button (m_fastForward):
+-	if (m_fastForward || m_fastForwardForced) {
++	if ((m_fastForward || m_fastForwardForced) && !m_bgmSpeedHold) {
+ 		if (m_fastForwardVolume >= 0) {
+ 			m_threadContext.core->opts.volume = m_fastForwardVolume;
+ 		}

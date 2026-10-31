@@ -1,0 +1,22 @@
+diff --git a/src/common/settings.h b/src/common/settings.h
+index c83f322..59b8353 100644
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -710,8 +710,16 @@ static inline void ResetTemporaryFrameLimit() {
+     is_temporary_frame_limit = false;
+     temporary_frame_limit = 0;
+ }
++// ff-bgm1x: 연출(연출 음악·동영상) 중에는 배속을 잠시 멈춘다. 오디오 쪽(BgmReplacer)이 켜고 끈다
++extern std::atomic<bool> cutscene_speed_hold;
+ static inline double GetFrameLimit() {
+-    return is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    const double limit =
++        is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    // 0 은 제한 없음. 100% 보다 느리게 맞춰 둔 속도는 그대로 둔다
++    if (cutscene_speed_hold.load(std::memory_order_relaxed) && (limit == 0 || limit > 100)) {
++        return 100;
++    }
++    return limit;
+ }
+ 
+ } // namespace Settings

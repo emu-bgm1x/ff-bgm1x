@@ -1,0 +1,30 @@
+diff --git a/src/frontend/qt_sdl/Config.cpp b/src/frontend/qt_sdl/Config.cpp
+index f767fcc..9e28db8 100644
+--- a/src/frontend/qt_sdl/Config.cpp
++++ b/src/frontend/qt_sdl/Config.cpp
+@@ -64,6 +64,7 @@ DefaultList<int> DefaultInts =
+     {"MP.AudioMode", 1},
+     {"MP.RecvTimeout", 25},
+     {"Instance*.Audio.Volume", 256},
++    {"Instance*.SfxVolume", 256},  // ff-bgm1x
+     {"Mic.InputType", 1},
+     {"Mouse.HideSeconds", 5},
+     {"Instance*.DSi.Battery.Level", 0xF},
+@@ -82,6 +83,7 @@ RangeList IntRanges =
+     {"3D.GL.ScaleFactor", {1, 16}},
+     {"Audio.Interpolation", {0, 4}},
+     {"Instance*.Audio.Volume", {0, 256}},
++    {"Instance*.SfxVolume", {0, 256}},  // ff-bgm1x
+     {"Mic.InputType", {0, micInputType_MAX-1}},
+     {"Instance*.Window*.ScreenRotation", {0, screenRot_MAX-1}},
+     {"Instance*.Window*.ScreenGap", {0, 500}},
+@@ -95,6 +97,9 @@ RangeList IntRanges =
+ 
+ DefaultList<bool> DefaultBools =
+ {
++    {"Instance*.Bgm1x", true},  // ff-bgm1x
++    {"Instance*.FfCutscenes", false},  // ff-bgm1x
++    {"Instance*.MenuSounds1x", true},  // ff-bgm1x
+     {"Screen.Filter", true},
+     {"3D.Soft.Threaded", true},
+     {"3D.GL.HiresCoordinates", true},

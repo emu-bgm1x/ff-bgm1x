@@ -1,0 +1,22 @@
+diff --git a/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h b/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
+index 0dd3844..4b822d7 100644
+--- a/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
++++ b/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
+@@ -57,6 +57,8 @@ static constexpr std::initializer_list<int> hk_general =
+     HK_FrameStep,
+     HK_FastForward,
+     HK_FastForwardToggle,
++    HK_BgmToggle,
++    HK_CutsceneFfToggle,
+     HK_SlowMo,
+     HK_SlowMoToggle,
+     HK_FrameLimitToggle,
+@@ -77,6 +79,8 @@ static constexpr std::initializer_list<const char*> hk_general_labels =
+     "Frame step",
+     "Fast forward",
+     "Toggle fast forward",
++    "Toggle BGM at 1x speed",
++    "Toggle fast forward during cutscenes",
+     "Slow mo",
+     "Toggle slow mo",
+     "Toggle FPS limit",

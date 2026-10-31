@@ -1,0 +1,509 @@
+diff --git a/src/NDS.cpp b/src/NDS.cpp
+index f45051e..aed2ad5 100644
+--- a/src/NDS.cpp
++++ b/src/NDS.cpp
+@@ -3577,6 +3577,7 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
+                 IPCFIFO9.Write(val);
+                 if ((IPCFIFOCnt7 & 0x0400) && wasempty)
+                     SetIRQ(1, IRQ_IPCRecv);
++                if (SoundFifoHook) SoundFifoHook(*this, val);  // ff-bgm1x
+             }
+         }
+         return;
+diff --git a/src/NDS.h b/src/NDS.h
+index 17e656e..761010f 100644
+--- a/src/NDS.h
++++ b/src/NDS.h
+@@ -250,6 +250,9 @@ private:
+ public: // TODO: Encapsulate the rest of these members
+     void* UserData;
+ 
++    // ff-bgm1x: ARM9 이 IPC FIFO 에 값을 쓸 때마다 불린다 (사운드 명령을 지켜보는 용도)
++    void (*SoundFifoHook)(NDS& nds, u32 fifoword) = nullptr;
++
+     int ConsoleType;
+     int CurCPU;
+ 
+diff --git a/src/SPU.cpp b/src/SPU.cpp
+index 3c4aca7..261d6d1 100644
+--- a/src/SPU.cpp
++++ b/src/SPU.cpp
+@@ -335,7 +335,9 @@ void SPU::SetDegrade10Bit(AudioBitDepth depth)
+     switch (depth)
+     {
+     case AudioBitDepth::Auto:
+-        Degrade10Bit = (NDS.ConsoleType == 0);
++        // ff-bgm1x: 처음 켤 때(생성자)는 항상 16비트로 시작하는데, 롬을 다시 불러오면 이 함수가 불려
++        // DS 에서는 10비트로 바뀌었다. 같은 설정에서 소리가 달라지지 않게 자동은 16비트로 맞춘다
++        Degrade10Bit = false;
+         break;
+     case AudioBitDepth::_10Bit:
+         Degrade10Bit = true;
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.cpp b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+index 9a13f4a..c636f09 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.cpp
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+@@ -28,6 +28,7 @@
+ #include "AudioSettingsDialog.h"
+ #include "ui_AudioSettingsDialog.h"
+ #include "main.h"
++#include "BgmReplacer.h"
+ 
+ using namespace melonDS;
+ AudioSettingsDialog* AudioSettingsDialog::currentDlg = nullptr;
+@@ -47,6 +48,7 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+     oldBitDepth = cfg.GetInt("Audio.BitDepth");
+     oldVolume = instcfg.GetInt("Audio.Volume");
+     oldDSiSync = instcfg.GetBool("Audio.DSiVolumeSync");
++    oldSfxVolume = instcfg.GetInt("SfxVolume");
+ 
+     volume = oldVolume;
+     dsiSync = oldDSiSync;
+@@ -67,6 +69,10 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+     ui->slVolume->setValue(oldVolume);
+     ui->slVolume->blockSignals(state);
+ 
++    state = ui->slSfxVolume->blockSignals(true);
++    ui->slSfxVolume->setValue(oldSfxVolume);
++    ui->slSfxVolume->blockSignals(state);
++
+     ui->chkSyncDSiVolume->setChecked(oldDSiSync);
+ 
+     // Setup volume slider accordingly
+@@ -182,6 +188,8 @@ void AudioSettingsDialog::on_AudioSettingsDialog_rejected()
+     cfg.SetInt("Audio.BitDepth", oldBitDepth);
+     instcfg.SetInt("Audio.Volume", oldVolume);
+     instcfg.SetBool("Audio.DSiVolumeSync", oldDSiSync);
++    instcfg.SetInt("SfxVolume", oldSfxVolume);
++    emuInstance->bgmReplacer->setSfxVolume(oldSfxVolume);
+ 
+     emit updateAudioVolume(oldVolume, oldDSiSync);
+     emit updateAudioSettings();
+@@ -227,6 +235,12 @@ void AudioSettingsDialog::on_slVolume_valueChanged(int val)
+     emit updateAudioVolume(val, dsiSync);
+ }
+ 
++void AudioSettingsDialog::on_slSfxVolume_valueChanged(int val)
++{
++    emuInstance->getLocalConfig().SetInt("SfxVolume", val);
++    emuInstance->bgmReplacer->setSfxVolume(val);
++}
++
+ void AudioSettingsDialog::on_chkSyncDSiVolume_clicked(bool checked)
+ {
+     dsiSync = checked;
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.h b/src/frontend/qt_sdl/AudioSettingsDialog.h
+index 946e47f..b4789b6 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.h
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.h
+@@ -67,6 +67,7 @@ private slots:
+     void on_cbInterpolation_currentIndexChanged(int idx);
+     void on_cbBitDepth_currentIndexChanged(int idx);
+     void on_slVolume_valueChanged(int val);
++    void on_slSfxVolume_valueChanged(int val);
+     void on_chkSyncDSiVolume_clicked(bool checked);
+     void onChangeMicMode(int mode);
+     void on_btnMicWavBrowse_clicked();
+@@ -79,6 +80,7 @@ private:
+     int oldInterp;
+     int oldBitDepth;
+     int oldVolume;
++    int oldSfxVolume;
+     bool oldDSiSync;
+     QButtonGroup* grpMicMode;
+ 
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.ui b/src/frontend/qt_sdl/AudioSettingsDialog.ui
+index 380197e..a18c62c 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.ui
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.ui
+@@ -59,7 +59,30 @@
+         </property>
+        </widget>
+       </item>
++      <item row="3" column="0">
++       <widget class="QLabel" name="lblSfxVolume">
++        <property name="text">
++         <string>Sound effect volume:</string>
++        </property>
++       </widget>
++      </item>
+       <item row="3" column="1">
++       <widget class="QSlider" name="slSfxVolume">
++        <property name="whatsThis">
++         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Controls the volume of the sound effects played at 1x speed (Keep sound effects at 1x speed).&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
++        </property>
++        <property name="maximum">
++         <number>256</number>
++        </property>
++        <property name="pageStep">
++         <number>16</number>
++        </property>
++        <property name="orientation">
++         <enum>Qt::Horizontal</enum>
++        </property>
++       </widget>
++      </item>
++      <item row="4" column="1">
+         <widget class="QCheckBox" name="chkSyncDSiVolume">
+          <property name="whatsThis">
+           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Synchronizes the output volume with the DSi hardware volume.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+@@ -199,6 +222,7 @@
+   <tabstop>cbInterpolation</tabstop>
+   <tabstop>cbBitDepth</tabstop>
+   <tabstop>slVolume</tabstop>
++  <tabstop>slSfxVolume</tabstop>
+   <tabstop>chkSyncDSiVolume</tabstop>
+   <tabstop>rbMicNone</tabstop>
+   <tabstop>rbMicExternal</tabstop>
+diff --git a/src/frontend/qt_sdl/CMakeLists.txt b/src/frontend/qt_sdl/CMakeLists.txt
+index db2d413..47ec89c 100644
+--- a/src/frontend/qt_sdl/CMakeLists.txt
++++ b/src/frontend/qt_sdl/CMakeLists.txt
+@@ -9,6 +9,8 @@ set(SOURCES_QT_SDL
+     Window.cpp
+     EmuInstance.cpp
+     EmuInstanceAudio.cpp
++    BgmReplacer.cpp
++    NitroSynth.cpp
+     EmuInstanceInput.cpp
+     EmuThread.cpp
+     CheatImportDialog.cpp
+diff --git a/src/frontend/qt_sdl/Config.cpp b/src/frontend/qt_sdl/Config.cpp
+index f767fcc..9e28db8 100644
+--- a/src/frontend/qt_sdl/Config.cpp
++++ b/src/frontend/qt_sdl/Config.cpp
+@@ -64,6 +64,7 @@ DefaultList<int> DefaultInts =
+     {"MP.AudioMode", 1},
+     {"MP.RecvTimeout", 25},
+     {"Instance*.Audio.Volume", 256},
++    {"Instance*.SfxVolume", 256},  // ff-bgm1x
+     {"Mic.InputType", 1},
+     {"Mouse.HideSeconds", 5},
+     {"Instance*.DSi.Battery.Level", 0xF},
+@@ -82,6 +83,7 @@ RangeList IntRanges =
+     {"3D.GL.ScaleFactor", {1, 16}},
+     {"Audio.Interpolation", {0, 4}},
+     {"Instance*.Audio.Volume", {0, 256}},
++    {"Instance*.SfxVolume", {0, 256}},  // ff-bgm1x
+     {"Mic.InputType", {0, micInputType_MAX-1}},
+     {"Instance*.Window*.ScreenRotation", {0, screenRot_MAX-1}},
+     {"Instance*.Window*.ScreenGap", {0, 500}},
+@@ -95,6 +97,9 @@ RangeList IntRanges =
+ 
+ DefaultList<bool> DefaultBools =
+ {
++    {"Instance*.Bgm1x", true},  // ff-bgm1x
++    {"Instance*.FfCutscenes", false},  // ff-bgm1x
++    {"Instance*.MenuSounds1x", true},  // ff-bgm1x
+     {"Screen.Filter", true},
+     {"3D.Soft.Threaded", true},
+     {"3D.GL.HiresCoordinates", true},
+diff --git a/src/frontend/qt_sdl/EmuInstance.cpp b/src/frontend/qt_sdl/EmuInstance.cpp
+index d6d662f..57f614c 100755
+--- a/src/frontend/qt_sdl/EmuInstance.cpp
++++ b/src/frontend/qt_sdl/EmuInstance.cpp
+@@ -35,6 +35,7 @@
+ #include "ArchiveUtil.h"
+ #endif
+ #include "EmuInstance.h"
++#include "BgmReplacer.h"
+ #include "Config.h"
+ #include "Platform.h"
+ #include "Net.h"
+@@ -124,6 +125,13 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
+     nds = nullptr;
+     //updateConsole();
+ 
++    // ff-bgm1x: 오디오 콜백이 쓰므로 오디오보다 먼저 만든다
++    bgmReplacer = new BgmReplacer(this);
++    bgmReplacer->setEnabled(localCfg.GetBool("Bgm1x"));
++    bgmReplacer->setFastForwardCutscenes(localCfg.GetBool("FfCutscenes"));
++    bgmReplacer->setSfx1x(localCfg.GetBool("MenuSounds1x"));
++    bgmReplacer->setSfxVolume(localCfg.GetInt("SfxVolume"));
++
+     audioInit();
+     inputInit();
+ 
+@@ -165,6 +173,9 @@ EmuInstance::~EmuInstance()
+     audioDeInit();
+     inputDeInit();
+ 
++    delete bgmReplacer;  // ff-bgm1x
++    bgmReplacer = nullptr;
++
+     if (nds)
+     {
+         saveRTCData();
+@@ -769,6 +780,7 @@ bool EmuInstance::loadState(const std::string& filename)
+     }
+ 
+     savestateLoaded = true;
++    if (bgmReplacer) bgmReplacer->onStateLoaded();  // ff-bgm1x
+ 
+     return true;
+ }
+diff --git a/src/frontend/qt_sdl/EmuInstance.h b/src/frontend/qt_sdl/EmuInstance.h
+index f143496..2c67da9 100755
+--- a/src/frontend/qt_sdl/EmuInstance.h
++++ b/src/frontend/qt_sdl/EmuInstance.h
+@@ -55,6 +55,8 @@ enum
+     HK_GuitarGripRed,
+     HK_GuitarGripYellow,
+     HK_GuitarGripBlue,
++    HK_BgmToggle,  // ff-bgm1x: BGM 1배속 유지 켜기/끄기
++    HK_CutsceneFfToggle,  // ff-bgm1x: 연출 중에도 배속 켜기/끄기
+     HK_MAX
+ };
+ 
+@@ -80,6 +82,8 @@ enum
+ bool isRightModKey(QKeyEvent* event);
+ int getEventKeyVal(QKeyEvent* event);
+ 
++class BgmReplacer;
++
+ class EmuInstance
+ {
+ public:
+@@ -372,8 +376,12 @@ private:
+     bool isTouching;
+     melonDS::u16 touchX, touchY;
+ 
++    BgmReplacer* bgmReplacer = nullptr;  // ff-bgm1x
++
+     friend class EmuThread;
+     friend class MainWindow;
++    friend class BgmReplacer;
++    friend class AudioSettingsDialog;  // ff-bgm1x: 효과음 볼륨
+ };
+ 
+ #endif //EMUINSTANCE_H
+diff --git a/src/frontend/qt_sdl/EmuInstanceAudio.cpp b/src/frontend/qt_sdl/EmuInstanceAudio.cpp
+index 40656de..9e6947d 100644
+--- a/src/frontend/qt_sdl/EmuInstanceAudio.cpp
++++ b/src/frontend/qt_sdl/EmuInstanceAudio.cpp
+@@ -21,6 +21,7 @@
+ #include "SPU.h"
+ #include "Platform.h"
+ #include "main.h"
++#include "BgmReplacer.h"
+ 
+ #include "mic_blow.h"
+ 
+@@ -167,6 +168,8 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
+     if ((num_in < 1) || inst->audioMuted)
+     {
+         memset(stream, 0, len*sizeof(s16)*2);
++        // ff-bgm1x: 원본 코어가 소리를 못 냈어도 자체 재생기의 BGM 은 이어서 낸다
++        if (!inst->audioMuted) inst->bgmReplacer->mixInto((s16*) stream, len, inst->audioVolume, len);
+         return;
+     }
+ 
+@@ -185,6 +188,11 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
+         for (int i = num_in; i < len_in-margin; i++)
+             ((u32*)stream)[i] = ((u32*)stream)[last];
+     }
++
++    // ff-bgm1x: 자체 재생기가 1배속으로 만든 BGM 을 더한다. 위에서 새로 채우지 않은 뒷부분에는
++    // 지난번에 더한 BGM 이 남아 있으므로, 어디까지 새로 채웠는지 알려 준다
++    int filled = (num_in < len_in-margin) ? (len_in-margin) : num_in;
++    inst->bgmReplacer->mixInto((s16*) stream, len, inst->audioVolume, std::clamp(filled, 0, len));
+ }
+ 
+ 
+diff --git a/src/frontend/qt_sdl/EmuInstanceInput.cpp b/src/frontend/qt_sdl/EmuInstanceInput.cpp
+index 866eb29..d6b13a0 100644
+--- a/src/frontend/qt_sdl/EmuInstanceInput.cpp
++++ b/src/frontend/qt_sdl/EmuInstanceInput.cpp
+@@ -66,7 +66,9 @@ const char* EmuInstance::hotkeyNames[HK_MAX] =
+     "HK_GuitarGripGreen",
+     "HK_GuitarGripRed",
+     "HK_GuitarGripYellow",
+-    "HK_GuitarGripBlue"
++    "HK_GuitarGripBlue",
++    "HK_BgmToggle",
++    "HK_CutsceneFfToggle"
+ };
+ 
+ std::shared_ptr<SDL_mutex> EmuInstance::joyMutexGlobal = nullptr;
+diff --git a/src/frontend/qt_sdl/EmuThread.cpp b/src/frontend/qt_sdl/EmuThread.cpp
+index e754d98..8a2f706 100755
+--- a/src/frontend/qt_sdl/EmuThread.cpp
++++ b/src/frontend/qt_sdl/EmuThread.cpp
+@@ -53,6 +53,7 @@
+ #include "GPU3D_Compute.h"
+ 
+ #include "Savestate.h"
++#include "BgmReplacer.h"
+ 
+ #include "EmuInstance.h"
+ 
+@@ -307,6 +308,7 @@ void EmuThread::run()
+             else
+             {
+                 nlines = emuInstance->nds->RunFrame();
++                emuInstance->bgmReplacer->afterMainFrame();  // ff-bgm1x
+             }
+ 
+             if (emuInstance->ndsSave)
+@@ -343,8 +345,32 @@ void EmuThread::run()
+             
+             if (emuInstance->hotkeyPressed(HK_FastForwardToggle)) emuInstance->fastForwardToggled = !emuInstance->fastForwardToggled;
+             if (emuInstance->hotkeyPressed(HK_SlowMoToggle)) emuInstance->slowmoToggled = !emuInstance->slowmoToggled;
++            if (emuInstance->hotkeyPressed(HK_BgmToggle))
++            {
++                // ff-bgm1x: BGM 1배속 유지 켜기/끄기 (다음 곡부터 적용)
++                const bool on = !emuInstance->bgmReplacer->isEnabled();
++                emuInstance->bgmReplacer->setEnabled(on);
++                emuInstance->getLocalConfig().SetBool("Bgm1x", on);
++                Config::Save();
++                emuInstance->osdAddMessage(0, on ? "BGM at 1x speed: on" : "BGM at 1x speed: off");
++            }
++
++            if (emuInstance->hotkeyPressed(HK_CutsceneFfToggle))
++            {
++                // ff-bgm1x: 연출 중에도 배속 켜기/끄기
++                const bool on = !emuInstance->bgmReplacer->fastForwardCutscenes();
++                emuInstance->bgmReplacer->setFastForwardCutscenes(on);
++                emuInstance->getLocalConfig().SetBool("FfCutscenes", on);
++                Config::Save();
++                emuInstance->osdAddMessage(0, on ? "Fast forward during cutscenes: on" : "Fast forward during cutscenes: off");
++            }
++
++            // ff-bgm1x: 연출 중이고 "연출 중에도 배속" 이 꺼져 있으면 배속을 걸어도 1배속으로 돈다
++            const bool cutsceneHold = emuInstance->bgmReplacer->isEnabled() &&
++                                      !emuInstance->bgmReplacer->fastForwardCutscenes() &&
++                                      emuInstance->bgmReplacer->cutsceneActive();
+ 
+-            bool enablefastforward = emuInstance->hotkeyDown(HK_FastForward) | emuInstance->fastForwardToggled;
++            bool enablefastforward = (emuInstance->hotkeyDown(HK_FastForward) | emuInstance->fastForwardToggled) && !cutsceneHold;
+             bool enableslowmo = emuInstance->hotkeyDown(HK_SlowMo) | emuInstance->slowmoToggled;
+ 
+             if (useOpenGL)
+@@ -365,7 +391,7 @@ void EmuThread::run()
+ 
+             if (slowmo) emuInstance->curFPS = emuInstance->slowmoFPS;
+             else if (fastforward) emuInstance->curFPS = emuInstance->fastForwardFPS;
+-            else if (!emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
++            else if (!cutsceneHold && !emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
+             else emuInstance->curFPS = emuInstance->targetFPS;
+ 
+             if (emuInstance->audioDSiVolumeSync && emuInstance->nds->ConsoleType == 1)
+@@ -388,7 +414,7 @@ void EmuThread::run()
+ 
+             if (frametimeStep < 0.001) frametimeStep = 0.001;
+ 
+-            if (emuInstance->doLimitFPS)
++            if (emuInstance->doLimitFPS || cutsceneHold)
+             {
+                 double curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+ 
+diff --git a/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h b/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
+index 0dd3844..4b822d7 100644
+--- a/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
++++ b/src/frontend/qt_sdl/InputConfig/InputConfigDialog.h
+@@ -57,6 +57,8 @@ static constexpr std::initializer_list<int> hk_general =
+     HK_FrameStep,
+     HK_FastForward,
+     HK_FastForwardToggle,
++    HK_BgmToggle,
++    HK_CutsceneFfToggle,
+     HK_SlowMo,
+     HK_SlowMoToggle,
+     HK_FrameLimitToggle,
+@@ -77,6 +79,8 @@ static constexpr std::initializer_list<const char*> hk_general_labels =
+     "Frame step",
+     "Fast forward",
+     "Toggle fast forward",
++    "Toggle BGM at 1x speed",
++    "Toggle fast forward during cutscenes",
+     "Slow mo",
+     "Toggle slow mo",
+     "Toggle FPS limit",
+diff --git a/src/frontend/qt_sdl/Window.cpp b/src/frontend/qt_sdl/Window.cpp
+index 9b3ab95..253088b 100755
+--- a/src/frontend/qt_sdl/Window.cpp
++++ b/src/frontend/qt_sdl/Window.cpp
+@@ -77,6 +77,7 @@
+ //#include "main_shaders.h"
+ 
+ #include "EmuInstance.h"
++#include "BgmReplacer.h"  // ff-bgm1x
+ #include "ArchiveUtil.h"
+ #include "CameraManager.h"
+ #include "Window.h"
+@@ -669,6 +670,40 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
+             actAudioSync = menu->addAction("Audio sync");
+             actAudioSync->setCheckable(true);
+             connect(actAudioSync, &QAction::triggered, this, &MainWindow::onChangeAudioSync);
++
++            // ff-bgm1x
++            menu->addSeparator();
++            actBgm1x = menu->addAction("Keep BGM at 1x speed");
++            actBgm1x->setCheckable(true);
++            connect(actBgm1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->requestEnabled(checked);
++                emuInstance->getLocalConfig().SetBool("Bgm1x", checked);
++                Config::Save();
++            });
++            actFfCutscenes = menu->addAction("Fast forward during cutscenes");
++            actFfCutscenes->setCheckable(true);
++            connect(actFfCutscenes, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setFastForwardCutscenes(checked);
++                emuInstance->getLocalConfig().SetBool("FfCutscenes", checked);
++                Config::Save();
++            });
++            actMenuSounds1x = menu->addAction("Keep sound effects at 1x speed");
++            actMenuSounds1x->setCheckable(true);
++            connect(actMenuSounds1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setSfx1x(checked);
++                emuInstance->getLocalConfig().SetBool("MenuSounds1x", checked);
++                Config::Save();
++            });
++            // 단축키로 바꾼 값도 메뉴를 열 때 반영한다
++            connect(menu, &QMenu::aboutToShow, this, [this]
++            {
++                actBgm1x->setChecked(emuInstance->bgmReplacer->wantEnabled());
++                actFfCutscenes->setChecked(emuInstance->bgmReplacer->fastForwardCutscenes());
++                actMenuSounds1x->setChecked(emuInstance->bgmReplacer->sfxAt1x());
++            });
+         }
+         {
+             QMenu * menu = menubar->addMenu("Help");
+diff --git a/src/frontend/qt_sdl/Window.h b/src/frontend/qt_sdl/Window.h
+index 678be7c..f9ad72b 100755
+--- a/src/frontend/qt_sdl/Window.h
++++ b/src/frontend/qt_sdl/Window.h
+@@ -351,6 +351,9 @@ public:
+     QAction* actShowOSD;
+     QAction* actLimitFramerate;
+     QAction* actAudioSync;
++    QAction* actBgm1x;  // ff-bgm1x
++    QAction* actFfCutscenes;  // ff-bgm1x
++    QAction* actMenuSounds1x;  // ff-bgm1x
+ 
+     QAction* actAbout;
+ };
+diff --git a/src/frontend/qt_sdl/main.cpp b/src/frontend/qt_sdl/main.cpp
+index f5bb3c9..9054aab 100644
+--- a/src/frontend/qt_sdl/main.cpp
++++ b/src/frontend/qt_sdl/main.cpp
+@@ -288,7 +288,16 @@ int main(int argc, char** argv)
+     if (argc != 0 && (!strcasecmp(argv[0], "derpDS") || !strcasecmp(argv[0], "./derpDS")))
+         printf("did you just call me a derp???\n");
+ 
++#if defined(__WIN32__)
++    // ff-bgm1x: SDL 의 시작 코드가 명령줄을 UTF-8 로 바꿔 넘기는데, Qt 는 바뀐 argv 를 시스템 코드페이지로
++    // 읽어서 한글 같은 비ASCII 경로가 깨진다. C 런타임의 원래 argv 를 넘기면 Qt 가 argv 가 바뀌지 않았다고
++    // 보고 유니코드 명령줄(GetCommandLineW)을 직접 읽는다.
++    int qtArgc = __argv ? __argc : argc;
++    char** qtArgv = __argv ? __argv : argv;
++    MelonApplication melon(qtArgc, qtArgv);
++#else
+     MelonApplication melon(argc, argv);
++#endif
+     pathInit();
+ 
+     CLI::CommandLineOptions* options = CLI::ManageArgs(melon);

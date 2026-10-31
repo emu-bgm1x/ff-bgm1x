@@ -1,0 +1,13 @@
+diff --git a/src/frontend/qt_sdl/CMakeLists.txt b/src/frontend/qt_sdl/CMakeLists.txt
+index db2d413..47ec89c 100644
+--- a/src/frontend/qt_sdl/CMakeLists.txt
++++ b/src/frontend/qt_sdl/CMakeLists.txt
+@@ -9,6 +9,8 @@ set(SOURCES_QT_SDL
+     Window.cpp
+     EmuInstance.cpp
+     EmuInstanceAudio.cpp
++    BgmReplacer.cpp
++    NitroSynth.cpp
+     EmuInstanceInput.cpp
+     EmuThread.cpp
+     CheatImportDialog.cpp

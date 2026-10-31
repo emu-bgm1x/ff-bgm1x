@@ -1,0 +1,17 @@
+diff --git a/src/audio_core/CMakeLists.txt b/src/audio_core/CMakeLists.txt
+index f6f8bf9..e41af0f 100644
+--- a/src/audio_core/CMakeLists.txt
++++ b/src/audio_core/CMakeLists.txt
+@@ -18,6 +18,12 @@ add_library(audio_core STATIC EXCLUDE_FROM_ALL
+     hle/shared_memory.h
+     hle/source.cpp
+     hle/source.h
++    hle/bgm_replacer.cpp
++    hle/bgm_replacer.h
++    hle/ctr_synth.cpp
++    hle/ctr_synth.h
++    hle/seq_tracker.cpp
++    hle/seq_tracker.h
+     lle/lle.cpp
+     lle/lle.h
+     input.h

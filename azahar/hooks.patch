@@ -1,0 +1,534 @@
+diff --git a/src/audio_core/CMakeLists.txt b/src/audio_core/CMakeLists.txt
+index f6f8bf9..e41af0f 100644
+--- a/src/audio_core/CMakeLists.txt
++++ b/src/audio_core/CMakeLists.txt
+@@ -18,6 +18,12 @@ add_library(audio_core STATIC EXCLUDE_FROM_ALL
+     hle/shared_memory.h
+     hle/source.cpp
+     hle/source.h
++    hle/bgm_replacer.cpp
++    hle/bgm_replacer.h
++    hle/ctr_synth.cpp
++    hle/ctr_synth.h
++    hle/seq_tracker.cpp
++    hle/seq_tracker.h
+     lle/lle.cpp
+     lle/lle.h
+     input.h
+diff --git a/src/audio_core/dsp_interface.cpp b/src/audio_core/dsp_interface.cpp
+index e0ce087..21d72bf 100644
+--- a/src/audio_core/dsp_interface.cpp
++++ b/src/audio_core/dsp_interface.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <cstddef>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+ #include "common/assert.h"
+@@ -107,6 +108,10 @@ void DspInterface::OutputCallback(s16* buffer, std::size_t num_frames) {
+         std::memcpy(buffer + 2 * i, &last_frame[0], 2 * sizeof(s16));
+     }
+ 
++    // ff-bgm1x: 오디오 장치가 요청한 전체 분량만큼 1배속 BGM 을 섞는다.
++    // 에뮬레이션이 성능 때문에 멈칫해 원본 소리가 비어도 BGM 은 끊기지 않는다 (일시정지는 따로 처리).
++    HLE::BgmReplacer::Instance().Mix(buffer, num_frames, sink->GetNativeSampleRate());
++
+     // Implementation of the hardware volume slider
+     // A cubic curve is used to approximate a linear change in human-perceived loudness
+     const float linear_volume = std::clamp(Settings::Volume(), 0.0f, 1.0f);
+diff --git a/src/audio_core/hle/aac_decoder.cpp b/src/audio_core/hle/aac_decoder.cpp
+index 33682a9..555a1b9 100644
+--- a/src/audio_core/hle/aac_decoder.cpp
++++ b/src/audio_core/hle/aac_decoder.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <neaacdec.h>
+ #include "audio_core/hle/aac_decoder.h"
++#include "audio_core/hle/bgm_replacer.h"
+ 
+ namespace AudioCore::HLE {
+ 
+@@ -91,6 +92,9 @@ BinaryMessage AACDecoder::Decode(const BinaryMessage& request) {
+     }
+     u8* data = memory.GetFCRAMPointer(request.decode_aac_request.src_addr - Memory::FCRAM_PADDR);
+     u32 data_len = request.decode_aac_request.size;
++    // ff-bgm1x: 어떤 BGM 파일의 몇 번째 프레임인지, 어디로 풀리는지 알려 준다
++    BgmReplacer::Instance().OnAacDecode(data, data_len, request.decode_aac_request.dst_addr_ch0,
++                                        request.decode_aac_request.dst_addr_ch1);
+ 
+     if (!decoder_initialized) {
+         unsigned long sample_rate;
+diff --git a/src/audio_core/hle/hle.cpp b/src/audio_core/hle/hle.cpp
+index 05ff9d7..7e915f4 100644
+--- a/src/audio_core/hle/hle.cpp
++++ b/src/audio_core/hle/hle.cpp
+@@ -15,6 +15,7 @@
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/decoder.h"
+ #include "audio_core/hle/hle.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/mixers.h"
+ #include "audio_core/hle/shared_memory.h"
+ #include "audio_core/hle/source.h"
+@@ -303,6 +304,7 @@ void DspHle::Impl::Initialize() {
+     // is clean and consistent every time the HW is initialized,
+     // but what is exactly reset needs to be figured out.
+     dsp_memory->raw_memory.fill(0);
++    HLE::BgmReplacer::Instance().Reset();  // ff-bgm1x
+     mixers.Reset();
+     for (auto& s : sources) {
+         s.Reset();
+@@ -412,6 +414,7 @@ HLE::SharedMemory& DspHle::Impl::WriteRegion() {
+ }
+ 
+ StereoFrame16 DspHle::Impl::GenerateCurrentFrame() {
++    HLE::BgmReplacer::Instance().OnDspFrame();  // ff-bgm1x: 게임 시간 기준
+     HLE::SharedMemory& read = ReadRegion();
+     HLE::SharedMemory& write = WriteRegion();
+ 
+diff --git a/src/audio_core/hle/mixers.cpp b/src/audio_core/hle/mixers.cpp
+index 03dab65..16900fd 100644
+--- a/src/audio_core/hle/mixers.cpp
++++ b/src/audio_core/hle/mixers.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <algorithm>
+ #include <cstddef>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/mixers.h"
+ #include "common/assert.h"
+ #include "common/logging/log.h"
+@@ -75,6 +76,9 @@ void Mixers::ParseConfig(DspConfiguration& config) {
+         LOG_TRACE(Audio_DSP, "mixers aux_return_volume[1] = {}", config.aux_return_volume[1]);
+     }
+ 
++    // ff-bgm1x: 대체 재생 BGM 도 같은 믹서 볼륨을 쓴다
++    BgmReplacer::Instance().UpdateMixerVolumes(state.intermediate_mixer_volume);
++
+     if (config.output_format_dirty) {
+         config.output_format_dirty.Assign(0);
+         state.output_format = config.output_format;
+diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
+index 4728526..28549bd 100755
+--- a/src/audio_core/hle/source.cpp
++++ b/src/audio_core/hle/source.cpp
+@@ -5,6 +5,7 @@
+ #include <algorithm>
+ #include <array>
+ #include "audio_core/codec.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/source.h"
+ #include "audio_core/interpolate.h"
+@@ -28,6 +29,20 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
+     if (!state.enabled) {
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        if (bgm_replaced) {
++            bgm_replaced = false;
++            BgmReplacer::Instance().OnSourceIdle(source_id);
++        }
++        return;
++    }
++
++    // ff-bgm1x: 1배속으로 대체 재생 중인 BGM 음성은 원본 믹스에 넣지 않고 볼륨만 알려 준다
++    if (bgm_replaced && BgmReplacer::Instance().IsEnabled()) {
++        if (intermediate_mix_id == 0) {
++            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
++        }
+         state.gain_ramp_start.at(intermediate_mix_id) = gains;
+         state.gain_ramp_active.at(intermediate_mix_id) = false;
+         return;
+@@ -64,6 +79,10 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+ void Source::Reset() {
+     current_frame.fill({});
+     state = {};
++    if (bgm_replaced) {
++        bgm_replaced = false;
++        BgmReplacer::Instance().OnSourceIdle(source_id);
++    }
+ }
+ 
+ void Source::Sleep() {
+@@ -462,13 +481,28 @@ bool Source::DequeueBuffer() {
+         const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
+         switch (buf.format) {
+         case Format::PCM8:
++            if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM8(num_channels, memory, buf.length);
+             break;
+         case Format::PCM16:
++            // ff-bgm1x: AAC 디코더가 BGM 을 풀어 놓은 버퍼인지 확인
++            if (BgmReplacer::Instance().OnPcmBuffer(source_id, buf.physical_address, buf.length,
++                                                    num_channels)) {
++                bgm_replaced = true;
++            } else if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM16(num_channels, memory, buf.length);
+             break;
+         case Format::ADPCM:
+             DEBUG_ASSERT(num_channels == 1);
++            // ff-bgm1x: BGM 스트림 버퍼인지 확인
++            bgm_replaced = BgmReplacer::Instance().OnAdpcmBuffer(source_id, state.adpcm_coeffs,
++                                                                 memory, buf.length);
+             state.current_buffer =
+                 Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
+             break;
+diff --git a/src/audio_core/hle/source.h b/src/audio_core/hle/source.h
+index 1223f68..6178a46 100755
+--- a/src/audio_core/hle/source.h
++++ b/src/audio_core/hle/source.h
+@@ -69,6 +69,7 @@ public:
+ 
+ private:
+     const std::size_t source_id;
++    bool bgm_replaced = false;  // ff-bgm1x: 이 음성을 1배속 대체 재생 중
+     Memory::MemorySystem* memory_system{};
+     StereoFrame16 current_frame;
+     StereoFrame16 backup_frame; // TODO(PabloMK7): Check if we actually need this
+diff --git a/src/citra_qt/bootmanager.h b/src/citra_qt/bootmanager.h
+index 9bd922e..d4f9bfa 100644
+--- a/src/citra_qt/bootmanager.h
++++ b/src/citra_qt/bootmanager.h
+@@ -4,6 +4,7 @@
+ 
+ #pragma once
+ 
++#include "audio_core/hle/bgm_replacer.h"
+ #include <atomic>
+ #include <condition_variable>
+ #include <memory>
+@@ -54,6 +55,7 @@ public:
+      * @note This function is thread-safe
+      */
+     void SetRunning(bool running) {
++        AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(running);  // ff-bgm1x
+         std::unique_lock lock{running_mutex};
+         this->running = running;
+         lock.unlock();
+diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
+index f75e16f..ae8aedf 100644
+--- a/src/citra_qt/citra_qt.cpp
++++ b/src/citra_qt/citra_qt.cpp
+@@ -45,6 +45,8 @@
+ #include "citra_qt/camera/qt_multimedia_camera.h"
+ #include "citra_qt/camera/still_image_camera.h"
+ #include "citra_qt/citra_qt.h"
++#include "audio_core/hle/bgm_replacer.h"
++#include <QSettings>
+ #include "citra_qt/compatibility_list.h"
+ #include "citra_qt/configuration/config.h"
+ #include "citra_qt/configuration/configure_dialog.h"
+@@ -951,6 +953,22 @@ void GMainWindow::InitializeHotkeys() {
+     connect_shortcut(QStringLiteral("Toggle Turbo Mode"),
+                      [&] { GMainWindow::SetTurboEnabled(!GMainWindow::IsTurboEnabled()); });
+ 
++    // ff-bgm1x: 메뉴의 체크 항목을 단축키로 켜고 끈다 (설정 저장은 메뉴 항목이 한다)
++    for (const auto& [hotkey, object] :
++         {std::pair{QStringLiteral("Toggle BGM at 1x Speed"), QStringLiteral("ff_bgm1x_1x")},
++          std::pair{QStringLiteral("Toggle Fast Forward During Cutscenes"), QStringLiteral("ff_bgm1x_ff_cutscenes")},
++          std::pair{QStringLiteral("Toggle Voices at 1x Speed"), QStringLiteral("ff_bgm1x_voices_1x")}}) {
++        const QString name = object;
++        connect_shortcut(hotkey, [this, name] {
++            if (QAction* action = findChild<QAction*>(name)) {
++                action->toggle();
++                statusBar()->showMessage(
++                    QStringLiteral("%1: %2").arg(action->text(), action->isChecked() ? tr("켜짐") : tr("꺼짐")),
++                    3000);
++            }
++        });
++    }
++
+     connect_shortcut(QStringLiteral("Increase Speed Limit"), [&] { AdjustSpeedLimit(true); });
+     connect_shortcut(QStringLiteral("Decrease Speed Limit"), [&] { AdjustSpeedLimit(false); });
+ 
+@@ -1115,6 +1133,55 @@ void GMainWindow::ConnectWidgetEvents() {
+ }
+ 
+ void GMainWindow::ConnectMenuEvents() {
++    // ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생 (기본 켜짐, 설정 유지)
++    {
++        QSettings bgm_settings(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        const bool bgm_on = bgm_settings.value(QStringLiteral("bgm_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetEnabled(bgm_on);
++        QAction* bgm_action = new QAction(tr("BGM 1배속 유지 (배속 중)"), this);
++        bgm_action->setObjectName(QStringLiteral("ff_bgm1x_1x"));
++        bgm_action->setCheckable(true);
++        bgm_action->setChecked(bgm_on);
++        ui->menu_Emulation->addSeparator();
++        ui->menu_Emulation->addAction(bgm_action);
++        connect(bgm_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("bgm_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetEnabled(checked);
++        });
++
++        // 연출(연출 음악이 나오는 장면) 중에도 배속할지 (기본 꺼짐: 연출은 1배속으로 본다)
++        const bool ff_cutscenes = bgm_settings.value(QStringLiteral("ff_cutscenes"), false).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(ff_cutscenes);
++        QAction* cutscene_action = new QAction(tr("연출 중에도 배속"), this);
++        cutscene_action->setObjectName(QStringLiteral("ff_bgm1x_ff_cutscenes"));
++        cutscene_action->setCheckable(true);
++        cutscene_action->setChecked(ff_cutscenes);
++        ui->menu_Emulation->addAction(cutscene_action);
++        connect(cutscene_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("ff_cutscenes"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(checked);
++        });
++
++        // 대사처럼 BGM 위에 겹쳐 트는 소리를 1배속으로 낼지 (기본 켜짐)
++        const bool voices_1x = bgm_settings.value(QStringLiteral("voices_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(voices_1x);
++        // 효과음 볼륨 (설정 > 오디오 에서 바꾼다)
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(
++            bgm_settings.value(QStringLiteral("sfx_volume"), 100).toInt() / 100.0f);
++        QAction* voices_action = new QAction(tr("대사·효과음 1배속"), this);
++        voices_action->setObjectName(QStringLiteral("ff_bgm1x_voices_1x"));
++        voices_action->setCheckable(true);
++        voices_action->setChecked(voices_1x);
++        ui->menu_Emulation->addAction(voices_action);
++        connect(voices_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("voices_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(checked);
++        });
++    }
++
+     const auto connect_menu = [&](QAction* action, const auto& event_fn,
+                                   QAction::MenuRole role = QAction::NoRole) {
+         action->setMenuRole(role);
+diff --git a/src/citra_qt/configuration/config.cpp b/src/citra_qt/configuration/config.cpp
+index 6f2b59b..5e2aea6 100644
+--- a/src/citra_qt/configuration/config.cpp
++++ b/src/citra_qt/configuration/config.cpp
+@@ -99,6 +99,10 @@ const std::vector<UISettings::Shortcut> QtConfig::default_hotkeys{ {
+      {QStringLiteral("Toggle Status Bar"),        QStringLiteral("Main Window"), {QStringLiteral("Ctrl+S"), QStringLiteral(""), Qt::ApplicationShortcut}},
+      {QStringLiteral("Toggle Texture Dumping"),   QStringLiteral("Main Window"), {QStringLiteral(""),       QStringLiteral(""), Qt::ApplicationShortcut}},
+      {QStringLiteral("Toggle Turbo Mode"),        QStringLiteral("Main Window"), {QStringLiteral(""),      QStringLiteral(""), Qt::ApplicationShortcut}},
++     // ff-bgm1x: 기본 키 없음
++     {QStringLiteral("Toggle BGM at 1x Speed"),   QStringLiteral("Main Window"), {QStringLiteral(""),      QStringLiteral(""), Qt::ApplicationShortcut}},
++     {QStringLiteral("Toggle Fast Forward During Cutscenes"), QStringLiteral("Main Window"), {QStringLiteral(""), QStringLiteral(""), Qt::ApplicationShortcut}},
++     {QStringLiteral("Toggle Voices at 1x Speed"), QStringLiteral("Main Window"), {QStringLiteral(""),     QStringLiteral(""), Qt::ApplicationShortcut}},
+     } };
+ // clang-format on
+ 
+diff --git a/src/citra_qt/configuration/configure_audio.cpp b/src/citra_qt/configuration/configure_audio.cpp
+index d67f84a..4b86046 100644
+--- a/src/citra_qt/configuration/configure_audio.cpp
++++ b/src/citra_qt/configuration/configure_audio.cpp
+@@ -2,8 +2,14 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <memory>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QSettings>
++#include <QSlider>
+ #include <QtGlobal>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/input_details.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+@@ -42,6 +48,39 @@ ConfigureAudio::ConfigureAudio(bool is_powered_on, QWidget* parent)
+     ui->volume_label->setVisible(Settings::IsConfiguringGlobal());
+     ui->volume_combo_box->setVisible(!Settings::IsConfiguringGlobal());
+ 
++    // ff-bgm1x: 볼륨 슬라이더 아래 한 줄 (1배속으로 내는 효과음의 볼륨, 설정은 ff-bgm1x 레지스트리에 저장)
++    if (Settings::IsConfiguringGlobal()) {
++        if (auto* parent_layout = qobject_cast<QBoxLayout*>(ui->volume_layout->parentWidget()->layout())) {
++            sfx_volume_row = new QWidget(this);
++            auto* row = new QHBoxLayout(sfx_volume_row);
++            row->setContentsMargins(0, 0, 0, 0);
++            // 기존 볼륨 줄과 같은 구성 (이름 칸 너비를 맞추고, 늘어나는 빈칸 + 슬라이더)
++            auto* sfx_label = new QLabel(tr("효과음 볼륨:"), sfx_volume_row);
++            const int label_width =
++                std::max(sfx_label->sizeHint().width(), ui->volume_label->sizeHint().width());
++            sfx_label->setMinimumWidth(label_width);
++            ui->volume_label->setMinimumWidth(label_width);
++            row->addWidget(sfx_label);
++            row->addItem(new QSpacerItem(30, 20, QSizePolicy::Expanding, QSizePolicy::Minimum));
++            sfx_volume_slider = new QSlider(Qt::Horizontal, sfx_volume_row);
++            sfx_volume_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++            sfx_volume_slider->setMaximum(100);
++            sfx_volume_slider->setPageStep(5);
++            row->addWidget(sfx_volume_slider);
++            sfx_volume_indicator = new QLabel(sfx_volume_row);
++            sfx_volume_indicator->setMinimumWidth(32);
++            sfx_volume_indicator->setAlignment(Qt::AlignCenter);
++            row->addWidget(sfx_volume_indicator);
++            parent_layout->insertWidget(parent_layout->indexOf(ui->volume_layout) + 1, sfx_volume_row);
++            connect(sfx_volume_slider, &QSlider::valueChanged, this, [this](int percentage) {
++                sfx_volume_indicator->setText(QStringLiteral("%1%").arg(percentage));
++            });
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            sfx_volume_slider->setValue(s.value(QStringLiteral("sfx_volume"), 100).toInt());
++            sfx_volume_indicator->setText(QStringLiteral("%1%").arg(sfx_volume_slider->value()));
++        }
++    }
++
+     SetupPerGameUI();
+     SetConfiguration();
+ 
+@@ -181,6 +220,12 @@ void ConfigureAudio::ApplyConfiguration() {
+                                              ui->simulate_headphones_plugged,
+                                              simulate_headphones_plugged);
+ 
++    if (sfx_volume_slider) {
++        QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        s.setValue(QStringLiteral("sfx_volume"), sfx_volume_slider->value());
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(sfx_volume_slider->value() / 100.0f);
++    }
++
+     if (Settings::IsConfiguringGlobal()) {
+         Settings::values.output_type =
+             static_cast<AudioCore::SinkType>(ui->output_type_combo_box->currentData().toUInt());
+diff --git a/src/citra_qt/configuration/configure_audio.h b/src/citra_qt/configuration/configure_audio.h
+index 11fa7e2..e120d9f 100644
+--- a/src/citra_qt/configuration/configure_audio.h
++++ b/src/citra_qt/configuration/configure_audio.h
+@@ -7,6 +7,9 @@
+ #include <memory>
+ #include <QWidget>
+ 
++class QLabel;
++class QSlider;
++
+ namespace Ui {
+ class ConfigureAudio;
+ }
+@@ -43,4 +46,8 @@ private:
+     ConfigurationShared::CheckState realtime_audio;
+     ConfigurationShared::CheckState simulate_headphones_plugged;
+     std::unique_ptr<Ui::ConfigureAudio> ui;
++    // ff-bgm1x: 효과음 볼륨 (전역 설정에서만)
++    QWidget* sfx_volume_row = nullptr;
++    QSlider* sfx_volume_slider = nullptr;
++    QLabel* sfx_volume_indicator = nullptr;
+ };
+diff --git a/src/common/settings.cpp b/src/common/settings.cpp
+index db0b3de..e1fe645 100644
+--- a/src/common/settings.cpp
++++ b/src/common/settings.cpp
+@@ -79,6 +79,7 @@ Values values = {};
+ static bool configuring_global = true;
+ bool is_temporary_frame_limit;
+ double temporary_frame_limit;
++std::atomic<bool> cutscene_speed_hold{false};  // ff-bgm1x
+ 
+ void LogSettings() {
+     const auto log_setting = [](std::string_view name, const auto& value) {
+diff --git a/src/common/settings.h b/src/common/settings.h
+index c83f322..59b8353 100644
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -710,8 +710,16 @@ static inline void ResetTemporaryFrameLimit() {
+     is_temporary_frame_limit = false;
+     temporary_frame_limit = 0;
+ }
++// ff-bgm1x: 연출(연출 음악·동영상) 중에는 배속을 잠시 멈춘다. 오디오 쪽(BgmReplacer)이 켜고 끈다
++extern std::atomic<bool> cutscene_speed_hold;
+ static inline double GetFrameLimit() {
+-    return is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    const double limit =
++        is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    // 0 은 제한 없음. 100% 보다 느리게 맞춰 둔 속도는 그대로 둔다
++    if (cutscene_speed_hold.load(std::memory_order_relaxed) && (limit == 0 || limit > 100)) {
++        return 100;
++    }
++    return limit;
+ }
+ 
+ } // namespace Settings
+diff --git a/src/core/file_sys/ncch_container.cpp b/src/core/file_sys/ncch_container.cpp
+index 666d603..c29da7a 100644
+--- a/src/core/file_sys/ncch_container.cpp
++++ b/src/core/file_sys/ncch_container.cpp
+@@ -236,6 +236,34 @@ Loader::ResultStatus NCCHContainer::LoadHeader() {
+ 
+     LOG_DEBUG(Service_FS, "NCCH type: {}", file->GetType().to_string());
+ 
++    // ff-bgm1x: NoCrypto 플래그가 꺼져 있어도 실제 내용이 평문인 덤프가 있다.
++    // ExeFS 첫 파일 이름(".code")이나 RomFS 표식("IVFC")이 그대로 읽히면 평문으로 본다.
++    if (!ncch_header.no_crypto) {
++        bool plaintext = false;
++        if (ncch_header.exefs_offset != 0) {
++            char name[8] = {};
++            if (file->ReadAtBytes(name, sizeof(name),
++                                  static_cast<std::size_t>(ncch_header.exefs_offset) * kBlockSize) ==
++                    sizeof(name) &&
++                std::memcmp(name, ".code\0\0\0", 8) == 0) {
++                plaintext = true;
++            }
++        }
++        if (!plaintext && ncch_header.romfs_offset != 0) {
++            char magic[4] = {};
++            if (file->ReadAtBytes(magic, sizeof(magic),
++                                  static_cast<std::size_t>(ncch_header.romfs_offset) * kBlockSize) ==
++                    sizeof(magic) &&
++                std::memcmp(magic, "IVFC", 4) == 0) {
++                plaintext = true;
++            }
++        }
++        if (plaintext) {
++            LOG_INFO(Service_FS, "ff-bgm1x: NoCrypto 플래그는 꺼져 있지만 내용이 평문이라 그대로 읽습니다");
++            ncch_header.no_crypto.Assign(1);
++        }
++    }
++
+     if (!ncch_header.no_crypto) {
+         // Encrypted NCCH are not supported
+         return Loader::ResultStatus::ErrorEncrypted;
+diff --git a/src/core/file_sys/romfs_reader.cpp b/src/core/file_sys/romfs_reader.cpp
+index 6b1387b..742eaa0 100644
+--- a/src/core/file_sys/romfs_reader.cpp
++++ b/src/core/file_sys/romfs_reader.cpp
+@@ -6,6 +6,7 @@
+ #include <vector>
+ #include <cryptopp/aes.h>
+ #include <cryptopp/modes.h>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/archives.h"
+ #include "common/logging/log.h"
+ #include "core/file_sys/archive_artic.h"
+@@ -23,6 +24,9 @@ std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length,
+     if (length == 0)
+         return 0; // Crypto++ does not like zero size buffer
+ 
++    // ff-bgm1x: 동영상 파일을 읽는 동안은 연출로 본다
++    AudioCore::HLE::BgmReplacer::Instance().OnRomFsRead(*this, offset, length);
++
+     const auto segments = BreakupRead(offset, length);
+     std::size_t read_progress = 0;
+ 
+diff --git a/src/core/hle/service/cam/y2r_u.cpp b/src/core/hle/service/cam/y2r_u.cpp
+index cd2d90a..37c63a0 100644
+--- a/src/core/hle/service/cam/y2r_u.cpp
++++ b/src/core/hle/service/cam/y2r_u.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <array>
+ #include <cstring>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/archives.h"
+ #include "common/common_funcs.h"
+ #include "common/logging/log.h"
+@@ -514,6 +515,7 @@ void Y2R_U::GetDitheringWeightParams(Kernel::HLERequestContext& ctx) {
+ 
+ void Y2R_U::StartConversion(Kernel::HLERequestContext& ctx) {
+     IPC::RequestParser rp(ctx);
++    AudioCore::HLE::BgmReplacer::Instance().OnVideoFrame();  // ff-bgm1x: 동영상 재생 중
+ 
+     // dst_image_size would seem to be perfect for this, but it doesn't include the gap :(
+     u32 total_output_size =

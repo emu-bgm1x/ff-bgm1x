@@ -1,0 +1,53 @@
+diff --git a/src/frontend/qt_sdl/Window.cpp b/src/frontend/qt_sdl/Window.cpp
+index 9b3ab95..253088b 100755
+--- a/src/frontend/qt_sdl/Window.cpp
++++ b/src/frontend/qt_sdl/Window.cpp
+@@ -77,6 +77,7 @@
+ //#include "main_shaders.h"
+ 
+ #include "EmuInstance.h"
++#include "BgmReplacer.h"  // ff-bgm1x
+ #include "ArchiveUtil.h"
+ #include "CameraManager.h"
+ #include "Window.h"
+@@ -669,6 +670,40 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
+             actAudioSync = menu->addAction("Audio sync");
+             actAudioSync->setCheckable(true);
+             connect(actAudioSync, &QAction::triggered, this, &MainWindow::onChangeAudioSync);
++
++            // ff-bgm1x
++            menu->addSeparator();
++            actBgm1x = menu->addAction("Keep BGM at 1x speed");
++            actBgm1x->setCheckable(true);
++            connect(actBgm1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->requestEnabled(checked);
++                emuInstance->getLocalConfig().SetBool("Bgm1x", checked);
++                Config::Save();
++            });
++            actFfCutscenes = menu->addAction("Fast forward during cutscenes");
++            actFfCutscenes->setCheckable(true);
++            connect(actFfCutscenes, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setFastForwardCutscenes(checked);
++                emuInstance->getLocalConfig().SetBool("FfCutscenes", checked);
++                Config::Save();
++            });
++            actMenuSounds1x = menu->addAction("Keep sound effects at 1x speed");
++            actMenuSounds1x->setCheckable(true);
++            connect(actMenuSounds1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setSfx1x(checked);
++                emuInstance->getLocalConfig().SetBool("MenuSounds1x", checked);
++                Config::Save();
++            });
++            // 단축키로 바꾼 값도 메뉴를 열 때 반영한다
++            connect(menu, &QMenu::aboutToShow, this, [this]
++            {
++                actBgm1x->setChecked(emuInstance->bgmReplacer->wantEnabled());
++                actFfCutscenes->setChecked(emuInstance->bgmReplacer->fastForwardCutscenes());
++                actMenuSounds1x->setChecked(emuInstance->bgmReplacer->sfxAt1x());
++            });
+         }
+         {
+             QMenu * menu = menubar->addMenu("Help");

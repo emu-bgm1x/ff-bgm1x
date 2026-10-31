@@ -1,0 +1,14 @@
+diff --git a/src/frontend/qt_sdl/Window.h b/src/frontend/qt_sdl/Window.h
+index 678be7c..f9ad72b 100755
+--- a/src/frontend/qt_sdl/Window.h
++++ b/src/frontend/qt_sdl/Window.h
+@@ -351,6 +351,9 @@ public:
+     QAction* actShowOSD;
+     QAction* actLimitFramerate;
+     QAction* actAudioSync;
++    QAction* actBgm1x;  // ff-bgm1x
++    QAction* actFfCutscenes;  // ff-bgm1x
++    QAction* actMenuSounds1x;  // ff-bgm1x
+ 
+     QAction* actAbout;
+ };

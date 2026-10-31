@@ -1,0 +1,14 @@
+diff --git a/src/NDS.h b/src/NDS.h
+index 17e656e..761010f 100644
+--- a/src/NDS.h
++++ b/src/NDS.h
+@@ -250,6 +250,9 @@ private:
+ public: // TODO: Encapsulate the rest of these members
+     void* UserData;
+ 
++    // ff-bgm1x: ARM9 이 IPC FIFO 에 값을 쓸 때마다 불린다 (사운드 명령을 지켜보는 용도)
++    void (*SoundFifoHook)(NDS& nds, u32 fifoword) = nullptr;
++
+     int ConsoleType;
+     int CurCPU;
+ 

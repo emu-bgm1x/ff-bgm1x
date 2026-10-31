@@ -1,0 +1,15 @@
+diff --git a/src/frontend/qt_sdl/EmuInstanceInput.cpp b/src/frontend/qt_sdl/EmuInstanceInput.cpp
+index 866eb29..d6b13a0 100644
+--- a/src/frontend/qt_sdl/EmuInstanceInput.cpp
++++ b/src/frontend/qt_sdl/EmuInstanceInput.cpp
+@@ -66,7 +66,9 @@ const char* EmuInstance::hotkeyNames[HK_MAX] =
+     "HK_GuitarGripGreen",
+     "HK_GuitarGripRed",
+     "HK_GuitarGripYellow",
+-    "HK_GuitarGripBlue"
++    "HK_GuitarGripBlue",
++    "HK_BgmToggle",
++    "HK_CutsceneFfToggle"
+ };
+ 
+ std::shared_ptr<SDL_mutex> EmuInstance::joyMutexGlobal = nullptr;

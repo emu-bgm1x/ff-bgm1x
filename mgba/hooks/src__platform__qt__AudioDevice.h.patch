@@ -1,0 +1,12 @@
+diff --git a/src/platform/qt/AudioDevice.h b/src/platform/qt/AudioDevice.h
+index 0794b37..657b5cd 100644
+--- a/src/platform/qt/AudioDevice.h
++++ b/src/platform/qt/AudioDevice.h
+@@ -27,6 +27,7 @@ protected:
+ 
+ private:
+ 	mCoreThread* m_context;
++	int m_sampleRate = 48000;
+ };
+ 
+ }
