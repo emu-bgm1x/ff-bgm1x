@@ -8,7 +8,9 @@
 
 배속(빨리 감기) 중에도 **BGM 과 효과음을 1배속으로** 들리게 하는 에뮬레이터 수정판(ff-bgm1x)을,
 에뮬레이터의 **공식 새 버전**에 다시 적용하기 위한 자료입니다.
-새 버전이 나오면 이 저장소(또는 폴더)를 AI 코딩 도구(Claude Code 등)에 주고 아래 프롬프트로 요청하세요.
+새 버전이 나오면 이 저장소(또는 폴더)를 AI 코딩 도구에 주고 아래 프롬프트로 요청하세요.
+
+**무엇을 바꿨는지는 [FEATURES.md](FEATURES.md) 에 정리되어 있습니다** (기능, 에뮬레이터별 방식, 확인한 게임, 새 버전에 대한 생각).
 
 완성된 실행 파일(Windows)은 [Releases](../../releases) 에 있습니다.
 
@@ -71,8 +73,10 @@ Issues are only used for the automatic upstream check below.
 
 ff-bgm1x is a set of emulator modifications that keep **BGM and sound effects playing at 1x speed while
 fast-forwarding**, so the game runs fast but sounds normal. This repository is a *porting kit*: it contains
-everything an AI coding assistant (e.g. Claude Code) needs to re-apply the feature to a **newer official
+everything an AI coding assistant needs to re-apply the feature to a **newer official
 release** of each emulator. Prebuilt Windows binaries of the last version are in [Releases](../../releases).
+
+**What was changed is summarized in [FEATURES.md](FEATURES.md)** (features, how each emulator works, tested games, notes on new versions).
 
 | Folder | Emulator | Base version | System |
 |---|---|---|---|
