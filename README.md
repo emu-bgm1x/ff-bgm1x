@@ -23,7 +23,7 @@
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | 안드로이드 NDS |
 
 안드로이드판은 Play 스토어가 아닌 APK 로 배포하므로, 설치할 때 "출처를 알 수 없는 앱" 허용이 필요합니다.
-릴리스의 안드로이드 APK 는 공식 앱과 서명이 달라, 공식 앱을 지우고 설치해야 합니다.
+릴리스의 GBA·3DS APK 는 공식 앱과 패키지 이름이 달라 함께 설치되고, NDS(melonDS) APK 는 공식 앱과 서명이 달라 공식 앱을 지우고 설치해야 합니다.
 
 각 폴더의 구성:
 
@@ -92,7 +92,7 @@ release** of each emulator. Prebuilt Windows binaries of the last version are in
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | Android NDS |
 
 The Android builds are distributed as APKs (not on the Play Store), so installing them requires allowing
-"unknown sources". They are signed differently from the official apps; uninstall the official app first.
+"unknown sources". The GBA and 3DS APKs use different package names and install next to the official apps; the NDS (melonDS) APK uses the official package name with a different signature, so uninstall the official app first.
 
 Each folder has:
 
