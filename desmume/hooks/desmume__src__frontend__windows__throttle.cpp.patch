@@ -1,0 +1,58 @@
+diff --git a/desmume/src/frontend/windows/throttle.cpp b/desmume/src/frontend/windows/throttle.cpp
+index 7cad183..061999f 100644
+--- a/desmume/src/frontend/windows/throttle.cpp
++++ b/desmume/src/frontend/windows/throttle.cpp
+@@ -19,6 +19,7 @@
+ 	along with the this software.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
++#include "../../ffbgm/ffbgm.h"
+ #include "throttle.h"
+ 
+ #define WIN32_LEAN_AND_MEAN
+@@ -34,6 +35,7 @@
+ #include "winutil.h"
+ 
+ int FastForward=0;
++int FastForwardSpeed=0; // ff-bgm1x: fast forward multiplier (0 = unlimited)
+ static u64 tmethod,tfreq,afsfreq;
+ static const u64 core_desiredfps = 3920763; //59.8261
+ static u64 desiredfps = core_desiredfps;
+@@ -113,16 +115,20 @@ void SpeedThrottle()
+ {
+ 	AutoFrameSkip_BeforeThrottle();
+ 
+-waiter:
+-	if(FastForward)
++	// ff-bgm1x: fast forward runs at FastForwardSpeed x the normal (100%) speed, ignoring the +/- setting like the original; 0 = unlimited.
++	// During a cutscene hold (cutscene and "fast forward during cutscenes" off) it runs at the normal target speed.
++	const bool ffActive = FastForward && !ffbgm_cutsceneHold();
++	if(ffActive && FastForwardSpeed <= 0)
+ 		return;
++	const u64 targetfps = ffActive ? core_desiredfps * (u64)FastForwardSpeed : desiredfps;
+ 
++waiter:
+ 	u64 ttime = GetCurTime();
+ 
+-	if((ttime - ltime) < (tfreq / desiredfps))
++	if((ttime - ltime) < (tfreq / targetfps))
+ 	{
+ 		u64 sleepy;
+-		sleepy = (tfreq / desiredfps) - (ttime - ltime);  
++		sleepy = (tfreq / targetfps) - (ttime - ltime);
+ 		sleepy *= 1000;
+ 		if(tfreq >= 65536)
+ 			sleepy /= afsfreq;
+@@ -134,10 +140,10 @@ waiter:
+ 			SwitchToThread(); // limit to other threads on the same CPU core for other short waits
+ 		goto waiter;
+ 	}
+-	if( (ttime-ltime) >= (tfreq*4/desiredfps))
++	if( (ttime-ltime) >= (tfreq*4/targetfps))
+ 		ltime=ttime;
+ 	else
+-		ltime+=tfreq/desiredfps;
++		ltime+=tfreq/targetfps;
+ }
+ 
+ 

@@ -9,15 +9,15 @@
 
 ## 공통 기능
 
-| 기능 | 설명 | mGBA | melonDS | Azahar |
-|---|---|---|---|---|
-| BGM 1배속 유지 | 게임의 음악은 소리만 끄고, 같은 곡을 실제 시간 기준으로 따로 재생 | ✓ (GBA, GB/GBC) | ✓ | ✓ |
-| 팡파레 끝까지 | 반복 없는 짧은 곡(아이템 획득 등)은 1배속으로 끝까지, 그 뒤 곡은 이어서 | ✓ (GBA) | ✓ | ✓ |
-| 연출 중 배속 멈춤 | 반복 없는 긴 곡(연출 곡)이 나오는 동안은 배속을 걸어도 1배속 진행. 메뉴 "연출 중에도 배속" 으로 끌 수 있음 | ✓ (GBA) | ✓ | ✓ (동영상 재생 중도) |
-| 효과음 1배속 | 효과음도 1배속으로 끝까지 | ✓ (GBA, GB/GBC) | ✓ | ✓ (울음소리 포함) |
-| 효과음 볼륨 | 오디오 설정의 볼륨 아래 슬라이더 한 줄 | ✓ (무음 체크 포함, GBA 만) | ✓ | ✓ |
-| 메뉴 켜고 끄기 | 기능마다 메뉴 항목, 설정 저장 | ✓ | ✓ | ✓ |
-| 단축키 | 메뉴 항목 켜고 끄기 (기본 키 없음) | — | ✓ | ✓ |
+| 기능 | 설명 | mGBA | melonDS | DeSmuME | Azahar |
+|---|---|---|---|---|---|
+| BGM 1배속 유지 | 게임의 음악은 소리만 끄고, 같은 곡을 실제 시간 기준으로 따로 재생 | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
+| 팡파레 끝까지 | 반복 없는 짧은 곡(아이템 획득 등)은 1배속으로 끝까지, 그 뒤 곡은 이어서 | ✓ (GBA) | ✓ | ✓ | ✓ |
+| 연출 중 배속 멈춤 | 반복 없는 긴 곡(연출 곡)이 나오는 동안은 배속을 걸어도 1배속 진행. 메뉴 "연출 중에도 배속" 으로 끌 수 있음 | ✓ (GBA) | ✓ | ✓ | ✓ (동영상 재생 중도) |
+| 효과음 1배속 | 효과음도 1배속으로 끝까지 | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (울음소리 포함) |
+| 효과음 볼륨 | 오디오 설정의 볼륨 아래 슬라이더 한 줄 | ✓ (무음 체크 포함, GBA 만) | ✓ | ✓ (사운드 설정 창 아래) | ✓ |
+| 메뉴 켜고 끄기 | 기능마다 메뉴 항목, 설정 저장 | ✓ | ✓ | ✓ | ✓ |
+| 단축키 | 메뉴 항목 켜고 끄기 (기본 키 없음) | — | ✓ | ✓ | ✓ |
 
 ## 에뮬레이터별 방식
 
@@ -29,6 +29,10 @@
 **melonDS 1.1**
 - 게임이 사운드 CPU 에 보내는 명령(IPC FIFO)을 지켜보다가, 닌텐도 표준 사운드 데이터(SDAT)의 같은 시퀀스를 내장 재생기로 연주한다. 원본은 페이더로 끈다.
 - 게임이 도중에 멈추는 효과음은 게임 안에서 울린 시간만큼 1배속으로 낸 뒤 멈춘다. 상태 저장을 불러오면 연주 중이던 곡을 같은 위치부터 이어 받는다.
+
+**DeSmuME (Git `3c4b95a`, Windows)**
+- melonDS 판과 같은 재생기(같은 코드)를 DeSmuME 의 IPC FIFO 쓰기, 사운드 출력, 메인 루프에 연결했다.
+- 공식 DeSmuME 의 배속은 배율 없이 최대 속도라서, 배속 배율 메뉴(2x~8x, 무제한)를 더했다.
 
 **Azahar 2126.2**
 - BGM: 게임 데이터의 스트림 파일(BCSTM, AAC)을 색인해 두고, DSP 음성이 받는 버퍼로 어느 곡인지 알아내 직접 해독해 1배속으로 낸다.
@@ -53,6 +57,7 @@
 |---|---|
 | melonDS | 오디오 비트 깊이 "자동" 을 항상 16비트로 (롬을 다시 불러오면 DS 에서 10비트로 바뀌어 같은 설정에서 소리가 달라지던 문제) |
 | melonDS | 한글 등 비ASCII 롬 경로를 명령줄로 넘길 때 깨지는 문제 (Windows) |
+| DeSmuME | Config → Fast forward speed: 배속을 원래 속도의 2/3/4/6/8배로 제한 (기본값은 공식과 같은 무제한) |
 | Azahar | NoCrypto 표시가 꺼져 있지만 실제로는 평문인 롬 덤프도 열리게 |
 | mGBA | 공식 배포본처럼 실행 파일 하나로 빌드 (정적 빌드용 초기화), SDL 출력 쪽 섞기 지원 |
 
@@ -76,15 +81,15 @@ music and sound effects play at 1x speed and original pitch.
 
 ## Common features
 
-| Feature | Description | mGBA | melonDS | Azahar |
-|---|---|---|---|---|
-| Keep BGM at 1x | The game's music is muted and the same song is played separately in real time | ✓ (GBA, GB/GBC) | ✓ | ✓ |
-| Fanfares to the end | Short non-looping songs (item jingles etc.) play to the end at 1x, then the music resumes | ✓ (GBA) | ✓ | ✓ |
-| Hold fast-forward in cutscenes | While a long non-looping (cutscene) song plays, the game runs at 1x even with fast-forward on; can be turned off | ✓ (GBA) | ✓ | ✓ (also during videos) |
-| Sound effects at 1x | Sound effects also play at 1x to the end | ✓ (GBA, GB/GBC) | ✓ | ✓ (cries included) |
-| Sound effect volume | One extra slider below the volume slider in audio settings | ✓ (with mute, GBA only) | ✓ | ✓ |
-| Menu toggles | A menu item per feature; settings are saved | ✓ | ✓ | ✓ |
-| Hotkeys | Toggle the menu items (no default keys) | — | ✓ | ✓ |
+| Feature | Description | mGBA | melonDS | DeSmuME | Azahar |
+|---|---|---|---|---|---|
+| Keep BGM at 1x | The game's music is muted and the same song is played separately in real time | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
+| Fanfares to the end | Short non-looping songs (item jingles etc.) play to the end at 1x, then the music resumes | ✓ (GBA) | ✓ | ✓ | ✓ |
+| Hold fast-forward in cutscenes | While a long non-looping (cutscene) song plays, the game runs at 1x even with fast-forward on; can be turned off | ✓ (GBA) | ✓ | ✓ | ✓ (also during videos) |
+| Sound effects at 1x | Sound effects also play at 1x to the end | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (cries included) |
+| Sound effect volume | One extra slider below the volume slider in audio settings | ✓ (with mute, GBA only) | ✓ | ✓ (bottom of Sound Settings) | ✓ |
+| Menu toggles | A menu item per feature; settings are saved | ✓ | ✓ | ✓ | ✓ |
+| Hotkeys | Toggle the menu items (no default keys) | — | ✓ | ✓ | ✓ |
 
 ## How each one works
 
@@ -96,6 +101,10 @@ music and sound effects play at 1x speed and original pitch.
 **melonDS 1.1**
 - Watches the sound commands the game sends to the sound CPU (IPC FIFO) and plays the same sequences from the cartridge's standard sound data (SDAT) with a built-in player; the originals are muted via the fader.
 - Sound effects the game stops early play at 1x for as long as they sounded in game time. After loading a save state, the current song continues from the same position.
+
+**DeSmuME (Git `3c4b95a`, Windows)**
+- The same player as the melonDS version (same code), hooked into DeSmuME's IPC FIFO write, sound output and main loop.
+- Official DeSmuME fast-forwards at maximum speed with no multiplier, so a fast-forward speed menu (2x-8x, unlimited) was added.
 
 **Azahar 2126.2**
 - BGM: indexes the stream files (BCSTM, AAC) in the game data, recognizes which song a DSP voice is playing from its buffers, and decodes it itself at 1x.
@@ -120,6 +129,7 @@ functions that are not on screen (quick save/load, 1x option toggles, ...). melo
 |---|---|
 | melonDS | Audio bit depth "Automatic" is always 16-bit (reloading a ROM switched DS mode to 10-bit, so the same setting sounded different) |
 | melonDS | Non-ASCII ROM paths passed on the command line were garbled (Windows) |
+| DeSmuME | Config → Fast forward speed: limits fast-forward to 2/3/4/6/8x the normal speed (default: unlimited, like the official build) |
 | Azahar | Opens ROM dumps whose NoCrypto flag is off but whose content is actually plaintext |
 | mGBA | Single-executable build like the official release (static build init), mixing support for SDL output |
 

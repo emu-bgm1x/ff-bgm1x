@@ -1,0 +1,63 @@
+DeSmuME (Windows) 수정판 (ff-bgm1x) - 배속 중에도 BGM 1배속 유지
+
+[바탕]
+  DeSmuME 공식 저장소 master 커밋 3c4b95a (2026-01, 창 제목 "DeSmuME 0.9.14 git#3c4b95a").
+  Visual Studio 2022 (MSVC) 로 빌드합니다.
+
+[실행]
+  DeSmuME 를 실행하고 File -> Open ROM 으로 ROM 을 엽니다. (ROM 은 포함되어 있지 않습니다)
+  배속 키는 공식 DeSmuME 와 같습니다: Tab (누르고 있는 동안), Fast Forward Toggle (기본 키 없음).
+  키는 Config -> Hotkey Config 에서 바꿉니다.
+  Fast Forward Toggle 에 Tab 이 들어간 조합(예: Shift+Tab)을 쓰면, 키를 뗄 때 Tab 의 "뗌" 이 같이 처리되어
+  배속이 바로 꺼집니다. Tab 이 들어가지 않는 키를 쓰세요.
+
+[추가된 메뉴] Config 메뉴, Emulation Settings 위
+  Fast forward speed
+    2x / 3x / 4x / 6x / 8x       배속을 원래 속도(100%)의 N배로 제한 (화면은 N프레임 중 1프레임만 그림)
+    Unlimited                     공식 DeSmuME 와 같이 최대 속도 (기본값)
+    배속 중에는 공식 DeSmuME 와 같이 + / - 속도 설정을 쓰지 않습니다.
+  ff-bgm1x (1x audio)
+    Keep BGM at 1x speed          BGM 1배속 유지 (기본값 켜짐)
+    Keep sound effects at 1x      효과음 1배속 (기본값 켜짐)
+    Fast forward during cutscenes 연출 중에도 배속 (기본값 꺼짐)
+
+[추가된 설정] Config -> Sound Settings 아래쪽
+  SFX Volume (1x)                 1배속으로 내는 효과음의 볼륨 (0~256, 기본값 256 = 원래 크기)
+                                  움직이면 바로 적용, Cancel 이면 원래 값
+
+[추가된 단축키] Config -> Hotkey Config (기본값 없음)
+  Keep BGM at 1x Toggle
+  Fast Forward During Cutscenes Toggle
+
+  설정은 desmume.ini 의 [ff-bgm1x] 에 저장됩니다
+  (Bgm1x, Sfx1x, FfCutscenes, SfxVolume, FastForwardSpeed).
+
+[동작 방식]
+  melonDS 수정판과 같은 방식입니다.
+  닌텐도 표준 사운드 드라이버(SDAT: SSEQ/SBNK/SWAR)를 쓰는 DS 게임이 대상입니다.
+  게임이 음악을 시작하라고 사운드 CPU 에 보내는 명령을 지켜보다가, 원본 음악은 소리만 끄고
+  같은 곡을 내장 재생기로 실제 시간에 맞춰 연주합니다.
+  - 반복되는 곡(필드, 배틀 등)       : 배속과 관계없이 1배속
+  - 팡파레(반복 없고 12초 이하)      : 1배속으로 끝까지 연주하고, 멈춰 있던 곡은 그 뒤에 이어집니다.
+  - 연출 곡(반복 없고 12초보다 긴 곡) : 바꾸지 않습니다. "연출 중에도 배속"이 꺼져 있으면
+                                       이 곡이 나오는 동안에는 배속을 걸어도 1배속으로 진행합니다.
+                                       (이때는 + / - 로 정한 평소 속도로 돕니다)
+  - 효과음                           : 음악이 아닌 반복 없는 시퀀스(SSEQ) 소리를 1배속으로 끝까지 냅니다.
+                                       효과음 묶음(SSAR)으로 내는 소리, 반복하는 효과음, 울음소리(SEQ_PV...)는
+                                       게임 속도 그대로입니다.
+  - 상태 저장을 불러오거나 기능을 다시 켜면, 게임이 연주 중이던 곡을 같은 위치부터 이어 받습니다.
+  BGM 1배속은 실제 시간에 맞춰 내므로, + 키로 평소 속도를 올려도 1배속으로 납니다.
+  표준 드라이버를 쓰지 않는 게임에서는 아무것도 바꾸지 않습니다.
+
+[확인한 범위]
+  포켓몬스터 하트골드(한국판): 시작 영상·타이틀, 도입부 일부.
+  BGM·효과음이 원본과 맞게 들리는지, 상태 불러오기 뒤 동작은 충분히 확인하지 않았습니다.
+  그 밖의 게임은 확인하지 않았습니다.
+
+[알려진 제약]
+  - melonDS 수정판의 알려진 제약(내장 재생기 소리 차이, 일부 명령 미반영 등)이 같이 있습니다.
+  - 하트골드는 시작 영상 곡과 타이틀 곡이 연출 곡이라, 타이틀 화면에 머무는 동안에도 배속이 걸리지 않습니다
+    ("Fast forward during cutscenes" 를 켜면 걸립니다).
+
+[라이선스]
+  DeSmuME (GNU General Public License v2 또는 그 이후 버전) 을 수정한 것이며, 같은 라이선스로 배포합니다.

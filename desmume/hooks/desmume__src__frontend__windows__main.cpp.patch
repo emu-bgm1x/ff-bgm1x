@@ -1,0 +1,161 @@
+diff --git a/desmume/src/frontend/windows/main.cpp b/desmume/src/frontend/windows/main.cpp
+index cef451c..f7e6f27 100644
+--- a/desmume/src/frontend/windows/main.cpp
++++ b/desmume/src/frontend/windows/main.cpp
+@@ -1,3 +1,4 @@
++#include "../../ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 Theo Berkau
+ 	Copyright (C) 2006-2025 DeSmuME team
+@@ -1259,6 +1260,7 @@ static void StepRunLoop_Core()
+ 	{
+ 		Lock lock;
+ 		NDS_exec<false>();
++		ffbgm_afterMainFrame();
+ 		SPU_Emulate_user();
+ 		win_sound_samplecounter = DESMUME_SAMPLE_RATE/60;
+ 	}
+@@ -1331,7 +1333,10 @@ static void StepRunLoop_User()
+ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1)
+ {
+ 	int skipRate = (forceFrameSkip < 0) ? frameskiprate : forceFrameSkip;
+-	int ffSkipRate = (forceFrameSkip < 0) ? 9 : forceFrameSkip;
++	// ff-bgm1x: with a fixed fast forward speed (Nx), draw 1 of N frames; unlimited keeps the original 9 skips
++	int ffSkipRate = (forceFrameSkip < 0) ? (FastForwardSpeed > 0 ? FastForwardSpeed - 1 : 9) : forceFrameSkip;
++	// ff-bgm1x: during a cutscene hold, ignore fast forward and run at the normal speed
++	const bool ffHeld = FastForward && !ffbgm_cutsceneHold();
+ 
+ 	if(lastskiprate != skipRate)
+ 	{
+@@ -1339,7 +1344,7 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		mainLoopData.framestoskip = 0; // otherwise switches to lower frameskip rates will lag behind
+ 	}
+ 
+-	if(!mainLoopData.skipnextframe || forceFrameSkip == 0 || frameAdvance || (continuousframeAdvancing && !FastForward))
++	if(!mainLoopData.skipnextframe || forceFrameSkip == 0 || frameAdvance || (continuousframeAdvancing && !ffHeld))
+ 	{
+ 		mainLoopData.framesskipped = 0;
+ 
+@@ -1360,7 +1365,7 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		NDS_SkipNextFrame();
+ 	}
+ 
+-	if(FastForward)
++	if(ffHeld)
+ 	{
+ 		if(mainLoopData.framesskipped < ffSkipRate)
+ 		{
+@@ -1369,8 +1374,10 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		}
+ 		if (mainLoopData.framestoskip < 1)
+ 			mainLoopData.framestoskip += ffSkipRate;
++		if (FastForwardSpeed > 0 && allowSleep)
++			SpeedThrottle(); // ff-bgm1x: limit fast forward to the chosen speed
+ 	}
+-	else if((/*autoframeskipenab && frameskiprate ||*/ FrameLimit) && allowSleep)
++	else if((/*autoframeskipenab && frameskiprate ||*/ FrameLimit || FastForward) && allowSleep)
+ 	{
+ 		SpeedThrottle();
+ 	}
+@@ -2065,6 +2072,12 @@ int _main()
+ 	start_paused = cmdline.start_paused!=0;
+ 	
+ 	FrameLimit = (cmdline.disable_limiter == 1) ? false : GetPrivateProfileBool("FrameLimit", "FrameLimit", true, IniName);
++	ffbgm_setBgm1x(GetPrivateProfileBool("ff-bgm1x", "Bgm1x", true, IniName));
++	ffbgm_setFfCutscenes(GetPrivateProfileBool("ff-bgm1x", "FfCutscenes", false, IniName));
++	ffbgm_setSfx1x(GetPrivateProfileBool("ff-bgm1x", "Sfx1x", true, IniName));
++	ffbgm_setSfxVolume(GetPrivateProfileInt("ff-bgm1x", "SfxVolume", 256, IniName));
++	FastForwardSpeed = GetPrivateProfileInt("ff-bgm1x", "FastForwardSpeed", 0, IniName);
++	if (FastForwardSpeed < 0 || FastForwardSpeed > 16) FastForwardSpeed = 0;
+ 	
+ 	// Temporary scanline parameter setting for Windows.
+ 	// TODO: When videofilter.cpp becomes Windows-friendly, replace the direct setting of
+@@ -3705,6 +3718,15 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
+ 			MainWindow->checkMenu(ID_VIEW_DISPLAYRTC,CommonSettings.hud.ShowRTC);
+ 			MainWindow->checkMenu(ID_VIEW_HUDEDITOR, HudEditorMode);
+ 			MainWindow->checkMenu(IDC_FRAMELIMIT, FrameLimit);
++			MainWindow->checkMenu(IDC_FFBGM_BGM1X, ffbgm_bgm1x());
++			MainWindow->checkMenu(IDC_FFBGM_SFX1X, ffbgm_sfx1x());
++			MainWindow->checkMenu(IDC_FFBGM_CUTSCENE, ffbgm_ffCutscenes());
++			MainWindow->checkMenu(IDC_FFSPEED_2X, FastForwardSpeed == 2);
++			MainWindow->checkMenu(IDC_FFSPEED_3X, FastForwardSpeed == 3);
++			MainWindow->checkMenu(IDC_FFSPEED_4X, FastForwardSpeed == 4);
++			MainWindow->checkMenu(IDC_FFSPEED_6X, FastForwardSpeed == 6);
++			MainWindow->checkMenu(IDC_FFSPEED_8X, FastForwardSpeed == 8);
++			MainWindow->checkMenu(IDC_FFSPEED_UNLIMITED, FastForwardSpeed <= 0);
+ 			
+ 			//Frame Skip
+ 			MainWindow->checkMenu(IDC_FRAMESKIPAUTO, autoframeskipenab);
+@@ -5208,6 +5230,24 @@ DOKEYDOWN:
+ 			break;
+ 	
+ 
++		case IDC_FFSPEED_2X: FastForwardSpeed = 2; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_3X: FastForwardSpeed = 3; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_4X: FastForwardSpeed = 4; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_6X: FastForwardSpeed = 6; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_8X: FastForwardSpeed = 8; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_UNLIMITED: FastForwardSpeed = 0; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFBGM_BGM1X:
++			ffbgm_setBgm1x(!ffbgm_bgm1x());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Bgm1x", ffbgm_bgm1x(), (char*)IniName);
++			break;
++		case IDC_FFBGM_SFX1X:
++			ffbgm_setSfx1x(!ffbgm_sfx1x());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Sfx1x", ffbgm_sfx1x(), (char*)IniName);
++			break;
++		case IDC_FFBGM_CUTSCENE:
++			ffbgm_setFfCutscenes(!ffbgm_ffCutscenes());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"FfCutscenes", ffbgm_ffCutscenes(), (char*)IniName);
++			break;
+ 		case IDC_FRAMELIMIT:
+ 			FrameLimit ^= 1;
+ 			WritePrivateProfileInt("FrameLimit", "FrameLimit", FrameLimit, IniName);
+@@ -6321,6 +6361,7 @@ static void SoundSettings_updateSynchMode(HWND hDlg)
+ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+ {
+ 	static UINT_PTR timerid=0;
++	static int sfxVolumeAtOpen = 256;
+ 	switch (uMsg)
+ 	{
+ 	case WM_INITDIALOG:
+@@ -6370,6 +6411,10 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 			// Set Selected Volume
+ 			SendDlgItemMessage(hDlg, IDC_SLVOLUME, TBM_SETPOS, TRUE, sndvolume);
+ 			SoundSettings_updateVolumeReadout(hDlg);
++			sfxVolumeAtOpen = ffbgm_sfxVolume();
++			SendDlgItemMessage(hDlg, IDC_SFXVOLUME, TBM_SETRANGE, 0, MAKELONG(0, 256));
++			SendDlgItemMessage(hDlg, IDC_SFXVOLUME, TBM_SETPOS, TRUE, sfxVolumeAtOpen);
++			SetDlgItemInt(hDlg, IDC_SFXVOLUMEREAD, sfxVolumeAtOpen, FALSE);
+ 
+ 			// Set spu advanced
+ 			CheckDlgItem(hDlg,IDC_SPU_ADVANCED,CommonSettings.spu_advanced);
+@@ -6379,6 +6424,14 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 		}
+ 	case WM_HSCROLL:
+ 		SoundSettings_updateVolumeReadout(hDlg);
++		{
++			if ((HWND)lParam == GetDlgItem(hDlg, IDC_SFXVOLUME))
++			{
++				int v = (int)SendMessage(GetDlgItem(hDlg, IDC_SFXVOLUME), TBM_GETPOS, 0, 0);
++				ffbgm_setSfxVolume(v);
++				SetDlgItemInt(hDlg, IDC_SFXVOLUMEREAD, v, FALSE);
++			}
++		}
+ 		break;
+ 
+ 	case WM_TIMER:
+@@ -6453,11 +6506,13 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 					//write spu advanced
+ 					CommonSettings.spu_advanced = IsDlgCheckboxChecked(hDlg,IDC_SPU_ADVANCED);
+ 					WritePrivateProfileBool("Sound","SpuAdvanced",CommonSettings.spu_advanced,IniName);
++					WritePrivateProfileInt("ff-bgm1x", "SfxVolume", ffbgm_sfxVolume(), IniName);
+ 
+ 					return TRUE;
+ 				}
+ 			case IDCANCEL:
+ 				{
++					ffbgm_setSfxVolume(sfxVolumeAtOpen);
+ 					EndDialog(hDlg, FALSE);
+ 					return TRUE;
+ 				}
