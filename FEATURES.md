@@ -28,7 +28,7 @@
 
 **melonDS 1.1**
 - 게임이 사운드 CPU 에 보내는 명령(IPC FIFO)을 지켜보다가, 닌텐도 표준 사운드 데이터(SDAT)의 같은 시퀀스를 내장 재생기로 연주한다. 원본은 페이더로 끈다.
-- 게임이 도중에 멈추는 효과음은 게임 안에서 울린 시간만큼 1배속으로 낸 뒤 멈춘다. 상태 저장을 불러오면 연주 중이던 곡을 같은 위치부터 이어 받는다.
+- 게임이 도중에 멈추는 효과음은 게임 안에서 울린 시간만큼 1배속으로 낸 뒤 멈춘다. 상태 저장을 불러왔을 때 같은 반복 곡이면 1배속 연주를 그대로 이어 가고, 다른 곡이면 같은 위치부터 이어 받는다. 같은 효과음을 짧은 간격으로 되풀이하면 그 간격도 1배속으로 맞춘다.
 
 **DeSmuME (Git `3c4b95a`, Windows)**
 - melonDS 판과 같은 재생기(같은 코드)를 DeSmuME 의 IPC FIFO 쓰기, 사운드 출력, 메인 루프에 연결했다.
@@ -100,7 +100,7 @@ music and sound effects play at 1x speed and original pitch.
 
 **melonDS 1.1**
 - Watches the sound commands the game sends to the sound CPU (IPC FIFO) and plays the same sequences from the cartridge's standard sound data (SDAT) with a built-in player; the originals are muted via the fader.
-- Sound effects the game stops early play at 1x for as long as they sounded in game time. After loading a save state, the current song continues from the same position.
+- Sound effects the game stops early play at 1x for as long as they sounded in game time. After loading a save state, the 1x playback simply continues if the same looping song is still playing; otherwise the current song is picked up from the same position. When the game repeats the same sound effect at short intervals, the interval is kept at 1x too.
 
 **DeSmuME (Git `3c4b95a`, Windows)**
 - The same player as the melonDS version (same code), hooked into DeSmuME's IPC FIFO write, sound output and main loop.

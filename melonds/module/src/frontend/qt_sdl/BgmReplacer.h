@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -52,7 +53,7 @@ public:
     // 에뮬레이션 스레드: 원본 코어가 프레임 하나를 돌린 뒤
     void afterMainFrame();
     // 에뮬레이션 스레드: 상태를 불러온 직후 (프레임 번호가 그대로여도 추적을 다시 하게 한다)
-    void onStateLoaded() { forceReset = true; }
+    void onStateLoaded() { forceReset = true; stateLoaded = true; }
     // 오디오 스레드: 자체 재생기의 소리를 출력에 더한다
     // freshFrames: stream 에서 이번에 새로 채워진 앞부분의 길이 (그 뒤는 지난번 출력이 남아 있다)
     void mixInto(melonDS::s16* stream, int frames, int volume, int freshFrames);
@@ -109,7 +110,8 @@ private:
     void detach(int p);
     void releaseHeld();
     bool findDriverPlayers();
-    void recoverFromDriver();
+    void recoverFromDriver(const std::array<bool, 16>* skip = nullptr);
+    void reloadKeepingMusic();
 
     EmuInstance* inst;
     std::atomic<bool> enabled{true};
@@ -136,6 +138,14 @@ private:
     std::array<melonDS::u32, 16> sfxOrphanSeq{};
     // 게임이 멈춘 효과음을, 게임 안에서 울린 시간만큼 1배속으로 낸 뒤 멈출 출력 샘플 위치 (자체 재생기 번호별, 0 = 없음)
     std::array<melonDS::u64, 16> sfxStopAt{};
+    // 같은 효과음을 게임이 되풀이할 때의 간격 (시퀀스 주소별): 마지막으로 게임이 튼 프레임, 마지막으로 1배속으로 낸 실제 시각
+    struct SfxRepeat
+    {
+        melonDS::u32 lastTrigFrame = 0;
+        std::chrono::steady_clock::time_point lastPlay{};
+        bool played = false;
+    };
+    std::unordered_map<melonDS::u32, SfxRepeat> sfxRepeat;
     // 팡파레를 시작한 시점 (자체 재생기 번호별): 게임 프레임 번호와 자체 재생기의 출력 샘플 수
     std::array<melonDS::u32, 16> jingleFrame{};
     std::array<melonDS::u64, 16> jingleSample{};
@@ -149,6 +159,7 @@ private:
 
     melonDS::u32 driverPlayers = 0;  // ARM7 드라이버의 플레이어 배열 주소 (찾았을 때)
     bool forceReset = false;
+    bool stateLoaded = false;  // 상태를 불러온 뒤 첫 프레임: 같은 곡은 이어 간다
     melonDS::u32 sharedWork = 0;  // 드라이버가 상태를 써 주는 공유 영역의 주소
 };
 

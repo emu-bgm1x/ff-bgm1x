@@ -40,7 +40,8 @@ constexpr u32 kFaderOffset = 6;       // 플레이어 구조체 안의 페이더
 constexpr s32 kFaderMute = -10000;    // 드라이버가 최소 음량으로 잘라 쓰는 값보다 충분히 작은 값
 constexpr u32 kNodeSize = 24;         // {u32 next, u32 id, u32 arg[4]}
 constexpr size_t kRingFrames = 16384;  // 자체 재생기 출력 버퍼 (프레임)
-constexpr float kJingleSeconds = 12.0f;  // 반복 없는 곡이 이보다 짧으면 팡파레로 본다
+constexpr float kJingleSeconds = 12.0f;
+constexpr double kRepeatWindow = 2.0;  // 같은 효과음이 게임 시간으로 이 안에 다시 나오면 '되풀이' 로 본다 (초)  // 반복 없는 곡이 이보다 짧으면 팡파레로 본다
 
 enum { Kind_Leave = 0, Kind_Music, Kind_Jingle, Kind_LongOneShot, Kind_Sfx };
 
@@ -252,6 +253,7 @@ void BgmReplacer::resetTracking()
     orphan = {};
     sfxOrphan = {};
     sfxStopAt = {};
+    sfxRepeat.clear();
     synth.reset();
     std::lock_guard<std::mutex> lock(ringMutex);
     ringCount = 0;
@@ -452,6 +454,20 @@ void BgmReplacer::startMusic(int p)
     Player& pl = players[p];
     if (pl.sfx)
     {
+        // 같은 효과음을 게임이 짧은 간격으로 되풀이하면(낮은 체력 경고음, 발소리 등) 그 간격도 1배속으로 맞춘다:
+        // 앞의 소리를 1배속으로 낸 뒤로 실제로 흐른 시간이, 게임 안에서 되풀이한 간격보다 짧으면 이번 것은 내지 않는다.
+        // 원본 쪽은 이미 무음이라, 배속 중에는 게임이 되풀이한 횟수보다 적게 울린다. 1배속에서는 모두 낸다
+        {
+            SfxRepeat& r = sfxRepeat[pl.seqBase];
+            const auto now = std::chrono::steady_clock::now();
+            const double gameGap = (double)(lastFrame - r.lastTrigFrame) / 59.8261;
+            const bool repeat = r.played && lastFrame >= r.lastTrigFrame && gameGap <= kRepeatWindow;
+            r.lastTrigFrame = lastFrame;
+            if (repeat && std::chrono::duration<double>(now - r.lastPlay).count() < gameGap * 0.9)
+                return;  // 내지 않는다 (started 는 false 로 남아, 정지 명령도 따로 처리하지 않는다)
+            r.played = true;
+            r.lastPlay = now;
+        }
         // 같은 효과음이 아직 울리고 있으면 끊고 새로 낸다 (배속 중에 겹쳐 쌓이지 않게)
         for (Player& other : players)
             if (&other != &pl && other.music && other.sfx && other.started && other.seqBase == pl.seqBase)
@@ -575,7 +591,7 @@ bool BgmReplacer::findDriverPlayers()
 
 // 추적을 처음부터 다시 해야 할 때(상태 불러오기, 기능을 다시 켬): 게임이 지금 연주 중인 곡을 드라이버에서 읽어
 // 음악은 같은 위치부터 자체 재생기로 이어 받고, 연출 곡이면 연출 중으로 표시한다
-void BgmReplacer::recoverFromDriver()
+void BgmReplacer::recoverFromDriver(const std::array<bool, 16>* skip)
 {
     if (!findDriverPlayers()) return;
     synth.setMemory(FF_MAIN_RAM, FF_MAIN_RAM_MASK);
@@ -588,9 +604,11 @@ void BgmReplacer::recoverFromDriver()
         if (track0 >= 32) continue;
         const u32 seqBase = ffArm7R32(driverPlayers + 0x24 * 16 + 0x40 * track0 + 0x24);
         const u32 bank = ffArm7R32(x + 0x20);
+        if (skip && (*skip)[p]) continue;  // 이어 가는 곡
 
         Player& pl = players[p];
         pl = Player();
+        pl.seqBase = seqBase;
         const int kind = classify(seqBase, pl.name);
         if (kind == Kind_LongOneShot)
         {
@@ -642,11 +660,70 @@ void BgmReplacer::onRomLoaded()
     forceReset = true;
 }
 
+// 정리는 다음 프레임(afterMainFrame)에 한다. 상태 불러오기(savestate_load)가 안에서 NDS_Reset 을 부르므로
+// 여기서 바로 정리하면 같은 곡을 이어 갈 수 없다
 void BgmReplacer::onReset()
 {
     frameNo = 0;
     forceReset = true;
-    resetTracking();
+}
+
+// 상태를 불러온 뒤: 같은 플레이어에서 같은 반복 곡이 계속 나오고 있으면 자체 재생기의 연주를 끊지 않고 그대로 둔다
+// (GBA 판과 같은 동작). 그 밖의 곡은 처음부터 다시 추적한다 (드라이버가 연주 중인 곡을 그 위치부터 이어 받음)
+void BgmReplacer::reloadKeepingMusic()
+{
+    const std::array<Player, 16> prev = players;
+    std::array<bool, 16> keep{};
+    std::array<bool, 16> keepSynth{};
+    if (findDriverPlayers())
+    {
+        for (int p = 0; p < 16; p++)
+        {
+            const Player& pl = prev[p];
+            if (!pl.music || !pl.started || pl.sfx || pl.jingle || pl.synthId < 0 || !synth.playerActive(pl.synthId)) continue;
+            const u32 x = driverPlayers + 0x24 * p;
+            const u8 flags = ffArm7R8(x);
+            if (!(flags & 1) || ffArm7R8(x + 1) != p) continue;
+            const u8 track0 = ffArm7R8(x + 8);
+            if (track0 >= 32) continue;
+            if (ffArm7R32(driverPlayers + 0x24 * 16 + 0x40 * track0 + 0x24) != pl.seqBase) continue;
+            keep[p] = true;
+            keepSynth[pl.synthId & 15] = true;
+        }
+    }
+
+    // 이어 가지 않는 것은 모두 정리한다 (resetTracking 과 같되, 이어 갈 자체 재생기 플레이어와 출력 버퍼는 둔다)
+    bool any = false;
+    for (int id = 0; id < 16; id++)
+    {
+        if (keepSynth[id]) any = true;
+        else synth.stop(id);
+    }
+    players = {};
+    cutsceneNow = false;
+    orphan = {};
+    sfxOrphan = {};
+    sfxStopAt = {};
+    sfxRepeat.clear();
+    if (!any)
+    {
+        synth.reset();
+        std::lock_guard<std::mutex> lock(ringMutex);
+        ringCount = 0;
+    }
+    for (int p = 0; p < 16; p++)
+    {
+        if (!keep[p]) continue;
+        Player& pl = players[p];
+        pl = prev[p];
+        pl.holdStart = pl.holdResume = false;
+        const u32 x = driverPlayers + 0x24 * p;
+        // 상태에 들어 있던 페이더가 무음이 아니면(기능을 끄고 저장한 상태 등) 다시 무음으로: 원본이 같이 들리지 않게
+        ffArm7W16(x + 6, (u16)kFaderMute);
+        pl.muted = true;
+        synth.pause(pl.synthId, (ffArm7R8(x) & 4) != 0);
+    }
+    recoverFromDriver(&keep);
 }
 
 void BgmReplacer::onSoundFifo(u32 word)
@@ -805,11 +882,18 @@ void BgmReplacer::afterMainFrame()
     const u32 frame = ++frameNo;
     if (forceReset)
     {
+        const bool keep = stateLoaded && enabled;
         forceReset = false;
-        resetTracking();
+        stateLoaded = false;
         lastFrame = frame;
         indexCart();
-        if (enabled && frame > 60) recoverFromDriver();
+        if (keep)
+            reloadKeepingMusic();  // 상태 불러오기: 프레임 번호와 관계없이 드라이버에서 이어 받는다
+        else
+        {
+            resetTracking();
+            if (enabled && frame > 60) recoverFromDriver();
+        }
     }
     lastFrame = frame;
     if (enabled) releaseHeld();
