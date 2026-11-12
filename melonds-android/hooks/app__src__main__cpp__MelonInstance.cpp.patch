@@ -1,0 +1,67 @@
+diff --git a/app/src/main/cpp/MelonInstance.cpp b/app/src/main/cpp/MelonInstance.cpp
+index 3781ead2..b9972be5 100644
+--- a/app/src/main/cpp/MelonInstance.cpp
++++ b/app/src/main/cpp/MelonInstance.cpp
+@@ -78,10 +78,16 @@ MelonInstance::MelonInstance(int instanceId, std::shared_ptr<EmulatorConfigurati
+     nds->Reset();
+     setBatteryLevels();
+     setDateTime();
++
++    // ff-bgm1x
++    bgmReplacer = std::make_unique<BgmReplacer>(this);
++    applyBgmConfiguration();
+ }
+ 
+ MelonInstance::~MelonInstance()
+ {
++    nds->SoundFifoHook = nullptr;
++    bgmReplacer.reset();
+     frameQueue.clear();
+     net->UnregisterInstance(instanceId);
+     delete nds;
+@@ -357,6 +363,7 @@ u32 MelonInstance::runFrame()
+     }
+ 
+     u32 nLines = nds->RunFrame();
++    bgmReplacer->afterMainFrame();  // ff-bgm1x
+     retroAchievementsManager->FrameUpdate();
+ 
+     if (!isRendererAccelerated)
+@@ -532,6 +539,29 @@ void MelonInstance::updateConfiguration(std::shared_ptr<EmulatorConfiguration> n
+ 
+     currentConfiguration = newConfiguration;
+     isRenderConfigurationDirty = true;
++    applyBgmConfiguration();
++}
++
++// ff-bgm1x: 설정값을 BgmReplacer 에 적용한다 (켜고 끄기는 다음 프레임에 에뮬레이션 스레드가 적용)
++void MelonInstance::applyBgmConfiguration()
++{
++    if (!bgmReplacer || !currentConfiguration)
++        return;
++    bgmReplacer->requestEnabled(currentConfiguration->bgm1x);
++    bgmReplacer->setFastForwardCutscenes(currentConfiguration->bgm1xFastForwardCutscenes);
++    bgmReplacer->setSfx1x(currentConfiguration->bgm1xSfx);
++    bgmReplacer->setSfxVolume(currentConfiguration->bgm1xSfxVolume);
++}
++
++void MelonInstance::mixBgm(s16* buffer, int frames, int volume)
++{
++    if (bgmReplacer)
++        bgmReplacer->mixInto(buffer, frames, volume, frames);
++}
++
++bool MelonInstance::isBgmSpeedHold()
++{
++    return bgmReplacer && bgmReplacer->isEnabled() && !bgmReplacer->fastForwardCutscenes() && bgmReplacer->cutsceneActive();
+ }
+ 
+ void MelonInstance::requestNdsSaveWrite(const u8* saveData, u32 saveLength, u32 writeOffset, u32 writeLength)
+@@ -569,6 +599,7 @@ bool MelonInstance::loadState(Savestate* state)
+     {
+         setBatteryLevels();
+         setDateTime();
++        bgmReplacer->onStateLoaded();  // ff-bgm1x (되감기도 여기를 지난다)
+         return true;
+     }
+     else

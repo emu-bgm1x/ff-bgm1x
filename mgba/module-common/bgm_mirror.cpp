@@ -394,6 +394,7 @@ void BgmMultiMirror::reset() {
     std::lock_guard<std::mutex> lk(mtx_);
     players_.clear();
     cutscene_ = false;
+    psgMask_ = 0;
 }
 
 void BgmMultiMirror::stopAll() {
@@ -408,6 +409,7 @@ void BgmMultiMirror::stopAll() {
         p.seHeader = p.seClock = 0;
     }
     cutscene_ = false;
+    psgMask_ = 0;
 }
 
 void BgmMultiMirror::releaseMute(GbaBus& bus) {
@@ -479,6 +481,7 @@ void BgmMultiMirror::seStep(GbaBus& bus, Player& p, const BgmSnapshot& s, bool m
     const bool started = s.header != p.seHeader || s.clock < p.seClock;
     p.seHeader = s.header;
     p.seClock = s.clock;
+    if (started) seStarted_ = true;
     // 재생기에서 앞의 효과음이 아직 울리는 동안 새로 낸 소리는 건너뛴다. 배속 중에는 게임이 같은 소리를
     // 아주 빨리 거듭 내므로, 매번 처음부터 다시 틀면 소리가 나기도 전에 끊겨 들리지 않는다.
     // 게임에서 먼저 끝나거나 멈춰도 재생기는 끝까지 낸다
@@ -509,6 +512,7 @@ void BgmMultiMirror::cutLaggingJingles(const Player* except) {
 
 void BgmMultiMirror::onFrame(GbaBus& bus, bool mute) {
     bool cutscene = false;
+    seStarted_ = false;
     for (auto& p : players_) {
         if (p.se) {
             onSeFrame(bus, p, mute);
@@ -570,6 +574,35 @@ void BgmMultiMirror::onFrame(GbaBus& bus, bool mute) {
         p.mirror->update(s);
     }
     cutscene_ = cutscene;
+    if (mute) psgMask_ = computePsgMask(bus, seStarted_);
+}
+
+uint8_t BgmMultiMirror::computePsgMask(GbaBus& bus, bool seStarted) const {
+    // m4a SoundInfo(+0x1C) 의 CgbChannel 4개 (0x40 바이트씩): statusFlags(+0), 이 채널을 쓰는 트랙(+0x2C)
+    const uint32_t si = bus.r32(kSoundInfoPtr);
+    if (si < 0x02000000u || si >= 0x03008000u) return 0;
+    const uint32_t cgb = bus.r32(si + 0x1C);
+    if (cgb < 0x02000000u || cgb >= 0x03008000u) return 0;
+    uint8_t mask = 0;
+    for (int k = 0; k < 4; ++k) {
+        const uint32_t ch = cgb + k * 0x40;
+        if (!bus.r8(ch)) {
+            // 빈 채널: 대체할 효과음이 방금 시작됐으면 다음 프레임에 그 소리가 이 채널을 잡을 수 있으므로 미리 끈다
+            if (seStarted) mask |= 1 << k;
+            continue;
+        }
+        const uint32_t track = bus.r32(ch + 0x2C);
+        for (const auto& p : players_) {
+            if (!p.seOn && !p.music) continue;
+            const uint32_t base = bus.r32(p.info + 0x2C);
+            const uint32_t n = std::min<uint32_t>(bus.r8(p.info + 8), 16);
+            if (track >= base && track < base + n * TRACK_SIZE) {
+                mask |= 1 << k;
+                break;
+            }
+        }
+    }
+    return mask;
 }
 
 void BgmMultiMirror::render(float* out, int frames) {

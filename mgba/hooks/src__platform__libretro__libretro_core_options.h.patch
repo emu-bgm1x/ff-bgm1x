@@ -1,0 +1,120 @@
+diff --git a/src/platform/libretro/libretro_core_options.h b/src/platform/libretro/libretro_core_options.h
+index 76ca634..54ec829 100644
+--- a/src/platform/libretro/libretro_core_options.h
++++ b/src/platform/libretro/libretro_core_options.h
+@@ -168,6 +168,42 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+       },
+       "ON"
+    },
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++   /* ff-bgm1x: libretro/mgba 에서 가져옴 (색 보정·프레임 블렌딩) */
++   {
++      "mgba_color_correction",
++      "Color Correction",
++      NULL,
++      "Adjusts output colors to match the display of real GBA/GBC hardware.",
++      NULL,
++      "video",
++      {
++         { "OFF",  "disabled" },
++         { "GBA",  "Game Boy Advance" },
++         { "GBC",  "Game Boy Color" },
++         { "Auto", NULL },
++         { NULL, NULL },
++      },
++      "OFF"
++   },
++   {
++      "mgba_interframe_blending",
++      "Interframe Blending",
++      NULL,
++      "Simulates LCD ghosting effects. 'Simple' performs a 50:50 mix of the current and previous frames. 'Smart' attempts to detect screen flickering, and only performs a 50:50 mix on affected pixels. 'LCD Ghosting' mimics natural LCD response times by combining multiple buffered frames. 'Simple' or 'Smart' blending is required when playing games that aggressively exploit LCD ghosting for transparency effects (Wave Race, Chikyuu Kaihou Gun ZAS, F-Zero, the Boktai series...).",
++      NULL,
++      "video",
++      {
++         { "OFF",               "disabled" },
++         { "mix",               "Simple" },
++         { "mix_smart",         "Smart" },
++         { "lcd_ghosting",      "LCD Ghosting (Accurate)" },
++         { "lcd_ghosting_fast", "LCD Ghosting (Fast)" },
++         { NULL, NULL },
++      },
++      "OFF"
++   },
++#endif
+    {
+       "mgba_audio_low_pass_filter",
+       "Audio Filter",
+@@ -303,6 +339,72 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+       },
+       "0"
+    },
++   /* ff-bgm1x: 프론트엔드가 ff_bgm1x_mix 를 불러 줄 때만 동작한다 */
++   {
++      "mgba_ff_bgm1x",
++      "BGM at 1x Speed (Fast Forward)",
++      NULL,
++      "Keeps background music at normal speed while fast forwarding. Requires a frontend that calls ff_bgm1x_mix.",
++      NULL,
++      "audio",
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
++   {
++      "mgba_ff_bgm1x_cutscenes",
++      "Fast Forward During Cutscenes",
++      NULL,
++      "When disabled, fast forward pauses while cutscene music is playing.",
++      NULL,
++      "audio",
++      {
++         { "disabled", NULL },
++         { "enabled",  NULL },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "mgba_ff_bgm1x_sfx",
++      "Sound Effects at 1x Speed",
++      NULL,
++      "Also plays sound effects at normal speed while fast forwarding.",
++      NULL,
++      "audio",
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
++   {
++      "mgba_ff_bgm1x_sfx_volume",
++      "1x Sound Effect Volume",
++      NULL,
++      "Volume of the sound effects played at normal speed (percent).",
++      NULL,
++      "audio",
++      {
++         { "100", NULL },
++         { "0",   NULL },
++         { "10",  NULL },
++         { "20",  NULL },
++         { "30",  NULL },
++         { "40",  NULL },
++         { "50",  NULL },
++         { "60",  NULL },
++         { "70",  NULL },
++         { "80",  NULL },
++         { "90",  NULL },
++         { NULL, NULL },
++      },
++      "100"
++   },
+    { NULL, NULL, NULL, NULL, NULL, NULL, {{0}}, NULL },
+ };
+ 

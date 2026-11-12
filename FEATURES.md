@@ -32,7 +32,20 @@
 
 **Azahar 2126.2**
 - BGM: 게임 데이터의 스트림 파일(BCSTM, AAC)을 색인해 두고, DSP 음성이 받는 버퍼로 어느 곡인지 알아내 직접 해독해 1배속으로 낸다.
-- 효과음: 배속 중에 DSP 음성이 새 소리를 시작하면 그 음성의 실제 출력(볼륨 포함)을 녹음해 1배속으로 다시 낸다. 배속이 꺼져 있으면 원본 그대로.
+- 효과음: 배속 중에 DSP 음성이 새 소리를 시작하면 그 음성의 실제 출력(볼륨 포함)을 녹음해 1배속으로 다시 낸다. 느린 속도(100% 미만)에서는 음성이 받은 소리 데이터를 미리 풀어 1배속으로 낸다. 속도가 정확히 100% 이면 원본 그대로.
+
+## 모바일판 (안드로이드)
+
+| 앱 | 바탕 | 1배속 소리 | 더한 것 |
+|---|---|---|---|
+| GBA | Lemuroid + LibretroDroid + mGBA libretro 코어 | PC mGBA 와 같은 재생기를 코어에 넣음 (GBA) | 배속 최대 16배(기본·게임별), 화면 빨리 감기 버튼(켜고 끄기), 센서(기울기·자이로·조도), 치트(직접 입력·.cht 불러오기), 화면 방향(자동·가로·세로, 게임별), 색 보정·잔상(프레임 섞기), 메뉴 버튼 한 번에 열기 |
+| NDS | melonDS Android | PC melonDS 와 같은 재생기 | 기본 배치에 메뉴(일시정지) 버튼 |
+| 3DS | Azahar 안드로이드 | PC Azahar 와 같은 코드 | 설정 화면에 1배속 항목, 화면 메뉴 버튼(한 번에 메뉴) |
+
+세 앱 공통 배치 편집기: 버튼·화면을 끌어 옮기기, 절대 좌표(px) 숫자 입력, 길게 눌러 여러 개 선택해 같이 옮기기,
+그룹(그룹 안에 그룹), 서로 맞추기(끝·가운데·높이), 가로·세로 등간격, 고른 버튼을 같은 실제 크기로, 화면 기준 정렬·꽉 채우기·여백·격자,
+왼쪽 기준 좌우 대칭. 3DS·GBA 는 버튼 삭제(기본 버튼 포함)와, 화면에 없는 기능만 고를 수 있는 버튼 추가
+(빠른 저장·불러오기, 1배속 옵션 켜기/끄기 등). melonDS 는 떠 있는 새 패널과 원래 아래 패널을 골라 쓴다.
 
 ## 기능과 별개로 고친 것
 
@@ -86,7 +99,20 @@ music and sound effects play at 1x speed and original pitch.
 
 **Azahar 2126.2**
 - BGM: indexes the stream files (BCSTM, AAC) in the game data, recognizes which song a DSP voice is playing from its buffers, and decodes it itself at 1x.
-- Sound effects: while fast-forwarding, when a DSP voice starts a new sound, its actual output (with volume) is recorded and replayed at 1x. Without fast-forward, the original is used.
+- Sound effects: while fast-forwarding, when a DSP voice starts a new sound, its actual output (with volume) is recorded and replayed at 1x. At slow speeds (below 100%), the sound data the voice receives is decoded ahead and played at 1x. At exactly 100%, the original is used.
+
+## Mobile (Android)
+
+| App | Based on | 1x sound | Additions |
+|---|---|---|---|
+| GBA | Lemuroid + LibretroDroid + mGBA libretro core | same player as PC mGBA, inside the core (GBA) | fast-forward up to 16x (default and per game), on-screen fast-forward toggle, sensors (tilt, gyro, light), cheats (manual and .cht import), screen orientation (auto/landscape/portrait, per game), color correction and frame blending, one-tap menu button |
+| NDS | melonDS Android | same player as PC melonDS | menu (pause) button in the default layouts |
+| 3DS | Azahar Android | same code as PC Azahar | 1x options in the settings screen, one-tap on-screen menu button |
+
+Layout editor in all three: drag buttons and screens, absolute (px) number input, long-press multi-select and move together,
+groups (nestable), align to each other (edges, centers), even spacing, same real size for selected buttons, screen-relative
+alignment, fill, margin, grid, left-to-right mirror. 3DS and GBA can delete any button (including default ones) and add only
+functions that are not on screen (quick save/load, 1x option toggles, ...). melonDS has a new floating panel and keeps the original one.
 
 ## Other fixes
 

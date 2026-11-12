@@ -1,0 +1,12 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.h b/libretrodroid/src/main/cpp/libretrodroidjni.h
+index 02ab0fc..aa38383 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.h
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.h
+@@ -50,6 +50,7 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_changeDisk
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setRumbleEnabled(JNIEnv* env, jclass obj, jboolean enabled);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setFrameSpeed(JNIEnv* env, jclass obj, jint speed);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setAudioEnabled(JNIEnv* env, jclass obj, jboolean enabled);
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setScreenRotation(JNIEnv* env, jclass obj, jint rotation);
+ 
+ }
+ 

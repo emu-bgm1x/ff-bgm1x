@@ -1,0 +1,12 @@
+diff --git a/src/android/app/src/main/res/values/arrays.xml b/src/android/app/src/main/res/values/arrays.xml
+index 5e8aff3..cc34867 100644
+--- a/src/android/app/src/main/res/values/arrays.xml
++++ b/src/android/app/src/main/res/values/arrays.xml
+@@ -189,6 +189,7 @@
+         <item>@string/button_swap</item>
+         <item>@string/button_turbo</item>
+         <item>@string/button_combo</item>
++        <item>@string/button_menu</item>
+     </string-array>
+ 
+     <string-array name="comboOptions">

@@ -1,0 +1,14 @@
+diff --git a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+index 866824a..101ade3 100644
+--- a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+@@ -17,4 +17,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_portrait_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>

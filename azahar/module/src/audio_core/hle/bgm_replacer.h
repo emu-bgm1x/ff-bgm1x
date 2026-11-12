@@ -70,13 +70,17 @@ public:
     bool OnPcmBuffer(std::size_t source_id, u32 address, u32 length, u32 channels);
     void UpdateSourceGain(std::size_t source_id, const std::array<std::array<float, 4>, 3>& gain);
     void UpdateMixerVolumes(const std::array<float, 3>& volumes);
-    // 효과음 음성 미러 (sfx_mirror.h). 음성이 새 소리를 시작할 때: 배속 중이면 녹음을 시작하고 true
-    // (그 소리는 원본 믹스에서 뺀다)
-    bool MirrorBegin(std::size_t source_id);
+    // 효과음 음성 미러 (sfx_mirror.h). 음성이 새 소리를 시작할 때 속도를 보고 방식을 정한다:
+    // 0 = 원본 그대로, 1 = 녹음 (배속 중), 2 = 앞당겨 해독 (느린 속도). 0 이 아니면 그 소리는 원본 믹스에서 뺀다
+    int MirrorBegin(std::size_t source_id);
     void MirrorEnd(std::size_t source_id);
-    // 녹음 중인 음성의 이번 프레임 출력. 녹음이 끝났으면(메뉴에서 끔 등) false -> 원본으로 돌아간다
+    // 녹음 중인 음성의 이번 프레임 출력. 미러가 끝났으면(메뉴에서 끔 등) false -> 원본으로 돌아간다
     bool MirrorFeed(std::size_t source_id, const StereoFrame16& frame,
                     const std::array<std::array<float, 4>, 3>& gain);
+    // 앞당겨 해독: 음성이 받은 버퍼의 해독 결과, 그리고 프레임마다 지금 볼륨·재생 배율
+    void MirrorAheadBuffer(std::size_t source_id, const AudioInterp::StereoBuffer16& pcm, bool loop);
+    bool MirrorAheadUpdate(std::size_t source_id, const std::array<std::array<float, 4>, 3>& gain,
+                           float rate);
 
     // ---- 오디오 출력 스레드 ----
     void Mix(s16* buffer, std::size_t frames, u32 sample_rate);

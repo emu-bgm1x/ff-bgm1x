@@ -1,0 +1,14 @@
+diff --git a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+index 0fe950e..93362e5 100644
+--- a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+@@ -29,4 +29,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_screen_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>

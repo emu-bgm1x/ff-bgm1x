@@ -1,0 +1,18 @@
+diff --git a/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml b/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
+index 525ac0bc..3dabf065 100644
+--- a/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
++++ b/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
+@@ -29,6 +29,13 @@
+     <string name="setting_gambatte_dark_filter_level">화면 어둡게 하기</string>
+     <string name="setting_gambatte_gbc_color_correction">색 보정</string>
+     <string name="setting_mgba_solar_sensor_level">태양광 센서 수준</string>
++    <!-- ff-bgm1x -->
++    <string name="setting_mgba_ff_bgm1x">BGM 1배속 유지 (배속 중)</string>
++    <string name="setting_mgba_ff_bgm1x_cutscenes">연출 중에도 배속</string>
++    <string name="setting_mgba_ff_bgm1x_sfx">효과음 1배속</string>
++    <string name="setting_mgba_ff_bgm1x_sfx_volume">1배속 효과음 볼륨</string>
++    <string name="value_mgba_ff_bgm1x_enabled">켬</string>
++    <string name="value_mgba_ff_bgm1x_disabled">끔</string>
+     <string name="setting_mgba_interframe_blending">LCD 고스팅</string>
+     <string name="setting_mgba_frameskip">프레임 스킵</string>
+     <string name="setting_mgba_color_correction">색 보정</string>

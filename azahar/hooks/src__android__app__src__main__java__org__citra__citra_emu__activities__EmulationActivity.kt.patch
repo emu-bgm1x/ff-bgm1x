@@ -1,0 +1,14 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+index 108fd3c..1ac0635 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+@@ -354,7 +354,8 @@ class EmulationActivity : AppCompatActivity() {
+             return false
+         }
+ 
+-        if (emulationFragment.isDrawerOpen()) {
++        // ff-bgm1x: 배치 편집기가 열려 있으면 키보드 입력(숫자 칸)이 화면으로 가야 한다
++        if (emulationFragment.isDrawerOpen() || emulationFragment.isLayoutEditorOpen()) {
+             return super.dispatchKeyEvent(event)
+         }
+ 

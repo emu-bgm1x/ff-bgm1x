@@ -1,0 +1,17 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
+index 7b6bca49..a09fc27f 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
+@@ -44,6 +44,12 @@ enum class GameMenuRoute(
+         titleId = R.string.game_menu_settings,
+         parent = HOME,
+     ),
++    // ff-bgm1x
++    CHEATS(
++        route = "cheats",
++        titleId = R.string.game_menu_cheats,
++        parent = HOME,
++    ),
+     ;
+ 
+     fun canGoBack(): Boolean {

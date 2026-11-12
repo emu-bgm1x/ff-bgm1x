@@ -1,5 +1,5 @@
 diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
-index 4728526..fac8b8d 100755
+index 4728526..e9df2f9 100755
 --- a/src/audio_core/hle/source.cpp
 +++ b/src/audio_core/hle/source.cpp
 @@ -5,6 +5,7 @@
@@ -10,7 +10,21 @@ index 4728526..fac8b8d 100755
  #include "audio_core/hle/common.h"
  #include "audio_core/hle/source.h"
  #include "audio_core/interpolate.h"
-@@ -28,6 +29,46 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+@@ -18,6 +19,13 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+                                   const s16_le (&adpcm_coeffs)[16]) {
+     ParseConfig(config, adpcm_coeffs);
+ 
++    // ff-bgm1x: 새 소리를 시작했으면 효과음 미러 방식을 정한다
++    if (mirror_new && state.enabled) {
++        mirror_new = false;
++        if (mirror_mode) BgmReplacer::Instance().MirrorEnd(source_id);
++        mirror_mode = BgmReplacer::Instance().MirrorBegin(source_id);
++    }
++
+     if (state.enabled) {
+         GenerateFrame();
+     }
+@@ -28,6 +36,44 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
  void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
      const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
      if (!state.enabled) {
@@ -20,8 +34,8 @@ index 4728526..fac8b8d 100755
 +            bgm_replaced = false;
 +            BgmReplacer::Instance().OnSourceIdle(source_id);
 +        }
-+        if (mirrored) {
-+            mirrored = false;
++        if (mirror_mode) {
++            mirror_mode = 0;
 +            BgmReplacer::Instance().MirrorEnd(source_id);
 +        }
 +        return;
@@ -32,8 +46,8 @@ index 4728526..fac8b8d 100755
 +        if (intermediate_mix_id == 0) {
 +            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
 +        }
-+        if (mirrored) {
-+            mirrored = false;
++        if (mirror_mode) {
++            mirror_mode = 0;
 +            BgmReplacer::Instance().MirrorEnd(source_id);
 +        }
 +        state.gain_ramp_start.at(intermediate_mix_id) = gains;
@@ -42,22 +56,20 @@ index 4728526..fac8b8d 100755
 +    }
 +
 +    // ff-bgm1x: 효과음 음성 미러. 배속 중에 시작한 소리는 이 음성의 출력(볼륨 포함)을 녹음해 1배속으로 내고,
-+    // 원본 믹스에서는 뺀다 (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
-+    if (intermediate_mix_id == 0) {
-+        if (mirror_new) {
-+            mirror_new = false;
-+            if (mirrored) BgmReplacer::Instance().MirrorEnd(source_id);
-+            mirrored = BgmReplacer::Instance().MirrorBegin(source_id);
-+        }
-+        if (mirrored && !BgmReplacer::Instance().MirrorFeed(source_id, current_frame, state.gain)) {
-+            mirrored = false;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
-+        }
++    // 느린 속도에서 시작한 소리는 앞당겨 해독한 버퍼를 지금 볼륨·재생 배율로 낸다. 어느 쪽이든 원본 믹스에서는 뺀다
++    // (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
++    if (intermediate_mix_id == 0 && mirror_mode) {
++        const bool alive =
++            mirror_mode == 1
++                ? BgmReplacer::Instance().MirrorFeed(source_id, current_frame, state.gain)
++                : BgmReplacer::Instance().MirrorAheadUpdate(source_id, state.gain, state.rate_multiplier);
++        if (!alive) mirror_mode = 0;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
 +    }
-+    if (mirrored) {
++    if (mirror_mode) {
          state.gain_ramp_start.at(intermediate_mix_id) = gains;
          state.gain_ramp_active.at(intermediate_mix_id) = false;
          return;
-@@ -64,6 +105,15 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+@@ -64,6 +110,15 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
  void Source::Reset() {
      current_frame.fill({});
      state = {};
@@ -65,15 +77,15 @@ index 4728526..fac8b8d 100755
 +        bgm_replaced = false;
 +        BgmReplacer::Instance().OnSourceIdle(source_id);
 +    }
-+    if (mirrored) {
-+        mirrored = false;
++    if (mirror_mode) {
++        mirror_mode = 0;
 +        BgmReplacer::Instance().MirrorEnd(source_id);
 +    }
 +    mirror_new = true;
  }
  
  void Source::Sleep() {
-@@ -102,6 +152,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+@@ -102,6 +157,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
  
      if (config.enable_dirty) {
          config.enable_dirty.Assign(0);
@@ -81,7 +93,7 @@ index 4728526..fac8b8d 100755
          state.enabled = config.enable != 0;
          LOG_TRACE(Audio_DSP, "source_id={} enable={}", source_id, state.enabled);
      }
-@@ -281,6 +332,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+@@ -281,6 +337,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
  
      if (config.embedded_buffer_dirty) {
          config.embedded_buffer_dirty.Assign(0);
@@ -89,7 +101,15 @@ index 4728526..fac8b8d 100755
          // HACK
          // Luigi's Mansion Dark Moon configures the embedded buffer with an extremely large value
          // for length, causing the Dequeue method to allocate a buffer of that size, eating up all
-@@ -462,13 +514,28 @@ bool Source::DequeueBuffer() {
+@@ -449,6 +506,7 @@ bool Source::DequeueBuffer() {
+ 
+     Buffer buf = state.input_queue.top();
+     state.input_queue.pop();
++    const bool loop_repeat = buf.has_played;  // ff-bgm1x: 반복 버퍼가 다시 돌아옴
+ 
+     if (buf.adpcm_dirty) {
+         state.adpcm_state.yn1 = buf.adpcm_yn[0];
+@@ -462,13 +520,28 @@ bool Source::DequeueBuffer() {
          const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
          switch (buf.format) {
          case Format::PCM8:
@@ -118,3 +138,20 @@ index 4728526..fac8b8d 100755
              state.current_buffer =
                  Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
              break;
+@@ -506,6 +579,16 @@ bool Source::DequeueBuffer() {
+         state.current_buffer.begin(),
+         std::next(state.current_buffer.begin(), state.current_sample_number));
+ 
++    // ff-bgm1x: 느린 속도의 효과음 미러 - 받은 버퍼 전체를 넘겨 실제 시간으로 낸다 (BGM 음성은 BGM 쪽이 맡는다)
++    if (mirror_mode == 2) {
++        if (bgm_replaced) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        } else if (!loop_repeat) {
++            BgmReplacer::Instance().MirrorAheadBuffer(source_id, state.current_buffer, buf.is_looping);
++        }
++    }
++
+     LOG_TRACE(Audio_DSP,
+               "source_id={} buffer_id={} from_queue={} current_buffer.size()={}, "
+               "buf.has_played={}, buf.play_position={}",

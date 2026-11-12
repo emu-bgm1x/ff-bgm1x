@@ -64,3 +64,16 @@ GB/GBC (포켓몬 금·은·크리스탈):
 - **정적 exe 빌드**(선택): 공식판처럼 exe 하나로 만들려면 Qt 정적판, `.a` 만 찾도록 하는 CMake 설정, `USE_LIBZIP=OFF`, libepoxy DllMain 대신 `EpoxyStaticInit.cpp` 의 TLS 콜백이 필요했다.
 - GB 엔진 프로필은 하나뿐이다. 다른 GB 게임은 프로필을 추가해야 한다 (`detectGbDriver`).
 - 줄바꿈: 이 자료는 LF.
+
+## 6. libretro 코어 (안드로이드 Lemuroid 용)
+
+`src/platform/libretro/` 에 같은 재생기를 붙였습니다. 앱 쪽은 `lemuroid/PORTING-AI.md` 를 보세요.
+
+| 파일 | 역할 |
+|---|---|
+| `module/src/platform/libretro/ff_bgm1x.cpp/.h` | 재생기(`BgmReplacer`)를 코어에 붙이고 `ff_bgm1x_mix`·`ff_bgm1x_speed_hold` 를 내보낸다 |
+| `hooks/src__platform__libretro__libretro.c.patch` | 코어 불러오기·리셋·프레임마다 재생기 호출, 코어 옵션 읽기, 색 보정·프레임 섞기(libretro/mgba 에서 가져옴) |
+| `hooks/src__platform__libretro__libretro_core_options.h.patch` | 코어 옵션 정의 |
+| `hooks/CMakeLists.txt.patch` | `BUILD_LIBRETRO` 에 C++ 소스(`../common`, qt `BgmReplacer`·`GbDriverBgm`) 추가 |
+
+빌드: `android/build_mgba_libretro.sh` (Android NDK·CMake, `MGBA_SRC` 에 소스 폴더).

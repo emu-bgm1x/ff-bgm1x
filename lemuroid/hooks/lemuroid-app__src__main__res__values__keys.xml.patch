@@ -1,0 +1,14 @@
+diff --git a/lemuroid-app/src/main/res/values/keys.xml b/lemuroid-app/src/main/res/values/keys.xml
+index fa7f12fd..5f57d689 100644
+--- a/lemuroid-app/src/main/res/values/keys.xml
++++ b/lemuroid-app/src/main/res/values/keys.xml
+@@ -29,6 +29,9 @@
+     <string name="pref_key_shader_filter" translatable="false">shader_filter_0</string>
+     <string name="pref_key_hd_mode" translatable="false">hd_mode</string>
+     <string name="pref_key_viewport_alignment" translatable="false">viewport_alignment</string>
++    <!-- ff-bgm1x -->
++    <string name="pref_key_fast_forward_speed" translatable="false">ff_bgm1x_fast_forward_speed</string>
++    <string name="pref_key_screen_orientation" translatable="false">ff_bgm1x_screen_orientation</string>
+ 
+     <string-array translatable="false" name="pref_key_haptic_feedback_mode_values">
+         <item>none</item>

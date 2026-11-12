@@ -1,0 +1,25 @@
+diff --git a/libretrodroid/src/main/cpp/videolayout.cpp b/libretrodroid/src/main/cpp/videolayout.cpp
+index 8b89326..07f33b9 100644
+--- a/libretrodroid/src/main/cpp/videolayout.cpp
++++ b/libretrodroid/src/main/cpp/videolayout.cpp
+@@ -50,7 +50,7 @@ void VideoLayout::updateForegroundVertices() {
+     float screenW = screenWidth * viewportRect.getWidth();
+     float screenH = screenHeight * viewportRect.getHeight();
+     float screenAspect = screenW / screenH;
+-    float contentAspect = aspectRatio;
++    float contentAspect = stretch ? screenAspect : aspectRatio;
+ 
+     float scaleX = viewportRect.getWidth();
+     float scaleY = viewportRect.getHeight();
+@@ -197,6 +197,11 @@ void VideoLayout::updateViewportAlignment(unsigned int viewportAlignment) {
+     updateBuffers();
+ }
+ 
++void VideoLayout::updateStretch(bool stretch) {
++    this->stretch = stretch;
++    updateBuffers();
++}
++
+ void VideoLayout::updateRotation(float rotation) {
+     LOGD("Updated rotation to : %f", rotation);
+ 

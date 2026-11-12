@@ -1,0 +1,50 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+index c7fb0d3..ebda6c0 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+@@ -71,6 +71,45 @@ class ScreenAdjustmentUtil(
+         NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+     }
+ 
++    // ff-bgm1x: 화면 배치 편집기용. 지금 저장된 사용자 배치 (x, y, 너비, 높이) 를 위·아래 화면 순서로 돌려준다
++    fun customLayout(portrait: Boolean): Pair<IntArray, IntArray> {
++        val s = customLayoutSettings(portrait)
++        return intArrayOf(s[0].int, s[1].int, s[2].int, s[3].int) to
++            intArrayOf(s[4].int, s[5].int, s[6].int, s[7].int)
++    }
++
++    // ff-bgm1x: 편집기에서 정한 사용자 배치를 저장하고, 배치를 '사용자 지정' 으로 바꿔 바로 적용한다
++    fun applyCustomLayout(portrait: Boolean, top: IntArray, bottom: IntArray) {
++        val s = customLayoutSettings(portrait)
++        val values = top + bottom
++        for (i in s.indices) {
++            s[i].int = values[i].coerceAtLeast(0)
++            settings.saveSetting(s[i], SettingsFile.FILE_NAME_CONFIG)
++        }
++        if (portrait) {
++            changePortraitOrientation(PortraitScreenLayout.CUSTOM_PORTRAIT_LAYOUT.int)
++        } else {
++            changeScreenOrientation(ScreenLayout.CUSTOM_LAYOUT.int)
++        }
++    }
++
++    private fun customLayoutSettings(portrait: Boolean): List<IntSetting> =
++        if (portrait) {
++            listOf(
++                IntSetting.PORTRAIT_TOP_X, IntSetting.PORTRAIT_TOP_Y,
++                IntSetting.PORTRAIT_TOP_WIDTH, IntSetting.PORTRAIT_TOP_HEIGHT,
++                IntSetting.PORTRAIT_BOTTOM_X, IntSetting.PORTRAIT_BOTTOM_Y,
++                IntSetting.PORTRAIT_BOTTOM_WIDTH, IntSetting.PORTRAIT_BOTTOM_HEIGHT
++            )
++        } else {
++            listOf(
++                IntSetting.LANDSCAPE_TOP_X, IntSetting.LANDSCAPE_TOP_Y,
++                IntSetting.LANDSCAPE_TOP_WIDTH, IntSetting.LANDSCAPE_TOP_HEIGHT,
++                IntSetting.LANDSCAPE_BOTTOM_X, IntSetting.LANDSCAPE_BOTTOM_Y,
++                IntSetting.LANDSCAPE_BOTTOM_WIDTH, IntSetting.LANDSCAPE_BOTTOM_HEIGHT
++            )
++        }
++
+     fun changeSecondaryOrientation(layoutOption: Int) {
+         IntSetting.SECONDARY_DISPLAY_LAYOUT.int = layoutOption
+         settings.saveSetting(IntSetting.SECONDARY_DISPLAY_LAYOUT, SettingsFile.FILE_NAME_CONFIG)

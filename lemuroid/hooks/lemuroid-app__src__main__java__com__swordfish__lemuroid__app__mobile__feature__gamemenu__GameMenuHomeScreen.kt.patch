@@ -1,0 +1,99 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
+index 09b87eaa..20f28e1e 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
+@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.verticalScroll
+ import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Code
++import androidx.compose.material.icons.filled.ScreenRotation
+ import androidx.compose.material.icons.filled.Sensors
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.Text
+@@ -17,6 +19,8 @@ import com.alorma.compose.settings.storage.memory.rememberMemoryBooleanSettingSt
+ import com.alorma.compose.settings.storage.memory.rememberMemoryIntSettingState
+ import com.swordfish.lemuroid.R
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.tilt.TiltConfigurationMenuEntry
++import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
++import com.swordfish.lemuroid.app.mobile.feature.settings.screenOrientationName
+ import com.swordfish.lemuroid.app.shared.GameMenuContract
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsList
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsMenuLink
+@@ -108,6 +112,30 @@ fun GameMenuHomeScreen(
+                     onResult { putExtra(GameMenuContract.RESULT_ENABLE_FAST_FORWARD, it) }
+                 },
+             )
++
++            // ff-bgm1x: 이 게임의 빨리 감기 배수 (첫 항목 = 기본값)
++            val speeds = listOf(0) + SettingsManager.FAST_FORWARD_SPEEDS
++            LemuroidSettingsList(
++                title = { Text(text = stringResource(id = R.string.game_menu_fast_forward_speed)) },
++                items =
++                    speeds.map {
++                        if (it == 0) {
++                            stringResource(R.string.game_menu_fast_forward_speed_default, gameMenuRequest.defaultFastForwardSpeed)
++                        } else {
++                            stringResource(R.string.fast_forward_speed_value, it)
++                        }
++                    },
++                icon = {
++                    Icon(
++                        painterResource(R.drawable.ic_menu_fast_forward),
++                        contentDescription = stringResource(id = R.string.game_menu_fast_forward_speed),
++                    )
++                },
++                state = rememberMemoryIntSettingState(speeds.indexOf(gameMenuRequest.gameFastForwardSpeed).coerceAtLeast(0)),
++                onItemSelected = { index, _ ->
++                    onResult { putExtra(GameMenuContract.RESULT_CHANGE_GAME_FAST_FORWARD_SPEED, speeds[index]) }
++                },
++            )
+         }
+ 
+         if (gameMenuRequest.numDisks > 1) {
+@@ -154,6 +182,45 @@ fun GameMenuHomeScreen(
+             )
+         }
+ 
++        // ff-bgm1x: 이 게임의 화면 방향 (첫 항목 = 기본값)
++        val orientations = listOf("") + SettingsManager.SCREEN_ORIENTATIONS
++        LemuroidSettingsList(
++            title = { Text(text = stringResource(id = R.string.game_menu_screen_orientation)) },
++            items =
++                orientations.map {
++                    if (it.isEmpty()) {
++                        stringResource(
++                            R.string.screen_orientation_default,
++                            screenOrientationName(gameMenuRequest.defaultScreenOrientation),
++                        )
++                    } else {
++                        screenOrientationName(it)
++                    }
++                },
++            icon = {
++                Icon(
++                    imageVector = Icons.Default.ScreenRotation,
++                    contentDescription = stringResource(id = R.string.game_menu_screen_orientation),
++                )
++            },
++            state = rememberMemoryIntSettingState(orientations.indexOf(gameMenuRequest.gameScreenOrientation).coerceAtLeast(0)),
++            onItemSelected = { index, _ ->
++                onResult { putExtra(GameMenuContract.RESULT_CHANGE_GAME_SCREEN_ORIENTATION, orientations[index]) }
++            },
++        )
++
++        // ff-bgm1x: 치트
++        LemuroidSettingsMenuLink(
++            title = { Text(text = stringResource(id = R.string.game_menu_cheats)) },
++            icon = {
++                Icon(
++                    imageVector = Icons.Default.Code,
++                    contentDescription = stringResource(id = R.string.game_menu_cheats),
++                )
++            },
++            onClick = { navController.navigateToRoute(GameMenuRoute.CHEATS) },
++        )
++
+         if (gameMenuRequest.allTiltConfigurations.isNotEmpty()) {
+             val tiltConfigurationEntries =
+                 gameMenuRequest.allTiltConfigurations

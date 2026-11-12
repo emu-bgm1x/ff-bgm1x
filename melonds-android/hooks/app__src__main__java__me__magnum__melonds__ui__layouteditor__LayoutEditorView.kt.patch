@@ -1,0 +1,648 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
+index c70cf791..8bdc37a8 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
+@@ -2,8 +2,15 @@ package me.magnum.melonds.ui.layouteditor
+ 
+ import android.content.Context
+ import android.util.AttributeSet
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.DashPathEffect
++import android.graphics.Paint
++import android.graphics.RectF
+ import android.view.KeyEvent
++import android.view.HapticFeedbackConstants
+ import android.view.MotionEvent
++import android.view.ViewConfiguration
+ import android.view.View
+ import me.magnum.melonds.domain.model.*
+ import me.magnum.melonds.domain.model.layout.LayoutComponent
+@@ -25,6 +32,8 @@ typealias ViewSelectedListener = (
+ ) -> Unit
+ 
+ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(context, attrs) {
++    enum class Edge { LEFT, RIGHT, TOP, BOTTOM }
++
+     enum class Anchor {
+         TOP_LEFT,
+         TOP_RIGHT,
+@@ -41,6 +50,25 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     private var selectedViewAnchor = Anchor.TOP_LEFT
+     private var modifiedByUser = false
+ 
++    // ff-bgm1x: 끌 때 맞추는 격자 간격 (px, 0 이면 끔)
++    var gridSize = 0
++    // ff-bgm1x: 길게 눌러 함께 고른 항목들 (selectedView 는 따로, 크기 막대·숫자는 selectedView 기준)
++    private val extraSelection = LinkedHashSet<LayoutComponentView>()
++    // ff-bgm1x: 고른 항목의 자리·크기가 바뀌면 부른다 (X·Y 표시용)
++    var onSelectedViewChanged: ((LayoutComponentView) -> Unit)? = null
++    // ff-bgm1x: 고른 것이 바뀌거나 배치가 바뀌면 부른다 (새 편집 패널 갱신용)
++    var onEditorChanged: (() -> Unit)? = null
++
++    // ff-bgm1x: 그룹. 번호 → 구성원 (항목 이름 또는 "g<번호>"). 그룹 안에 그룹을 넣을 수 있다
++    private val groups = LinkedHashMap<Int, MutableList<String>>()
++    private val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
++    private val groupPaint = Paint().apply {
++        style = Paint.Style.STROKE
++        color = Color.MAGENTA
++        strokeWidth = context.dpToPixels(2f)
++        pathEffect = DashPathEffect(floatArrayOf(context.dpToPixels(8f), context.dpToPixels(5f)), 0f)
++    }
++
+     init {
+         super.setOnClickListener {
+             if (selectedView != null) {
+@@ -54,6 +82,232 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     override fun instantiateLayout(layoutConfiguration: UILayout, layoutTarget: LayoutTarget) {
+         super.instantiateLayout(layoutConfiguration, layoutTarget)
+         modifiedByUser = false
++        loadGroups()
++    }
++
++    // ff-bgm1x: 그룹 ------------------------------------------------------
++
++    private fun keyOf(view: LayoutComponentView) = view.component.name
++
++    private fun viewOf(key: String) = views.entries.firstOrNull { it.key.name == key }?.value
++
++    private fun isGroup(member: String) = member.startsWith("g")
++
++    private fun groupId(member: String) = member.substring(1).toInt()
++
++    private fun parentOf(member: String): Int? = groups.entries.firstOrNull { member in it.value }?.key
++
++    private fun rootOf(member: String): String {
++        var m = member
++        while (true) {
++            val p = parentOf(m) ?: return m
++            m = "g$p"
++        }
++    }
++
++    private fun rootGroups() = groups.keys.filter { parentOf("g$it") == null }.map { "g$it" }
++
++    private fun leavesOf(member: String): List<String> =
++        if (isGroup(member)) groups[groupId(member)].orEmpty().flatMap { leavesOf(it) } else listOf(member)
++
++    private fun boundsOf(views: List<LayoutComponentView>): RectF? {
++        if (views.isEmpty()) return null
++        val b = RectF(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
++        views.forEach {
++            val p = it.getPosition()
++            b.union(p.x.toFloat(), p.y.toFloat(), (p.x + it.getWidth()).toFloat(), (p.y + it.getHeight()).toFloat())
++        }
++        return b
++    }
++
++    private fun memberBounds(member: String) = boundsOf(leavesOf(member).mapNotNull { viewOf(it) })
++
++    private fun moveMemberBy(member: String, dx: Int, dy: Int) {
++        leavesOf(member).mapNotNull { viewOf(it) }.forEach {
++            val p = it.getPosition()
++            it.setPosition(Point(p.x + dx, p.y + dy))
++        }
++    }
++
++    fun selectedUnits(): List<String> = selection().map { rootOf(keyOf(it)) }.distinct()
++
++    // 서로 맞추기·등간격의 대상: 단위가 둘 이상이면 그 단위들, 그룹 하나만 골랐으면 그 그룹의 바로 아래 구성원들
++    fun alignTargets(): List<String> {
++        val units = selectedUnits()
++        if (units.size == 1 && isGroup(units[0])) return groups[groupId(units[0])].orEmpty().toList()
++        return units
++    }
++
++    fun hasGroupSelected() = selectedUnits().any { isGroup(it) }
++
++    fun makeGroup() {
++        val units = selectedUnits()
++        if (units.size < 2) return
++        val gid = (groups.keys.maxOrNull() ?: 0) + 1
++        groups[gid] = units.toMutableList()
++        saveGroups()
++        editorChanged()
++    }
++
++    fun ungroup() {
++        selectedUnits().filter { isGroup(it) }.forEach { groups.remove(groupId(it)) }
++        cleanupGroups()
++        saveGroups()
++        editorChanged()
++    }
++
++    // 빈 그룹은 지우고, 구성원이 하나뿐인 그룹은 그 구성원으로 바꾼다
++    private fun cleanupGroups() {
++        var changed = true
++        while (changed) {
++            changed = false
++            for ((gid, members) in groups.entries.toList()) {
++                members.removeAll { isGroup(it) && groupId(it) !in groups }
++                if (members.size <= 1) {
++                    val only = members.firstOrNull()
++                    groups.remove(gid)
++                    groups.values.forEach { list ->
++                        val i = list.indexOf("g$gid")
++                        if (i >= 0) {
++                            if (only != null) list[i] = only else list.removeAt(i)
++                        }
++                    }
++                    changed = true
++                }
++            }
++        }
++    }
++
++    private fun loadGroups() {
++        groups.clear()
++        prefs.getString(PREF_GROUPS, "")!!.split(';').forEach { entry ->
++            val parts = entry.split('=')
++            if (parts.size != 2) return@forEach
++            val gid = parts[0].toIntOrNull() ?: return@forEach
++            groups[gid] = parts[1].split(',').filter { it.isNotEmpty() }.toMutableList()
++        }
++        groups.values.forEach { list -> list.removeAll { !isGroup(it) && viewOf(it) == null } }
++        cleanupGroups()
++        invalidate()
++    }
++
++    private fun saveGroups() {
++        prefs.edit().putString(PREF_GROUPS, groups.entries.joinToString(";") { "${it.key}=${it.value.joinToString(",")}" }).apply()
++    }
++
++    enum class Align { LEFT, H_CENTER, RIGHT, TOP, V_CENTER, BOTTOM }
++
++    fun alignEach(align: Align) {
++        val bounds = alignTargets().mapNotNull { m -> memberBounds(m)?.let { m to it } }
++        if (bounds.size < 2) return
++        val all = RectF(bounds[0].second).also { b -> bounds.forEach { b.union(it.second) } }
++        bounds.forEach { (m, b) ->
++            when (align) {
++                Align.LEFT -> moveMemberBy(m, (all.left - b.left).roundToInt(), 0)
++                Align.H_CENTER -> moveMemberBy(m, (all.centerX() - b.centerX()).roundToInt(), 0)
++                Align.RIGHT -> moveMemberBy(m, (all.right - b.right).roundToInt(), 0)
++                Align.TOP -> moveMemberBy(m, 0, (all.top - b.top).roundToInt())
++                Align.V_CENTER -> moveMemberBy(m, 0, (all.centerY() - b.centerY()).roundToInt())
++                Align.BOTTOM -> moveMemberBy(m, 0, (all.bottom - b.bottom).roundToInt())
++            }
++        }
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // 등간격: gap 이 null 이면 양 끝은 두고 사이를 같게, 숫자면 첫 대상부터 그 간격으로 늘어놓는다
++    fun distribute(horizontal: Boolean, gap: Int?) {
++        val bounds = alignTargets().mapNotNull { m -> memberBounds(m)?.let { m to it } }
++            .sortedBy { if (horizontal) it.second.left else it.second.top }
++        if (bounds.size < 2) return
++        val sizes = bounds.map { if (horizontal) it.second.width() else it.second.height() }
++        val start = if (horizontal) bounds.first().second.left else bounds.first().second.top
++        val end = if (horizontal) bounds.last().second.right else bounds.last().second.bottom
++        val spacing = gap?.toFloat() ?: ((end - start - sizes.sum()) / (bounds.size - 1))
++        var pos = start
++        bounds.forEachIndexed { i, (m, b) ->
++            if (horizontal) moveMemberBy(m, (pos - b.left).roundToInt(), 0) else moveMemberBy(m, 0, (pos - b.top).roundToInt())
++            pos += sizes[i] + spacing
++        }
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // ff-bgm1x: 버튼 추가·기능 바꾸기·지우기 ---------------------------------
++
++    fun availableComponents(): List<LayoutComponent> = LayoutComponent.entries.filter { it !in views.keys }
++
++    // 새 버튼은 화면 가운데에 두고 고른다
++    fun addComponentCentered(component: LayoutComponent) {
++        addLayoutComponent(component)
++        val view = views[component] ?: return
++        post {
++            place(view, (width - view.getWidth()) / 2, (height - view.getHeight()) / 2)
++            deselectCurrentView()
++            selectView(view)
++            editorChanged()
++        }
++    }
++
++    // 고른 항목 하나를 다른 기능으로 바꾼다 (자리·크기 그대로)
++    fun changeSelectedComponent(component: LayoutComponent) {
++        val view = selectedView ?: return
++        if (view.component.isScreen() || component in views.keys) return
++        val p = view.getPosition()
++        val rect = Rect(p.x, p.y, view.getWidth(), view.getHeight())
++        val oldKey = keyOf(view)
++        deselectCurrentView()
++        removeView(view.view)
++        views.remove(view.component)
++        val newView = addPositionedLayoutComponent(PositionedLayoutComponent(rect, component, view.baseAlpha, view.onTop))
++        views[component] = newView
++        groups.values.forEach { list -> list.replaceAll { if (it == oldKey) component.name else it } }
++        saveGroups()
++        modifiedByUser = true
++        selectView(newView)
++        editorChanged()
++    }
++
++    // 고른 항목을 모두 지운다
++    fun deleteSelection() {
++        val doomed = selection()
++        if (doomed.isEmpty()) return
++        deselectCurrentView()
++        doomed.forEach {
++            removeView(it.view)
++            views.remove(it.component)
++            groups.values.forEach { list -> list.remove(keyOf(it)) }
++        }
++        cleanupGroups()
++        saveGroups()
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // 고른 항목의 크기 (가운데 유지)
++    fun resizeSelectedView(w: Int, h: Int) {
++        val view = selectedView ?: return
++        val cx = view.getPosition().x + view.getWidth() / 2
++        val cy = view.getPosition().y + view.getHeight() / 2
++        place(view, cx - w / 2, cy - h / 2, w, h)
++        editorChanged()
++    }
++
++    fun selectedViewOrNull(): LayoutComponentView? = selectedView
++
++    private fun editorChanged() {
++        invalidate()
++        post { onEditorChanged?.invoke() }
++    }
++
++    // 맨 바깥 그룹을 보라색 점선으로 감싼다
++    override fun dispatchDraw(canvas: Canvas) {
++        super.dispatchDraw(canvas)
++        val pad = context.dpToPixels(4f)
++        rootGroups().forEach { g ->
++            val b = memberBounds(g) ?: return@forEach
++            canvas.drawRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, groupPaint)
++        }
+     }
+ 
+     fun setOnViewSelectedListener(listener: ViewSelectedListener) {
+@@ -110,32 +364,51 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     private fun setupDragHandler(layoutComponentView: LayoutComponentView) {
+         layoutComponentView.view.setOnTouchListener(object : OnTouchListener {
+             private var dragging = false
++            private var groupDrag = false
++            private var longPressed = false
+ 
+             private var downOffsetX = -1f
+             private var downOffsetY = -1f
+ 
++            // ff-bgm1x: 길게 누르면 고른 묶음에 더하거나 뺀다
++            private val longPress = Runnable {
++                longPressed = true
++                toggleSelection(layoutComponentView)
++                layoutComponentView.view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
++            }
++
+             override fun onTouch(view: View?, motionEvent: MotionEvent?): Boolean {
+                 if (view == null)
+                     return false
+ 
+-                if (selectedView != null) {
+-                    deselectCurrentView()
+-                }
+-
+                 return when (motionEvent?.action) {
+                     MotionEvent.ACTION_DOWN -> {
+                         downOffsetX = motionEvent.x
+                         downOffsetY = motionEvent.y
+-                        view.alpha = 1f
+-                        layoutComponentView.setHighlighted(true)
++                        longPressed = false
++                        view.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                         true
+                     }
+                     MotionEvent.ACTION_MOVE -> {
++                        if (longPressed) return true
+                         if (!dragging) {
+                             val distance = sqrt((motionEvent.x - downOffsetX).pow(2f) + (motionEvent.y - downOffsetY).pow(2f))
+                             if (distance >= 25) {
+                                 dragging = true
++                                view.removeCallbacks(longPress)
++                                // 고른 묶음 안의 항목이면 묶음째, 그룹에 든 항목이면 그 그룹째, 아니면 그것만 옮긴다
++                                if (!isSelected(layoutComponentView) && rootOf(keyOf(layoutComponentView)) != keyOf(layoutComponentView)) {
++                                    selectUnit(layoutComponentView)
++                                }
++                                groupDrag = isSelected(layoutComponentView)
++                                if (!groupDrag) {
++                                    deselectCurrentView()
++                                    view.alpha = 1f
++                                    layoutComponentView.setHighlighted(true)
++                                }
+                             }
++                        } else if (groupDrag) {
++                            dragGroup(layoutComponentView, motionEvent.x - downOffsetX, motionEvent.y - downOffsetY)
+                         } else {
+                             dragView(layoutComponentView, motionEvent.x - downOffsetX, motionEvent.y - downOffsetY)
+                         }
+@@ -143,13 +416,18 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+                     }
+                     MotionEvent.ACTION_CANCEL,
+                     MotionEvent.ACTION_UP -> {
+-                        if (!dragging) {
+-                            selectView(layoutComponentView)
+-                        } else {
++                        view.removeCallbacks(longPress)
++                        if (longPressed) {
++                            // 길게 누른 것으로 끝
++                        } else if (!dragging) {
++                            selectUnit(layoutComponentView)
++                        } else if (!groupDrag) {
+                             view.alpha = 0.5f
+                             layoutComponentView.setHighlighted(false)
+-                            dragging = false
+                         }
++                        dragging = false
++                        groupDrag = false
++                        longPressed = false
+                         true
+                     }
+                     else -> false
+@@ -158,6 +436,96 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         })
+     }
+ 
++    // ff-bgm1x: 고른 항목 전부 (기준 항목 먼저)
++    private fun selection(): List<LayoutComponentView> = listOfNotNull(selectedView) + extraSelection
++
++    private fun isSelected(view: LayoutComponentView) = view == selectedView || view in extraSelection
++
++    fun selectionCount(): Int = selection().size
++
++    // ff-bgm1x: 그 항목이 속한 맨 바깥 단위(그룹이면 그룹 전체)를 고른다
++    private fun selectUnit(view: LayoutComponentView) {
++        deselectCurrentView()
++        selectView(view)
++        leavesOf(rootOf(keyOf(view))).mapNotNull { viewOf(it) }.filter { it != view }.forEach {
++            extraSelection.add(it)
++            it.view.alpha = 1f
++            it.setHighlighted(true)
++        }
++        notifySelectedViewChanged(view)
++        editorChanged()
++    }
++
++    // ff-bgm1x: 길게 누르면 그 단위를 고른 묶음에 더하거나 뺀다
++    private fun toggleSelection(view: LayoutComponentView) {
++        val unit = leavesOf(rootOf(keyOf(view))).mapNotNull { viewOf(it) }
++        if (isSelected(view)) {
++            unit.filter { it != view }.forEach { toggleOne(it, false) }
++            toggleOne(view, false)
++        } else {
++            toggleOne(view, true)
++            unit.filter { it != view }.forEach { toggleOne(it, true) }
++        }
++        editorChanged()
++    }
++
++    private fun toggleOne(view: LayoutComponentView, add: Boolean) {
++        if (add == isSelected(view)) return
++        when {
++            view in extraSelection -> {
++                extraSelection.remove(view)
++                view.view.alpha = 0.5f
++                view.setHighlighted(false)
++            }
++            view == selectedView -> {
++                // 기준 항목을 빼면 함께 고른 것 중 하나가 기준이 된다
++                val next = extraSelection.firstOrNull()
++                if (next == null) {
++                    deselectCurrentView()
++                } else {
++                    extraSelection.remove(next)
++                    view.view.alpha = 0.5f
++                    view.setHighlighted(false)
++                    selectView(next)
++                }
++            }
++            selectedView == null -> selectView(view)
++            else -> {
++                extraSelection.add(view)
++                view.view.alpha = 1f
++                view.setHighlighted(true)
++            }
++        }
++        selectedView?.let { notifySelectedViewChanged(it) }
++    }
++
++    // ff-bgm1x: 끄는 항목을 기준으로 묶음 전체를 같은 만큼 옮긴다
++    private fun dragGroup(view: LayoutComponentView, offsetX: Float, offsetY: Float) {
++        val position = view.getPosition()
++        val targetX = snap(position.x + offsetX)
++        val targetY = snap(position.y + offsetY)
++        moveGroupBy((targetX - position.x).roundToInt(), (targetY - position.y).roundToInt())
++    }
++
++    // ff-bgm1x: 묶음 전체가 화면 밖으로 나가지 않는 범위에서 같이 옮긴다
++    private fun moveGroupBy(dx: Int, dy: Int) {
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val top = group.minOf { it.getPosition().y }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        val cdx = dx.coerceIn(-left, max(width - right, -left))
++        val cdy = dy.coerceIn(-top, max(height - bottom, -top))
++        group.forEach {
++            val p = it.getPosition()
++            it.setPosition(Point(p.x + cdx, p.y + cdy))
++        }
++        modifiedByUser = true
++        selectedView?.let { notifySelectedViewChanged(it) }
++        invalidate()
++    }
++
+     private fun selectView(view: LayoutComponentView) {
+         val anchorDistances = mutableMapOf<Anchor, Double>()
+         anchorDistances[Anchor.TOP_LEFT] = view.getPosition().x.toDouble().pow(2) + view.getPosition().y.toDouble().pow(2)
+@@ -180,9 +548,20 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         val widthScale = (view.getWidth() - minComponentSize) / (width - minComponentSize).toFloat()
+         val heightScale = (view.getHeight() - minComponentSize) / (height - minComponentSize).toFloat()
+         onViewSelectedListener?.invoke(view, widthScale, heightScale, width, height, minComponentSize)
++        notifySelectedViewChanged(view)
++    }
++
++    fun clearSelection() {
++        deselectCurrentView()
++        editorChanged()
+     }
+ 
+     private fun deselectCurrentView() {
++        extraSelection.forEach {
++            it.view.alpha = 0.5f
++            it.setHighlighted(false)
++        }
++        extraSelection.clear()
+         selectedView?.let {
+             it.view.alpha = 0.5f
+             it.setHighlighted(false)
+@@ -201,10 +580,113 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+ 
+     private fun dragView(view: LayoutComponentView, offsetX: Float, offsetY: Float) {
+         val currentPosition = view.getPosition()
+-        val finalX = min(max(currentPosition.x + offsetX, 0f), width - view.getWidth().toFloat())
+-        val finalY = min(max(currentPosition.y + offsetY, 0f), height - view.getHeight().toFloat())
++        val finalX = min(max(snap(currentPosition.x + offsetX), 0f), width - view.getWidth().toFloat())
++        val finalY = min(max(snap(currentPosition.y + offsetY), 0f), height - view.getHeight().toFloat())
+         view.setPosition(Point(finalX.toInt(), finalY.toInt()))
+         modifiedByUser = true
++        notifySelectedViewChanged(view)
++    }
++
++    // ff-bgm1x: 자리는 레이아웃이 끝나야 view.x 에 반영되므로 그 뒤에 알린다
++    private fun notifySelectedViewChanged(view: LayoutComponentView) {
++        view.view.post { if (view == selectedView) onSelectedViewChanged?.invoke(view) }
++    }
++
++    // ff-bgm1x: 격자 맞춤
++    private fun snap(value: Float): Float {
++        return if (gridSize > 0) (value / gridSize).roundToInt() * gridSize.toFloat() else value
++    }
++
++    // ff-bgm1x: 항목을 화면 안으로 넣어 자리·크기를 정한다
++    private fun place(view: LayoutComponentView, x: Int, y: Int, w: Int = view.getWidth(), h: Int = view.getHeight()) {
++        val finalW = w.coerceIn(minComponentSize, max(width, minComponentSize))
++        val finalH = h.coerceIn(minComponentSize, max(height, minComponentSize))
++        val finalX = x.coerceIn(0, max(width - finalW, 0))
++        val finalY = y.coerceIn(0, max(height - finalH, 0))
++        view.setPositionAndSize(Point(finalX, finalY), finalW, finalH)
++        modifiedByUser = true
++        notifySelectedViewChanged(view)
++    }
++
++    fun getSelectedView(): LayoutComponentView? = selectedView
++
++    // ff-bgm1x: 기준 항목의 자리를 정하고, 함께 고른 항목은 같은 만큼 옮긴다
++    fun moveSelectedViewTo(x: Int?, y: Int?) {
++        val view = selectedView ?: return
++        val position = view.getPosition()
++        moveGroupBy((x ?: position.x) - position.x, (y ?: position.y) - position.y)
++    }
++
++    // ff-bgm1x: 고른 묶음을 한 덩어리로 가장자리에 붙인다 (여백 px 만큼 띄움)
++    fun alignSelectedView(edge: Edge, margin: Int) {
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val top = group.minOf { it.getPosition().y }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        when (edge) {
++            Edge.LEFT -> moveGroupBy(margin - left, 0)
++            Edge.RIGHT -> moveGroupBy(width - margin - right, 0)
++            Edge.TOP -> moveGroupBy(0, margin - top)
++            Edge.BOTTOM -> moveGroupBy(0, height - margin - bottom)
++        }
++    }
++
++    /**
++     * ff-bgm1x: 고른 화면을 여백만 남기고 꽉 채운다. 세로 화면은 너비를, 가로 화면은 높이를 채우고
++     * 다른 축의 자리는 그대로 둔다. [ratio] 가 있으면 그 비율을 지킨다 (없으면 다른 축 크기 유지).
++     */
++    fun fillSelectedScreen(margin: Int, ratio: Float?) {
++        val view = selectedView ?: return
++        val position = view.getPosition()
++        if (height > width) {
++            val w = width - 2 * margin
++            val h = ratio?.let { (w / it).roundToInt() } ?: view.getHeight()
++            place(view, margin, position.y, w, h)
++        } else {
++            val h = height - 2 * margin
++            val w = ratio?.let { (h * it).roundToInt() } ?: view.getWidth()
++            place(view, position.x, margin, w, h)
++        }
++        refreshSelection()
++    }
++
++    // ff-bgm1x: 함께 고른 버튼들을 기준 버튼과 같은 크기로 (각 항목의 가운데는 유지)
++    fun sameSizeForSelection() {
++        val source = selectedView ?: return
++        if (source.component.isScreen()) return
++        val w = source.getWidth()
++        val h = source.getHeight()
++        extraSelection.filter { !it.component.isScreen() }.forEach {
++            val cx = it.getPosition().x + it.getWidth() / 2
++            val cy = it.getPosition().y + it.getHeight() / 2
++            place(it, cx - w / 2, cy - h / 2, w, h)
++        }
++    }
++
++    // ff-bgm1x: 짝(방향키↔ABXY, L↔R, SELECT↔START) 중 왼쪽에 있는 것을 기준으로 오른쪽 것을 거울 자리로 옮긴다
++    fun mirrorLeftToRight() {
++        val pairs = listOf(
++            LayoutComponent.DPAD to LayoutComponent.BUTTONS,
++            LayoutComponent.BUTTON_L to LayoutComponent.BUTTON_R,
++            LayoutComponent.BUTTON_SELECT to LayoutComponent.BUTTON_START,
++        )
++        pairs.forEach { (a, b) ->
++            val viewA = views[a] ?: return@forEach
++            val viewB = views[b] ?: return@forEach
++            val centerA = viewA.getPosition().x + viewA.getWidth() / 2
++            val centerB = viewB.getPosition().x + viewB.getWidth() / 2
++            val (left, right) = if (centerA <= centerB) viewA to viewB else viewB to viewA
++            val mirroredCenterX = width - (left.getPosition().x + left.getWidth() / 2)
++            val centerY = left.getPosition().y + left.getHeight() / 2
++            place(right, mirroredCenterX - right.getWidth() / 2, centerY - right.getHeight() / 2)
++        }
++    }
++
++    // ff-bgm1x: 크기 조절 막대 등을 고른 항목의 지금 값으로 다시 맞춘다
++    fun refreshSelection() {
++        selectedView?.let { selectView(it) }
+     }
+ 
+     fun setSelectedViewAlpha(alpha: Float) {
+@@ -241,20 +723,21 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         }
+     }
+ 
++    // ff-bgm1x: 고른 묶음을 한 덩어리로 가운데에 둔다
+     fun centerSelectedViewHorizontally() {
+-        val view = selectedView ?: return
+-        val centerX = (width - view.getWidth()) / 2
+-        val position = view.getPosition()
+-        view.setPosition(Point(centerX, position.y))
+-        modifiedByUser = true
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        moveGroupBy((width - (right - left)) / 2 - left, 0)
+     }
+ 
+     fun centerSelectedViewVertically() {
+-        val view = selectedView ?: return
+-        val centerY = (height - view.getHeight()) / 2
+-        val position = view.getPosition()
+-        view.setPosition(Point(position.x, centerY))
+-        modifiedByUser = true
++        val group = selection()
++        if (group.isEmpty()) return
++        val top = group.minOf { it.getPosition().y }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        moveGroupBy(0, (height - (bottom - top)) / 2 - top)
+     }
+ 
+     fun scaleSelectedView(scale: Float) {
+@@ -317,5 +800,10 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         }
+         currentlySelectedView.setPositionAndSize(Point(viewX, viewY), newViewWidth, newViewHeight)
+         modifiedByUser = true
++        notifySelectedViewChanged(currentlySelectedView)
++    }
++
++    companion object {
++        private const val PREF_GROUPS = "ff_layout_editor_groups"
+     }
+-}
+\ No newline at end of file
++}

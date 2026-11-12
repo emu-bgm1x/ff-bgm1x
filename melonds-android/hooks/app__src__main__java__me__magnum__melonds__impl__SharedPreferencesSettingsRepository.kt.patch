@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+index 4d688b35..1c708b87 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+@@ -157,6 +157,10 @@ class SharedPreferencesSettingsRepository(
+             dsiNandUri = dsiDirDocument?.findFile("nand.bin")?.uri,
+             internalDirectory = context.filesDir.absolutePath,
+             fastForwardSpeedMultiplier = getFastForwardSpeedMultiplier(),
++            bgm1x = preferences.getBoolean("ff_bgm1x_bgm_1x", true),
++            bgm1xFastForwardCutscenes = preferences.getBoolean("ff_bgm1x_ff_cutscenes", false),
++            bgm1xSfx = preferences.getBoolean("ff_bgm1x_sfx_1x", true),
++            bgm1xSfxVolume = preferences.getInt("ff_bgm1x_sfx_volume", 256).coerceIn(0, 256),
+             rewindEnabled = isRewindEnabled(),
+             rewindPeriodSeconds = getRewindPeriod(),
+             rewindWindowSeconds = getRewindWindow(),

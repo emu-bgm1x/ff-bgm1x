@@ -1,0 +1,23 @@
+diff --git a/src/android/app/src/main/jni/native.cpp b/src/android/app/src/main/jni/native.cpp
+index fd52ce0..7db53ec 100644
+--- a/src/android/app/src/main/jni/native.cpp
++++ b/src/android/app/src/main/jni/native.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include <core/hle/service/cfg/cfg.h>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/arch.h"
+ 
+ #if CITRA_ARCH(arm64)
+@@ -379,6 +380,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
+             SCOPE_EXIT({ Settings::values.volume = volume; });
+             Settings::values.volume = 0;
+ 
++            // ff-bgm1x: 사용자가 일시정지한 동안 대체 재생도 멈춘다
++            AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(false);
++            SCOPE_EXIT({ AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(true); });
++
+             std::unique_lock pause_lock{paused_mutex};
+             running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
+             window->PollEvents();

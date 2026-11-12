@@ -1,0 +1,91 @@
+diff --git a/lemuroid-app/src/main/res/values/strings.xml b/lemuroid-app/src/main/res/values/strings.xml
+index 861ee9ed..deddeba0 100644
+--- a/lemuroid-app/src/main/res/values/strings.xml
++++ b/lemuroid-app/src/main/res/values/strings.xml
+@@ -131,6 +131,86 @@
+     <string name="game_menu_edit_touch_controls">Edit Controls</string>
+     <string name="game_menu_mute_audio">Mute</string>
+     <string name="game_menu_fast_forward">Fast-Forward</string>
++    <!-- ff-bgm1x -->
++    <string name="settings_title_fast_forward_speed">Fast-forward speed</string>
++    <string name="fast_forward_speed_value">%1$dx</string>
++    <string name="game_menu_fast_forward_speed">Fast-forward speed (this game)</string>
++    <string name="game_menu_fast_forward_speed_default">Default (%1$dx)</string>
++    <string name="game_menu_cheats">Cheats</string>
++    <string name="game_menu_cheats_add">Add cheat</string>
++    <string name="game_menu_cheats_import">Import .cht</string>
++    <string name="game_menu_cheats_empty">No cheats for this game.</string>
++    <string name="game_menu_cheats_delete">Delete</string>
++    <string name="game_menu_cheats_name">Name</string>
++    <string name="game_menu_cheats_code">Code (one per line)</string>
++    <string name="game_menu_cheats_default_name">Cheat %1$d</string>
++    <string name="custom_layout_open">Move buttons</string>
++    <string name="custom_layout_hint">Tap to select one, long-press to select several. Drag to move.</string>
++    <string name="custom_layout_game_view">Game screen</string>
++    <string name="custom_layout_selected_button">Selected button</string>
++    <string name="custom_layout_size">Size %1$d%%</string>
++    <string name="custom_layout_reset_item">Reset selected</string>
++    <string name="custom_layout_show_fast_forward">Show fast-forward button</string>
++    <string name="custom_layout_target_default">Default</string>
++    <string name="custom_layout_target_game">This game</string>
++    <string name="custom_layout_reset_all">Reset all</string>
++    <string name="custom_layout_save">Save</string>
++    <string name="custom_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="custom_layout_panel_collapse">Collapse</string>
++    <string name="custom_layout_panel_expand">Expand</string>
++    <string name="custom_layout_x">X px</string>
++    <string name="custom_layout_y">Y px</string>
++    <string name="custom_layout_size_field">Size %</string>
++    <string name="custom_layout_w">W px</string>
++    <string name="custom_layout_h">H px</string>
++    <string name="custom_layout_center_h">Center H</string>
++    <string name="custom_layout_center_v">Center V</string>
++    <string name="custom_layout_edge_left">◀ Left</string>
++    <string name="custom_layout_edge_right">Right ▶</string>
++    <string name="custom_layout_edge_top">▲ Top</string>
++    <string name="custom_layout_edge_bottom">▼ Bottom</string>
++    <string name="custom_layout_fill">Fill screen</string>
++    <string name="custom_layout_same_size">Same size for selected buttons</string>
++    <string name="custom_layout_add_button">Add button</string>
++    <string name="custom_layout_change_function">Change function</string>
++    <string name="custom_layout_delete_button">Delete button</string>
++    <string name="custom_layout_choose_function">Add (only ones not on screen)</string>
++    <string name="custom_layout_group">Group</string>
++    <string name="custom_layout_ungroup">Ungroup</string>
++    <string name="custom_layout_section_each">Align to each other (inside the group if one group is selected)</string>
++    <string name="custom_layout_align_left">Left edges</string>
++    <string name="custom_layout_align_hcenter">Center (vertical line)</string>
++    <string name="custom_layout_align_right">Right edges</string>
++    <string name="custom_layout_align_top">Top edges</string>
++    <string name="custom_layout_align_vcenter">Same height</string>
++    <string name="custom_layout_align_bottom">Bottom edges</string>
++    <string name="custom_layout_dist_h">Space horizontally</string>
++    <string name="custom_layout_dist_v">Space vertically</string>
++    <string name="custom_layout_gap">Gap px (empty = even)</string>
++    <string name="custom_func_none">None</string>
++    <string name="custom_func_menu">Menu</string>
++    <string name="custom_func_fast_forward">FF</string>
++    <string name="custom_func_quick_save">Save</string>
++    <string name="custom_func_quick_load">Load</string>
++    <string name="custom_func_bgm_1x">BGM 1x</string>
++    <string name="custom_func_sfx_1x">SFX 1x</string>
++    <string name="custom_func_ff_cutscenes">FF in cutscenes</string>
++    <string name="custom_func_state_on">On</string>
++    <string name="custom_func_state_off">Off</string>
++    <string name="custom_layout_base_dpad">D-Pad</string>
++    <string name="custom_layout_base_analog">Analog stick</string>
++    <string name="custom_layout_base_face">A·B buttons</string>
++    <string name="custom_layout_selected_many">%1$s and %2$d more selected (yellow = reference)</string>
++    <string name="custom_layout_mirror">Mirror left buttons to right</string>
++    <string name="custom_layout_margin">Margin px</string>
++    <string name="custom_layout_grid">Grid px (0 = off)</string>
++    <string name="custom_layout_keep_aspect">Keep game aspect ratio</string>
++    <string name="settings_title_screen_orientation">Screen orientation</string>
++    <string name="game_menu_screen_orientation">Screen orientation (this game)</string>
++    <string name="screen_orientation_default">Default (%1$s)</string>
++    <string name="screen_orientation_auto">Auto (follow the phone)</string>
++    <string name="screen_orientation_landscape">Landscape</string>
++    <string name="screen_orientation_portrait">Portrait</string>
+     <string name="game_menu_change_disk_disk">Disk %1$s</string>
+     <string name="game_menu_tilt_sensor">Tilt Sensor</string>
+ 

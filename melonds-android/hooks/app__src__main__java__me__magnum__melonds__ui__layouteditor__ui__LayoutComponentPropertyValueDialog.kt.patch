@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
+index e499adef..4ab2eafb 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
+@@ -36,6 +36,10 @@ fun LayoutComponentPropertyValueDialog(
+             LayoutComponentEditableProperty.SIZE -> stringResource(R.string.label_size)
+             LayoutComponentEditableProperty.WIDTH -> stringResource(R.string.label_width)
+             LayoutComponentEditableProperty.HEIGHT -> stringResource(R.string.label_height)
++            LayoutComponentEditableProperty.X -> stringResource(R.string.ff_layout_x)
++            LayoutComponentEditableProperty.Y -> stringResource(R.string.ff_layout_y)
++            LayoutComponentEditableProperty.MARGIN -> stringResource(R.string.ff_layout_margin_title)
++            LayoutComponentEditableProperty.GRID -> stringResource(R.string.ff_layout_grid_title)
+             null -> ""
+         },
+         dialogState = dialogState,

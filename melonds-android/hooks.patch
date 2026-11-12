@@ -1,0 +1,1534 @@
+diff --git a/app/CMakeLists.txt b/app/CMakeLists.txt
+index deee01eb..b0cc5692 100644
+--- a/app/CMakeLists.txt
++++ b/app/CMakeLists.txt
+@@ -62,6 +62,9 @@ add_library(
+         ${ANDROID-CPP}/renderer/FrameQueue.cpp
+         ${ANDROID-CPP}/renderer/ScreenshotRenderer.cpp
+         ${ANDROID-CPP}/retroachievements/RetroAchievementsManager.cpp
++        # ff-bgm1x
++        ${ANDROID-CPP}/bgm1x/BgmReplacer.cpp
++        ${ANDROID-CPP}/bgm1x/NitroSynth.cpp
+ )
+ 
+ target_include_directories(melonDS-android-frontend PUBLIC
+diff --git a/app/src/main/cpp/Configuration.h b/app/src/main/cpp/Configuration.h
+index 8511c887..b97ed1ea 100644
+--- a/app/src/main/cpp/Configuration.h
++++ b/app/src/main/cpp/Configuration.h
+@@ -72,6 +72,11 @@ typedef struct
+     char* dsiNandPath;
+     char* internalFilesDir;
+     float fastForwardSpeedMultiplier;
++    // ff-bgm1x: 배속 중 BGM·효과음 1배속
++    bool bgm1x;
++    bool bgm1xFastForwardCutscenes;
++    bool bgm1xSfx;
++    int bgm1xSfxVolume;  // 0~256
+     bool showBootScreen;
+     bool useJit;
+     int consoleType;
+diff --git a/app/src/main/cpp/MelonDS.cpp b/app/src/main/cpp/MelonDS.cpp
+index 0a88d23b..67c8e19f 100644
+--- a/app/src/main/cpp/MelonDS.cpp
++++ b/app/src/main/cpp/MelonDS.cpp
+@@ -210,6 +210,11 @@ namespace MelonDSAndroid
+         return instance->runFrame();
+     }
+ 
++    bool isBgmSpeedHold()
++    {
++        return instance && instance->isBgmSpeedHold();
++    }
++
+     Frame* getPresentationFrame(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline)
+     {
+         if (!instance)
+diff --git a/app/src/main/cpp/MelonDS.h b/app/src/main/cpp/MelonDS.h
+index fd2d8cf0..3bbac1f8 100644
+--- a/app/src/main/cpp/MelonDS.h
++++ b/app/src/main/cpp/MelonDS.h
+@@ -61,6 +61,8 @@ namespace MelonDSAndroid {
+     extern void updateMotionData(float ax, float ay, float az, float rx, float ry, float rz);
+     extern void start();
+     extern u32 loop();
++    // ff-bgm1x: 연출 중이라 배속을 멈춰야 하는지 (에뮬레이션 스레드)
++    extern bool isBgmSpeedHold();
+     extern Frame* getPresentationFrame(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
+     extern void pause();
+     extern void resume();
+diff --git a/app/src/main/cpp/MelonDSAndroidConfiguration.cpp b/app/src/main/cpp/MelonDSAndroidConfiguration.cpp
+index 9376a5f9..063244b0 100644
+--- a/app/src/main/cpp/MelonDSAndroidConfiguration.cpp
++++ b/app/src/main/cpp/MelonDSAndroidConfiguration.cpp
+@@ -28,6 +28,11 @@ MelonDSAndroid::EmulatorConfiguration MelonDSAndroidConfiguration::buildEmulator
+     jobject dsiNandUri = env->GetObjectField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "dsiNandUri", "Landroid/net/Uri;"));
+     jstring internalFilesDir = (jstring) env->GetObjectField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "internalDirectory", "Ljava/lang/String;"));
+     jfloat fastForwardMaxSpeed = env->GetFloatField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "fastForwardSpeedMultiplier", "F"));
++    // ff-bgm1x
++    jboolean bgm1x = env->GetBooleanField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "bgm1x", "Z"));
++    jboolean bgm1xFastForwardCutscenes = env->GetBooleanField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "bgm1xFastForwardCutscenes", "Z"));
++    jboolean bgm1xSfx = env->GetBooleanField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "bgm1xSfx", "Z"));
++    jint bgm1xSfxVolume = env->GetIntField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "bgm1xSfxVolume", "I"));
+     jboolean enableRewind = env->GetBooleanField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "rewindEnabled", "Z"));
+     jint rewindPeriodSeconds = env->GetIntField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "rewindPeriodSeconds", "I"));
+     jint rewindWindowSeconds = env->GetIntField(emulatorConfiguration, env->GetFieldID(emulatorConfigurationClass, "rewindWindowSeconds", "I"));
+@@ -74,6 +79,10 @@ MelonDSAndroid::EmulatorConfiguration MelonDSAndroidConfiguration::buildEmulator
+     finalEmulatorConfiguration.dsiNandPath = const_cast<char*>(dsiNandPath);
+     finalEmulatorConfiguration.internalFilesDir = const_cast<char*>(internalDir);
+     finalEmulatorConfiguration.fastForwardSpeedMultiplier = fastForwardMaxSpeed;
++    finalEmulatorConfiguration.bgm1x = bgm1x;
++    finalEmulatorConfiguration.bgm1xFastForwardCutscenes = bgm1xFastForwardCutscenes;
++    finalEmulatorConfiguration.bgm1xSfx = bgm1xSfx;
++    finalEmulatorConfiguration.bgm1xSfxVolume = bgm1xSfxVolume;
+     finalEmulatorConfiguration.showBootScreen = showBootScreen;
+     finalEmulatorConfiguration.useJit = useJit;
+     finalEmulatorConfiguration.consoleType = consoleType;
+diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+index 2a85bf86..8215d8e0 100644
+--- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
++++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+@@ -657,12 +657,17 @@ void* emulate(void*)
+         double currentTick = getCurrentMillis();
+         double delay = currentTick - lastTick;
+ 
++        // ff-bgm1x: 연출 중(연출 중에도 배속 꺼짐)이면 배속 중이어도 1배속으로 돈다
++        const bool bgmHold = isFastForwardEnabled && MelonDSAndroid::isBgmSpeedHold();
++        const float frameTargetFps = bgmHold ? 60.0f : (float) targetFps;
++        const bool frameLimitFps = limitFps || bgmHold;
++
+         // All times are in ms
+-        double frameTimeStep = (double) nLines / ((float) targetFps * 263.0) * 1000.0;
++        double frameTimeStep = (double) nLines / (frameTargetFps * 263.0) * 1000.0;
+         if (frameTimeStep < 1)
+             frameTimeStep = 1;
+ 
+-        if (limitFps)
++        if (frameLimitFps)
+         {
+             frameLimitError += frameTimeStep - delay;
+             if (frameLimitError < -frameTimeStep)
+diff --git a/app/src/main/cpp/MelonInstance.cpp b/app/src/main/cpp/MelonInstance.cpp
+index 3781ead2..b9972be5 100644
+--- a/app/src/main/cpp/MelonInstance.cpp
++++ b/app/src/main/cpp/MelonInstance.cpp
+@@ -78,10 +78,16 @@ MelonInstance::MelonInstance(int instanceId, std::shared_ptr<EmulatorConfigurati
+     nds->Reset();
+     setBatteryLevels();
+     setDateTime();
++
++    // ff-bgm1x
++    bgmReplacer = std::make_unique<BgmReplacer>(this);
++    applyBgmConfiguration();
+ }
+ 
+ MelonInstance::~MelonInstance()
+ {
++    nds->SoundFifoHook = nullptr;
++    bgmReplacer.reset();
+     frameQueue.clear();
+     net->UnregisterInstance(instanceId);
+     delete nds;
+@@ -357,6 +363,7 @@ u32 MelonInstance::runFrame()
+     }
+ 
+     u32 nLines = nds->RunFrame();
++    bgmReplacer->afterMainFrame();  // ff-bgm1x
+     retroAchievementsManager->FrameUpdate();
+ 
+     if (!isRendererAccelerated)
+@@ -532,6 +539,29 @@ void MelonInstance::updateConfiguration(std::shared_ptr<EmulatorConfiguration> n
+ 
+     currentConfiguration = newConfiguration;
+     isRenderConfigurationDirty = true;
++    applyBgmConfiguration();
++}
++
++// ff-bgm1x: 설정값을 BgmReplacer 에 적용한다 (켜고 끄기는 다음 프레임에 에뮬레이션 스레드가 적용)
++void MelonInstance::applyBgmConfiguration()
++{
++    if (!bgmReplacer || !currentConfiguration)
++        return;
++    bgmReplacer->requestEnabled(currentConfiguration->bgm1x);
++    bgmReplacer->setFastForwardCutscenes(currentConfiguration->bgm1xFastForwardCutscenes);
++    bgmReplacer->setSfx1x(currentConfiguration->bgm1xSfx);
++    bgmReplacer->setSfxVolume(currentConfiguration->bgm1xSfxVolume);
++}
++
++void MelonInstance::mixBgm(s16* buffer, int frames, int volume)
++{
++    if (bgmReplacer)
++        bgmReplacer->mixInto(buffer, frames, volume, frames);
++}
++
++bool MelonInstance::isBgmSpeedHold()
++{
++    return bgmReplacer && bgmReplacer->isEnabled() && !bgmReplacer->fastForwardCutscenes() && bgmReplacer->cutsceneActive();
+ }
+ 
+ void MelonInstance::requestNdsSaveWrite(const u8* saveData, u32 saveLength, u32 writeOffset, u32 writeLength)
+@@ -569,6 +599,7 @@ bool MelonInstance::loadState(Savestate* state)
+     {
+         setBatteryLevels();
+         setDateTime();
++        bgmReplacer->onStateLoaded();  // ff-bgm1x (되감기도 여기를 지난다)
+         return true;
+     }
+     else
+diff --git a/app/src/main/cpp/MelonInstance.h b/app/src/main/cpp/MelonInstance.h
+index cfbf3dc2..17cf8d60 100644
+--- a/app/src/main/cpp/MelonInstance.h
++++ b/app/src/main/cpp/MelonInstance.h
+@@ -14,13 +14,14 @@
+ #include "renderer/ScreenshotRenderer.h"
+ #include "retroachievements/RetroAchievementsManager.h"
+ #include "net/Net.h"
++#include "bgm1x/BgmReplacer.h"
+ 
+ using namespace melonDS;
+ 
+ namespace MelonDSAndroid
+ {
+ 
+-class MelonInstance
++class MelonInstance : public BgmReplacerHost
+ {
+ 
+ public:
+@@ -73,7 +74,16 @@ public:
+     std::string getRichPresenceStatus();
+     std::vector<RetroAchievements::RARuntimeAchievement> getRuntimeAchievements();
+ 
++    // ff-bgm1x: 오디오 스레드가 출력 버퍼에 1배속 소리를 더한다
++    void mixBgm(s16* buffer, int frames, int volume);
++    // 에뮬레이션 스레드: 연출 중이라 배속을 멈춰야 하는지
++    bool isBgmSpeedHold();
++    void setBgmOutputRate(int rate) { bgmOutputRate = rate; }
++    melonDS::NDS* bgmNds() override { return nds; }
++    int bgmAudioFreq() override { return bgmOutputRate; }
++
+ private:
++    void applyBgmConfiguration();
+     void updateRenderer();
+     void setBatteryLevels();
+     void setDateTime();
+@@ -100,6 +110,9 @@ private:
+     Renderer currentRenderer;
+     bool isRenderConfigurationDirty;
+     int frame;
++
++    std::unique_ptr<BgmReplacer> bgmReplacer;
++    std::atomic<int> bgmOutputRate {48000};
+ };
+ 
+ }
+diff --git a/app/src/main/cpp/OboeCallback.cpp b/app/src/main/cpp/OboeCallback.cpp
+index f74076c2..0b152581 100644
+--- a/app/src/main/cpp/OboeCallback.cpp
++++ b/app/src/main/cpp/OboeCallback.cpp
+@@ -22,6 +22,7 @@ OboeCallback::onAudioReady(oboe::AudioStream *stream, void *audioData, int32_t n
+     }
+ 
+     int len = numFrames;
++    currentInstance->setBgmOutputRate(stream->getSampleRate());  // ff-bgm1x
+ 
+     double skew = std::clamp(60.0 / INTERNAL_FRAME_RATE, 0.995, 1.005);
+     currentInstance->setAudioOutputSkew(skew);
+@@ -34,6 +35,8 @@ OboeCallback::onAudioReady(oboe::AudioStream *stream, void *audioData, int32_t n
+     if (num_in < 1)
+     {
+         memset(audioData, 0, len * sizeof(s16) * 2);
++        // ff-bgm1x: 원본 소리가 없어도 1배속 소리는 낸다
++        currentInstance->mixBgm((s16*) audioData, len, _volume);
+         return oboe::DataCallbackResult::Continue;
+     }
+ 
+@@ -52,6 +55,9 @@ OboeCallback::onAudioReady(oboe::AudioStream *stream, void *audioData, int32_t n
+             ((u32*)audioData)[i] = ((u32*)audioData)[last];
+     }
+ 
++    // ff-bgm1x: 배속과 관계없이 1배속으로 만든 BGM·효과음을 더한다
++    currentInstance->mixBgm((s16*) audioData, len, _volume);
++
+     if (_recordingStream) [[unlikely]]
+         _recordingStream->write((char*) audioData, numFrames * sizeof(s16) * 2);
+ 
+diff --git a/app/src/main/java/me/magnum/melonds/domain/model/EmulatorConfiguration.kt b/app/src/main/java/me/magnum/melonds/domain/model/EmulatorConfiguration.kt
+index 56c3afca..f0bd1fc4 100644
+--- a/app/src/main/java/me/magnum/melonds/domain/model/EmulatorConfiguration.kt
++++ b/app/src/main/java/me/magnum/melonds/domain/model/EmulatorConfiguration.kt
+@@ -14,6 +14,11 @@ data class EmulatorConfiguration(
+         val dsiNandUri: Uri?,
+         val internalDirectory: String,
+         val fastForwardSpeedMultiplier: Float,
++        // ff-bgm1x: 배속 중 BGM·효과음 1배속 (네이티브가 이 이름으로 읽는다)
++        val bgm1x: Boolean,
++        val bgm1xFastForwardCutscenes: Boolean,
++        val bgm1xSfx: Boolean,
++        val bgm1xSfxVolume: Int,
+         val rewindEnabled: Boolean,
+         val rewindPeriodSeconds: Int,
+         val rewindWindowSeconds: Int,
+diff --git a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+index 4d688b35..1c708b87 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+@@ -157,6 +157,10 @@ class SharedPreferencesSettingsRepository(
+             dsiNandUri = dsiDirDocument?.findFile("nand.bin")?.uri,
+             internalDirectory = context.filesDir.absolutePath,
+             fastForwardSpeedMultiplier = getFastForwardSpeedMultiplier(),
++            bgm1x = preferences.getBoolean("ff_bgm1x_bgm_1x", true),
++            bgm1xFastForwardCutscenes = preferences.getBoolean("ff_bgm1x_ff_cutscenes", false),
++            bgm1xSfx = preferences.getBoolean("ff_bgm1x_sfx_1x", true),
++            bgm1xSfxVolume = preferences.getInt("ff_bgm1x_sfx_volume", 256).coerceIn(0, 256),
+             rewindEnabled = isRewindEnabled(),
+             rewindPeriodSeconds = getRewindPeriod(),
+             rewindWindowSeconds = getRewindWindow(),
+diff --git a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
+index 58f67125..2d976919 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
+@@ -160,6 +160,8 @@ class DefaultLayoutProvider(
+                 PositionedLayoutComponent(Rect(width / 2 - smallButtonsSize - (spacing4dp / 2.0).toInt(), utilityButtonsTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_TOGGLE_SOFT_INPUT),
+                 PositionedLayoutComponent(Rect(width / 2 + (spacing4dp / 2.0).toInt(), utilityButtonsTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_MICROPHONE_TOGGLE),
+                 PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize + (spacing4dp * 1.5).toInt(), utilityButtonsTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_FAST_FORWARD_TOGGLE),
++                // ff-bgm1x: 한 번 누르면 메뉴가 열리는 버튼을 기본 배치에 둔다
++                PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize * 2 + (spacing4dp * 2.5).toInt(), utilityButtonsTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_PAUSE),
+             )
+         )
+     }
+@@ -218,6 +220,8 @@ class DefaultLayoutProvider(
+                 PositionedLayoutComponent(Rect(width / 2 - smallButtonsSize - (spacing4dp / 2.0).toInt(), safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_TOGGLE_SOFT_INPUT),
+                 PositionedLayoutComponent(Rect(width / 2 + (spacing4dp / 2.0).toInt(), safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_MICROPHONE_TOGGLE),
+                 PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize + (spacing4dp * 1.5).toInt(), safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_FAST_FORWARD_TOGGLE),
++                // ff-bgm1x: 한 번 누르면 메뉴가 열리는 버튼을 기본 배치에 둔다
++                PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize * 2 + (spacing4dp * 2.5).toInt(), safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_PAUSE),
+             )
+         )
+     }
+@@ -271,6 +275,8 @@ class DefaultLayoutProvider(
+                 PositionedLayoutComponent(Rect(width / 2 - smallButtonsSize - (spacing4dp / 2.0).toInt(), mainFold.foldBounds.bottom, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_TOGGLE_SOFT_INPUT),
+                 PositionedLayoutComponent(Rect(width / 2 + spacing4dp + (spacing4dp / 2.0).toInt(), mainFold.foldBounds.bottom, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_MICROPHONE_TOGGLE),
+                 PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize + (spacing4dp * 1.5).toInt(), mainFold.foldBounds.bottom, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_FAST_FORWARD_TOGGLE),
++                // ff-bgm1x: 한 번 누르면 메뉴가 열리는 버튼을 기본 배치에 둔다
++                PositionedLayoutComponent(Rect(width / 2 + smallButtonsSize * 2 + (spacing4dp * 2.5).toInt(), mainFold.foldBounds.bottom, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_PAUSE),
+             )
+         )
+     }
+@@ -335,6 +341,8 @@ class DefaultLayoutProvider(
+                 PositionedLayoutComponent(Rect(mainFold.foldBounds.x - smallButtonsSize - spacing8dp, safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_TOGGLE_SOFT_INPUT),
+                 PositionedLayoutComponent(Rect(mainFold.foldBounds.right + smallButtonsSize + spacing8dp, safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_MICROPHONE_TOGGLE),
+                 PositionedLayoutComponent(Rect(mainFold.foldBounds.right + spacing8dp * 2, safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_FAST_FORWARD_TOGGLE),
++                // ff-bgm1x: 한 번 누르면 메뉴가 열리는 버튼을 기본 배치에 둔다
++                PositionedLayoutComponent(Rect(mainFold.foldBounds.right + smallButtonsSize * 2 + spacing8dp * 2, safeTop, smallButtonsSize, smallButtonsSize), LayoutComponent.BUTTON_PAUSE),
+             )
+         )
+     }
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
+index 8cb35d1c..86be7b37 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
+@@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import androidx.lifecycle.findViewTreeViewModelStoreOwner
+ import androidx.lifecycle.get
++import androidx.preference.PreferenceManager
+ import com.squareup.picasso.Callback
+ import com.squareup.picasso.Picasso
+ import me.magnum.melonds.R
+@@ -46,6 +47,7 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutComponentEditableProperty
+ import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
+ import me.magnum.melonds.ui.layouteditor.model.ScreenEditorState
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutBackgroundDialog
++import me.magnum.melonds.ui.layouteditor.ui.FfLayoutPanel
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutComponentPropertyValueDialog
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutPropertiesDialog
+ import me.magnum.melonds.ui.theme.MelonTheme
+@@ -55,6 +57,9 @@ import kotlin.math.min
+ import kotlin.math.roundToInt
+ 
+ private const val CONTROLS_SLIDE_ANIMATION_DURATION_MS = 100L
++private const val PREF_MARGIN = "ff_layout_editor_margin"
++private const val PREF_GRID = "ff_layout_editor_grid"
++private const val PREF_NEW_PANEL = "ff_layout_editor_new_panel"
+ 
+ class LayoutEditorManagerView(
+     private val layoutTarget: LayoutTarget,
+@@ -100,6 +105,16 @@ class LayoutEditorManagerView(
+     private var bottomAspectRatio = ScreenAspectRatio.RATIO_4_3
+     private var updatingAspectSpinner = false
+ 
++    // ff-bgm1x: 꽉 채우기·가장자리 붙이기 여백과 격자 간격 (px). 편집기 설정이라 레이아웃이 아닌 앱 설정에 둔다
++    private val toolPreferences = PreferenceManager.getDefaultSharedPreferences(context)
++    private var layoutMargin = toolPreferences.getInt(PREF_MARGIN, 0)
++
++    // ff-bgm1x: 새 편집 패널(떠 있는 패널)을 쓰는지. 원래 아래 패널과 골라 쓸 수 있다
++    private var useNewPanel by mutableStateOf(toolPreferences.getBoolean(PREF_NEW_PANEL, true))
++    private var panelTick by mutableStateOf(0)
++    private var panelMargin by mutableStateOf(layoutMargin)
++    private var panelGrid by mutableStateOf(toolPreferences.getInt(PREF_GRID, 0))
++
+     private var showLayoutPropertiesDialog by mutableStateOf(initialEditorState?.isPropertiesDialogShown ?: false)
+     private var showBackgroundPropertiesDialog by mutableStateOf(initialEditorState?.isBackgroundPropertiesDialogShown ?: false)
+     private var shownEditablePropertyDialog by mutableStateOf<LayoutComponentEditableProperty?>(null)
+@@ -165,6 +180,10 @@ class LayoutEditorManagerView(
+                             LayoutComponentEditableProperty.SIZE -> binding.seekBarSize.progress + selectedViewMinSize
+                             LayoutComponentEditableProperty.WIDTH -> binding.seekBarWidth.progress + selectedViewMinSize
+                             LayoutComponentEditableProperty.HEIGHT -> binding.seekBarHeight.progress + selectedViewMinSize
++                            LayoutComponentEditableProperty.X -> binding.viewLayoutEditor.getSelectedView()?.getPosition()?.x ?: 0
++                            LayoutComponentEditableProperty.Y -> binding.viewLayoutEditor.getSelectedView()?.getPosition()?.y ?: 0
++                            LayoutComponentEditableProperty.MARGIN -> layoutMargin
++                            LayoutComponentEditableProperty.GRID -> binding.viewLayoutEditor.gridSize
+                             null -> 0
+                         },
+                         onValueChanged = {
+@@ -178,6 +197,18 @@ class LayoutEditorManagerView(
+                                     binding.seekBarHeight.progress = it - selectedViewMinSize
+                                     enforceAspectRatio(selectedAspectRatio, HEIGHT)
+                                 }
++                                LayoutComponentEditableProperty.X -> binding.viewLayoutEditor.moveSelectedViewTo(it, null)
++                                LayoutComponentEditableProperty.Y -> binding.viewLayoutEditor.moveSelectedViewTo(null, it)
++                                LayoutComponentEditableProperty.MARGIN -> {
++                                    layoutMargin = it.coerceAtLeast(0)
++                                    toolPreferences.edit().putInt(PREF_MARGIN, layoutMargin).apply()
++                                    updateToolLabels()
++                                }
++                                LayoutComponentEditableProperty.GRID -> {
++                                    binding.viewLayoutEditor.gridSize = it.coerceAtLeast(0)
++                                    toolPreferences.edit().putInt(PREF_GRID, binding.viewLayoutEditor.gridSize).apply()
++                                    updateToolLabels()
++                                }
+                                 null -> { /* no-op */ }
+                             }
+                             shownEditablePropertyDialog = null
+@@ -189,6 +220,39 @@ class LayoutEditorManagerView(
+                         title = stringResource(R.string.layout_name),
+                         dialogState = nameInputDialogState,
+                     )
++
++                    // ff-bgm1x: 새 편집 패널
++                    if (useNewPanel) {
++                        FfLayoutPanel(
++                            editor = binding.viewLayoutEditor,
++                            tick = panelTick,
++                            margin = panelMargin,
++                            grid = panelGrid,
++                            onMarginChanged = {
++                                layoutMargin = it
++                                panelMargin = it
++                                toolPreferences.edit().putInt(PREF_MARGIN, it).apply()
++                                updateToolLabels()
++                            },
++                            onGridChanged = {
++                                binding.viewLayoutEditor.gridSize = it
++                                panelGrid = it
++                                toolPreferences.edit().putInt(PREF_GRID, it).apply()
++                                updateToolLabels()
++                            },
++                            onFillScreen = {
++                                val view = binding.viewLayoutEditor.selectedViewOrNull()
++                                val ratio = when (view?.component) {
++                                    LayoutComponent.TOP_SCREEN -> topAspectRatio.ratio
++                                    LayoutComponent.BOTTOM_SCREEN -> bottomAspectRatio.ratio
++                                    else -> null
++                                }
++                                binding.viewLayoutEditor.fillSelectedScreen(layoutMargin, ratio)
++                            },
++                            onOpenMenu = { openMenu() },
++                            onUseOriginalEditor = { setNewPanel(false) },
++                        )
++                    }
+                 }
+             }
+         }
+@@ -228,15 +292,69 @@ class LayoutEditorManagerView(
+         binding.buttonCenterVertical.setOnClickListener {
+             binding.viewLayoutEditor.centerSelectedViewVertically()
+         }
++        // ff-bgm1x: 배치 편의 기능
++        binding.buttonAlignLeft.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.LEFT, layoutMargin)
++        }
++        binding.buttonAlignRight.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.RIGHT, layoutMargin)
++        }
++        binding.buttonAlignTop.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.TOP, layoutMargin)
++        }
++        binding.buttonAlignBottom.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.BOTTOM, layoutMargin)
++        }
++        binding.buttonFillScreen.setOnClickListener {
++            binding.viewLayoutEditor.fillSelectedScreen(layoutMargin, selectedAspectRatio.ratio)
++        }
++        binding.buttonSameSize.setOnClickListener {
++            binding.viewLayoutEditor.sameSizeForSelection()
++        }
++        binding.buttonMirror.setOnClickListener {
++            binding.viewLayoutEditor.mirrorLeftToRight()
++        }
++        binding.buttonMargin.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.MARGIN
++        }
++        binding.buttonGrid.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.GRID
++        }
++        binding.layoutXLabels.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.X
++        }
++        binding.layoutYLabels.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.Y
++        }
++        binding.viewLayoutEditor.gridSize = toolPreferences.getInt(PREF_GRID, 0)
++        binding.viewLayoutEditor.onEditorChanged = { panelTick++ }
++        binding.viewLayoutEditor.onSelectedViewChanged = { view ->
++            panelTick++
++            binding.textX.text = view.getPosition().x.toString()
++            binding.textY.text = view.getPosition().y.toString()
++            // 길게 눌러 함께 고르면 "고른 버튼 같은 크기로" 를 보인다
++            binding.buttonSameSize.isVisible =
++                !view.component.isScreen() && binding.viewLayoutEditor.selectionCount() > 1
++        }
++        updateToolLabels()
+ 
+         binding.viewLayoutEditor.setLayoutComponentViewBuilderFactory(EditorLayoutComponentViewBuilderFactory())
+         binding.viewLayoutEditor.setOnClickListener {
++            // 새 편집 패널에서는 빈 곳을 누르면 고른 것만 해제한다
++            if (useNewPanel) {
++                binding.viewLayoutEditor.clearSelection()
++                return@setOnClickListener
++            }
+             if (areBottomControlsShown)
+                 hideBottomControls()
+             else
+                 showBottomControls()
+         }
+         binding.viewLayoutEditor.setOnViewSelectedListener { view, widthScale, heightScale, maxWidth, maxHeight, minSize ->
++            if (useNewPanel) {
++                panelTick++
++                return@setOnViewSelectedListener
++            }
+             hideBottomControls()
+             // Force the scaling controls to restart so the new view always
+             // receives fresh listeners even if they were already visible.
+@@ -366,6 +484,16 @@ class LayoutEditorManagerView(
+         }
+ 
+         hideScalingControls(false)
++
++        // ff-bgm1x: 원래 아래 패널에 "새 편집 패널" 버튼을 넣고, 새 패널을 쓰면 아래 패널을 숨긴다
++        binding.layoutControls.addView(
++            android.widget.Button(context, null, 0, R.style.Button_Editor).apply {
++                setText(R.string.ff_layout_new_panel)
++                setOnClickListener { setNewPanel(true) }
++            },
++            binding.layoutControls.childCount - 1,
++        )
++        if (useNewPanel) hideBottomControls(false)
+     }
+ 
+     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+@@ -376,6 +504,19 @@ class LayoutEditorManagerView(
+         }
+     }
+ 
++    // ff-bgm1x: 새 편집 패널 ↔ 원래 아래 패널
++    private fun setNewPanel(enabled: Boolean) {
++        useNewPanel = enabled
++        toolPreferences.edit().putBoolean(PREF_NEW_PANEL, enabled).apply()
++        binding.viewLayoutEditor.clearSelection()
++        if (enabled) {
++            hideBottomControls(false)
++            hideScalingControls(false)
++        } else {
++            showBottomControls(false)
++        }
++    }
++
+     fun handleBackNavigation() {
+         if (areScalingControlsShown) {
+             hideScalingControls(true)
+@@ -572,8 +713,9 @@ class LayoutEditorManagerView(
+         binding.seekBarAlpha.isVisible = isScreen
+         binding.layoutAspectRatio.isVisible = isScreen
+         binding.checkboxAboveScreen.isVisible = isScreen
+-        binding.buttonCenterHorizontal.isVisible = isScreen
+-        binding.buttonCenterVertical.isVisible = isScreen
++        // ff-bgm1x: 정렬은 버튼에도 쓴다. 꽉 채우기는 화면만, 같은 크기는 버튼만
++        binding.buttonFillScreen.isVisible = isScreen
++        binding.buttonSameSize.isVisible = !isScreen && binding.viewLayoutEditor.selectionCount() > 1
+ 
+         currentWidthScale = widthScale
+         currentHeightScale = heightScale
+@@ -627,6 +769,11 @@ class LayoutEditorManagerView(
+         areScalingControlsShown = false
+     }
+ 
++    private fun updateToolLabels() {
++        binding.buttonMargin.text = resources.getString(R.string.ff_layout_margin, layoutMargin)
++        binding.buttonGrid.text = resources.getString(R.string.ff_layout_grid, binding.viewLayoutEditor.gridSize)
++    }
++
+     private fun enforceAspectRatio(aspectRatio: ScreenAspectRatio, priority: AspectRatioEnforcementPriority) {
+         val ratio = aspectRatio.ratio ?: return
+ 
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
+index c70cf791..8bdc37a8 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorView.kt
+@@ -2,8 +2,15 @@ package me.magnum.melonds.ui.layouteditor
+ 
+ import android.content.Context
+ import android.util.AttributeSet
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.DashPathEffect
++import android.graphics.Paint
++import android.graphics.RectF
+ import android.view.KeyEvent
++import android.view.HapticFeedbackConstants
+ import android.view.MotionEvent
++import android.view.ViewConfiguration
+ import android.view.View
+ import me.magnum.melonds.domain.model.*
+ import me.magnum.melonds.domain.model.layout.LayoutComponent
+@@ -25,6 +32,8 @@ typealias ViewSelectedListener = (
+ ) -> Unit
+ 
+ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(context, attrs) {
++    enum class Edge { LEFT, RIGHT, TOP, BOTTOM }
++
+     enum class Anchor {
+         TOP_LEFT,
+         TOP_RIGHT,
+@@ -41,6 +50,25 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     private var selectedViewAnchor = Anchor.TOP_LEFT
+     private var modifiedByUser = false
+ 
++    // ff-bgm1x: 끌 때 맞추는 격자 간격 (px, 0 이면 끔)
++    var gridSize = 0
++    // ff-bgm1x: 길게 눌러 함께 고른 항목들 (selectedView 는 따로, 크기 막대·숫자는 selectedView 기준)
++    private val extraSelection = LinkedHashSet<LayoutComponentView>()
++    // ff-bgm1x: 고른 항목의 자리·크기가 바뀌면 부른다 (X·Y 표시용)
++    var onSelectedViewChanged: ((LayoutComponentView) -> Unit)? = null
++    // ff-bgm1x: 고른 것이 바뀌거나 배치가 바뀌면 부른다 (새 편집 패널 갱신용)
++    var onEditorChanged: (() -> Unit)? = null
++
++    // ff-bgm1x: 그룹. 번호 → 구성원 (항목 이름 또는 "g<번호>"). 그룹 안에 그룹을 넣을 수 있다
++    private val groups = LinkedHashMap<Int, MutableList<String>>()
++    private val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
++    private val groupPaint = Paint().apply {
++        style = Paint.Style.STROKE
++        color = Color.MAGENTA
++        strokeWidth = context.dpToPixels(2f)
++        pathEffect = DashPathEffect(floatArrayOf(context.dpToPixels(8f), context.dpToPixels(5f)), 0f)
++    }
++
+     init {
+         super.setOnClickListener {
+             if (selectedView != null) {
+@@ -54,6 +82,232 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     override fun instantiateLayout(layoutConfiguration: UILayout, layoutTarget: LayoutTarget) {
+         super.instantiateLayout(layoutConfiguration, layoutTarget)
+         modifiedByUser = false
++        loadGroups()
++    }
++
++    // ff-bgm1x: 그룹 ------------------------------------------------------
++
++    private fun keyOf(view: LayoutComponentView) = view.component.name
++
++    private fun viewOf(key: String) = views.entries.firstOrNull { it.key.name == key }?.value
++
++    private fun isGroup(member: String) = member.startsWith("g")
++
++    private fun groupId(member: String) = member.substring(1).toInt()
++
++    private fun parentOf(member: String): Int? = groups.entries.firstOrNull { member in it.value }?.key
++
++    private fun rootOf(member: String): String {
++        var m = member
++        while (true) {
++            val p = parentOf(m) ?: return m
++            m = "g$p"
++        }
++    }
++
++    private fun rootGroups() = groups.keys.filter { parentOf("g$it") == null }.map { "g$it" }
++
++    private fun leavesOf(member: String): List<String> =
++        if (isGroup(member)) groups[groupId(member)].orEmpty().flatMap { leavesOf(it) } else listOf(member)
++
++    private fun boundsOf(views: List<LayoutComponentView>): RectF? {
++        if (views.isEmpty()) return null
++        val b = RectF(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
++        views.forEach {
++            val p = it.getPosition()
++            b.union(p.x.toFloat(), p.y.toFloat(), (p.x + it.getWidth()).toFloat(), (p.y + it.getHeight()).toFloat())
++        }
++        return b
++    }
++
++    private fun memberBounds(member: String) = boundsOf(leavesOf(member).mapNotNull { viewOf(it) })
++
++    private fun moveMemberBy(member: String, dx: Int, dy: Int) {
++        leavesOf(member).mapNotNull { viewOf(it) }.forEach {
++            val p = it.getPosition()
++            it.setPosition(Point(p.x + dx, p.y + dy))
++        }
++    }
++
++    fun selectedUnits(): List<String> = selection().map { rootOf(keyOf(it)) }.distinct()
++
++    // 서로 맞추기·등간격의 대상: 단위가 둘 이상이면 그 단위들, 그룹 하나만 골랐으면 그 그룹의 바로 아래 구성원들
++    fun alignTargets(): List<String> {
++        val units = selectedUnits()
++        if (units.size == 1 && isGroup(units[0])) return groups[groupId(units[0])].orEmpty().toList()
++        return units
++    }
++
++    fun hasGroupSelected() = selectedUnits().any { isGroup(it) }
++
++    fun makeGroup() {
++        val units = selectedUnits()
++        if (units.size < 2) return
++        val gid = (groups.keys.maxOrNull() ?: 0) + 1
++        groups[gid] = units.toMutableList()
++        saveGroups()
++        editorChanged()
++    }
++
++    fun ungroup() {
++        selectedUnits().filter { isGroup(it) }.forEach { groups.remove(groupId(it)) }
++        cleanupGroups()
++        saveGroups()
++        editorChanged()
++    }
++
++    // 빈 그룹은 지우고, 구성원이 하나뿐인 그룹은 그 구성원으로 바꾼다
++    private fun cleanupGroups() {
++        var changed = true
++        while (changed) {
++            changed = false
++            for ((gid, members) in groups.entries.toList()) {
++                members.removeAll { isGroup(it) && groupId(it) !in groups }
++                if (members.size <= 1) {
++                    val only = members.firstOrNull()
++                    groups.remove(gid)
++                    groups.values.forEach { list ->
++                        val i = list.indexOf("g$gid")
++                        if (i >= 0) {
++                            if (only != null) list[i] = only else list.removeAt(i)
++                        }
++                    }
++                    changed = true
++                }
++            }
++        }
++    }
++
++    private fun loadGroups() {
++        groups.clear()
++        prefs.getString(PREF_GROUPS, "")!!.split(';').forEach { entry ->
++            val parts = entry.split('=')
++            if (parts.size != 2) return@forEach
++            val gid = parts[0].toIntOrNull() ?: return@forEach
++            groups[gid] = parts[1].split(',').filter { it.isNotEmpty() }.toMutableList()
++        }
++        groups.values.forEach { list -> list.removeAll { !isGroup(it) && viewOf(it) == null } }
++        cleanupGroups()
++        invalidate()
++    }
++
++    private fun saveGroups() {
++        prefs.edit().putString(PREF_GROUPS, groups.entries.joinToString(";") { "${it.key}=${it.value.joinToString(",")}" }).apply()
++    }
++
++    enum class Align { LEFT, H_CENTER, RIGHT, TOP, V_CENTER, BOTTOM }
++
++    fun alignEach(align: Align) {
++        val bounds = alignTargets().mapNotNull { m -> memberBounds(m)?.let { m to it } }
++        if (bounds.size < 2) return
++        val all = RectF(bounds[0].second).also { b -> bounds.forEach { b.union(it.second) } }
++        bounds.forEach { (m, b) ->
++            when (align) {
++                Align.LEFT -> moveMemberBy(m, (all.left - b.left).roundToInt(), 0)
++                Align.H_CENTER -> moveMemberBy(m, (all.centerX() - b.centerX()).roundToInt(), 0)
++                Align.RIGHT -> moveMemberBy(m, (all.right - b.right).roundToInt(), 0)
++                Align.TOP -> moveMemberBy(m, 0, (all.top - b.top).roundToInt())
++                Align.V_CENTER -> moveMemberBy(m, 0, (all.centerY() - b.centerY()).roundToInt())
++                Align.BOTTOM -> moveMemberBy(m, 0, (all.bottom - b.bottom).roundToInt())
++            }
++        }
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // 등간격: gap 이 null 이면 양 끝은 두고 사이를 같게, 숫자면 첫 대상부터 그 간격으로 늘어놓는다
++    fun distribute(horizontal: Boolean, gap: Int?) {
++        val bounds = alignTargets().mapNotNull { m -> memberBounds(m)?.let { m to it } }
++            .sortedBy { if (horizontal) it.second.left else it.second.top }
++        if (bounds.size < 2) return
++        val sizes = bounds.map { if (horizontal) it.second.width() else it.second.height() }
++        val start = if (horizontal) bounds.first().second.left else bounds.first().second.top
++        val end = if (horizontal) bounds.last().second.right else bounds.last().second.bottom
++        val spacing = gap?.toFloat() ?: ((end - start - sizes.sum()) / (bounds.size - 1))
++        var pos = start
++        bounds.forEachIndexed { i, (m, b) ->
++            if (horizontal) moveMemberBy(m, (pos - b.left).roundToInt(), 0) else moveMemberBy(m, 0, (pos - b.top).roundToInt())
++            pos += sizes[i] + spacing
++        }
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // ff-bgm1x: 버튼 추가·기능 바꾸기·지우기 ---------------------------------
++
++    fun availableComponents(): List<LayoutComponent> = LayoutComponent.entries.filter { it !in views.keys }
++
++    // 새 버튼은 화면 가운데에 두고 고른다
++    fun addComponentCentered(component: LayoutComponent) {
++        addLayoutComponent(component)
++        val view = views[component] ?: return
++        post {
++            place(view, (width - view.getWidth()) / 2, (height - view.getHeight()) / 2)
++            deselectCurrentView()
++            selectView(view)
++            editorChanged()
++        }
++    }
++
++    // 고른 항목 하나를 다른 기능으로 바꾼다 (자리·크기 그대로)
++    fun changeSelectedComponent(component: LayoutComponent) {
++        val view = selectedView ?: return
++        if (view.component.isScreen() || component in views.keys) return
++        val p = view.getPosition()
++        val rect = Rect(p.x, p.y, view.getWidth(), view.getHeight())
++        val oldKey = keyOf(view)
++        deselectCurrentView()
++        removeView(view.view)
++        views.remove(view.component)
++        val newView = addPositionedLayoutComponent(PositionedLayoutComponent(rect, component, view.baseAlpha, view.onTop))
++        views[component] = newView
++        groups.values.forEach { list -> list.replaceAll { if (it == oldKey) component.name else it } }
++        saveGroups()
++        modifiedByUser = true
++        selectView(newView)
++        editorChanged()
++    }
++
++    // 고른 항목을 모두 지운다
++    fun deleteSelection() {
++        val doomed = selection()
++        if (doomed.isEmpty()) return
++        deselectCurrentView()
++        doomed.forEach {
++            removeView(it.view)
++            views.remove(it.component)
++            groups.values.forEach { list -> list.remove(keyOf(it)) }
++        }
++        cleanupGroups()
++        saveGroups()
++        modifiedByUser = true
++        editorChanged()
++    }
++
++    // 고른 항목의 크기 (가운데 유지)
++    fun resizeSelectedView(w: Int, h: Int) {
++        val view = selectedView ?: return
++        val cx = view.getPosition().x + view.getWidth() / 2
++        val cy = view.getPosition().y + view.getHeight() / 2
++        place(view, cx - w / 2, cy - h / 2, w, h)
++        editorChanged()
++    }
++
++    fun selectedViewOrNull(): LayoutComponentView? = selectedView
++
++    private fun editorChanged() {
++        invalidate()
++        post { onEditorChanged?.invoke() }
++    }
++
++    // 맨 바깥 그룹을 보라색 점선으로 감싼다
++    override fun dispatchDraw(canvas: Canvas) {
++        super.dispatchDraw(canvas)
++        val pad = context.dpToPixels(4f)
++        rootGroups().forEach { g ->
++            val b = memberBounds(g) ?: return@forEach
++            canvas.drawRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad, groupPaint)
++        }
+     }
+ 
+     fun setOnViewSelectedListener(listener: ViewSelectedListener) {
+@@ -110,32 +364,51 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+     private fun setupDragHandler(layoutComponentView: LayoutComponentView) {
+         layoutComponentView.view.setOnTouchListener(object : OnTouchListener {
+             private var dragging = false
++            private var groupDrag = false
++            private var longPressed = false
+ 
+             private var downOffsetX = -1f
+             private var downOffsetY = -1f
+ 
++            // ff-bgm1x: 길게 누르면 고른 묶음에 더하거나 뺀다
++            private val longPress = Runnable {
++                longPressed = true
++                toggleSelection(layoutComponentView)
++                layoutComponentView.view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
++            }
++
+             override fun onTouch(view: View?, motionEvent: MotionEvent?): Boolean {
+                 if (view == null)
+                     return false
+ 
+-                if (selectedView != null) {
+-                    deselectCurrentView()
+-                }
+-
+                 return when (motionEvent?.action) {
+                     MotionEvent.ACTION_DOWN -> {
+                         downOffsetX = motionEvent.x
+                         downOffsetY = motionEvent.y
+-                        view.alpha = 1f
+-                        layoutComponentView.setHighlighted(true)
++                        longPressed = false
++                        view.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                         true
+                     }
+                     MotionEvent.ACTION_MOVE -> {
++                        if (longPressed) return true
+                         if (!dragging) {
+                             val distance = sqrt((motionEvent.x - downOffsetX).pow(2f) + (motionEvent.y - downOffsetY).pow(2f))
+                             if (distance >= 25) {
+                                 dragging = true
++                                view.removeCallbacks(longPress)
++                                // 고른 묶음 안의 항목이면 묶음째, 그룹에 든 항목이면 그 그룹째, 아니면 그것만 옮긴다
++                                if (!isSelected(layoutComponentView) && rootOf(keyOf(layoutComponentView)) != keyOf(layoutComponentView)) {
++                                    selectUnit(layoutComponentView)
++                                }
++                                groupDrag = isSelected(layoutComponentView)
++                                if (!groupDrag) {
++                                    deselectCurrentView()
++                                    view.alpha = 1f
++                                    layoutComponentView.setHighlighted(true)
++                                }
+                             }
++                        } else if (groupDrag) {
++                            dragGroup(layoutComponentView, motionEvent.x - downOffsetX, motionEvent.y - downOffsetY)
+                         } else {
+                             dragView(layoutComponentView, motionEvent.x - downOffsetX, motionEvent.y - downOffsetY)
+                         }
+@@ -143,13 +416,18 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+                     }
+                     MotionEvent.ACTION_CANCEL,
+                     MotionEvent.ACTION_UP -> {
+-                        if (!dragging) {
+-                            selectView(layoutComponentView)
+-                        } else {
++                        view.removeCallbacks(longPress)
++                        if (longPressed) {
++                            // 길게 누른 것으로 끝
++                        } else if (!dragging) {
++                            selectUnit(layoutComponentView)
++                        } else if (!groupDrag) {
+                             view.alpha = 0.5f
+                             layoutComponentView.setHighlighted(false)
+-                            dragging = false
+                         }
++                        dragging = false
++                        groupDrag = false
++                        longPressed = false
+                         true
+                     }
+                     else -> false
+@@ -158,6 +436,96 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         })
+     }
+ 
++    // ff-bgm1x: 고른 항목 전부 (기준 항목 먼저)
++    private fun selection(): List<LayoutComponentView> = listOfNotNull(selectedView) + extraSelection
++
++    private fun isSelected(view: LayoutComponentView) = view == selectedView || view in extraSelection
++
++    fun selectionCount(): Int = selection().size
++
++    // ff-bgm1x: 그 항목이 속한 맨 바깥 단위(그룹이면 그룹 전체)를 고른다
++    private fun selectUnit(view: LayoutComponentView) {
++        deselectCurrentView()
++        selectView(view)
++        leavesOf(rootOf(keyOf(view))).mapNotNull { viewOf(it) }.filter { it != view }.forEach {
++            extraSelection.add(it)
++            it.view.alpha = 1f
++            it.setHighlighted(true)
++        }
++        notifySelectedViewChanged(view)
++        editorChanged()
++    }
++
++    // ff-bgm1x: 길게 누르면 그 단위를 고른 묶음에 더하거나 뺀다
++    private fun toggleSelection(view: LayoutComponentView) {
++        val unit = leavesOf(rootOf(keyOf(view))).mapNotNull { viewOf(it) }
++        if (isSelected(view)) {
++            unit.filter { it != view }.forEach { toggleOne(it, false) }
++            toggleOne(view, false)
++        } else {
++            toggleOne(view, true)
++            unit.filter { it != view }.forEach { toggleOne(it, true) }
++        }
++        editorChanged()
++    }
++
++    private fun toggleOne(view: LayoutComponentView, add: Boolean) {
++        if (add == isSelected(view)) return
++        when {
++            view in extraSelection -> {
++                extraSelection.remove(view)
++                view.view.alpha = 0.5f
++                view.setHighlighted(false)
++            }
++            view == selectedView -> {
++                // 기준 항목을 빼면 함께 고른 것 중 하나가 기준이 된다
++                val next = extraSelection.firstOrNull()
++                if (next == null) {
++                    deselectCurrentView()
++                } else {
++                    extraSelection.remove(next)
++                    view.view.alpha = 0.5f
++                    view.setHighlighted(false)
++                    selectView(next)
++                }
++            }
++            selectedView == null -> selectView(view)
++            else -> {
++                extraSelection.add(view)
++                view.view.alpha = 1f
++                view.setHighlighted(true)
++            }
++        }
++        selectedView?.let { notifySelectedViewChanged(it) }
++    }
++
++    // ff-bgm1x: 끄는 항목을 기준으로 묶음 전체를 같은 만큼 옮긴다
++    private fun dragGroup(view: LayoutComponentView, offsetX: Float, offsetY: Float) {
++        val position = view.getPosition()
++        val targetX = snap(position.x + offsetX)
++        val targetY = snap(position.y + offsetY)
++        moveGroupBy((targetX - position.x).roundToInt(), (targetY - position.y).roundToInt())
++    }
++
++    // ff-bgm1x: 묶음 전체가 화면 밖으로 나가지 않는 범위에서 같이 옮긴다
++    private fun moveGroupBy(dx: Int, dy: Int) {
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val top = group.minOf { it.getPosition().y }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        val cdx = dx.coerceIn(-left, max(width - right, -left))
++        val cdy = dy.coerceIn(-top, max(height - bottom, -top))
++        group.forEach {
++            val p = it.getPosition()
++            it.setPosition(Point(p.x + cdx, p.y + cdy))
++        }
++        modifiedByUser = true
++        selectedView?.let { notifySelectedViewChanged(it) }
++        invalidate()
++    }
++
+     private fun selectView(view: LayoutComponentView) {
+         val anchorDistances = mutableMapOf<Anchor, Double>()
+         anchorDistances[Anchor.TOP_LEFT] = view.getPosition().x.toDouble().pow(2) + view.getPosition().y.toDouble().pow(2)
+@@ -180,9 +548,20 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         val widthScale = (view.getWidth() - minComponentSize) / (width - minComponentSize).toFloat()
+         val heightScale = (view.getHeight() - minComponentSize) / (height - minComponentSize).toFloat()
+         onViewSelectedListener?.invoke(view, widthScale, heightScale, width, height, minComponentSize)
++        notifySelectedViewChanged(view)
++    }
++
++    fun clearSelection() {
++        deselectCurrentView()
++        editorChanged()
+     }
+ 
+     private fun deselectCurrentView() {
++        extraSelection.forEach {
++            it.view.alpha = 0.5f
++            it.setHighlighted(false)
++        }
++        extraSelection.clear()
+         selectedView?.let {
+             it.view.alpha = 0.5f
+             it.setHighlighted(false)
+@@ -201,10 +580,113 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+ 
+     private fun dragView(view: LayoutComponentView, offsetX: Float, offsetY: Float) {
+         val currentPosition = view.getPosition()
+-        val finalX = min(max(currentPosition.x + offsetX, 0f), width - view.getWidth().toFloat())
+-        val finalY = min(max(currentPosition.y + offsetY, 0f), height - view.getHeight().toFloat())
++        val finalX = min(max(snap(currentPosition.x + offsetX), 0f), width - view.getWidth().toFloat())
++        val finalY = min(max(snap(currentPosition.y + offsetY), 0f), height - view.getHeight().toFloat())
+         view.setPosition(Point(finalX.toInt(), finalY.toInt()))
+         modifiedByUser = true
++        notifySelectedViewChanged(view)
++    }
++
++    // ff-bgm1x: 자리는 레이아웃이 끝나야 view.x 에 반영되므로 그 뒤에 알린다
++    private fun notifySelectedViewChanged(view: LayoutComponentView) {
++        view.view.post { if (view == selectedView) onSelectedViewChanged?.invoke(view) }
++    }
++
++    // ff-bgm1x: 격자 맞춤
++    private fun snap(value: Float): Float {
++        return if (gridSize > 0) (value / gridSize).roundToInt() * gridSize.toFloat() else value
++    }
++
++    // ff-bgm1x: 항목을 화면 안으로 넣어 자리·크기를 정한다
++    private fun place(view: LayoutComponentView, x: Int, y: Int, w: Int = view.getWidth(), h: Int = view.getHeight()) {
++        val finalW = w.coerceIn(minComponentSize, max(width, minComponentSize))
++        val finalH = h.coerceIn(minComponentSize, max(height, minComponentSize))
++        val finalX = x.coerceIn(0, max(width - finalW, 0))
++        val finalY = y.coerceIn(0, max(height - finalH, 0))
++        view.setPositionAndSize(Point(finalX, finalY), finalW, finalH)
++        modifiedByUser = true
++        notifySelectedViewChanged(view)
++    }
++
++    fun getSelectedView(): LayoutComponentView? = selectedView
++
++    // ff-bgm1x: 기준 항목의 자리를 정하고, 함께 고른 항목은 같은 만큼 옮긴다
++    fun moveSelectedViewTo(x: Int?, y: Int?) {
++        val view = selectedView ?: return
++        val position = view.getPosition()
++        moveGroupBy((x ?: position.x) - position.x, (y ?: position.y) - position.y)
++    }
++
++    // ff-bgm1x: 고른 묶음을 한 덩어리로 가장자리에 붙인다 (여백 px 만큼 띄움)
++    fun alignSelectedView(edge: Edge, margin: Int) {
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val top = group.minOf { it.getPosition().y }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        when (edge) {
++            Edge.LEFT -> moveGroupBy(margin - left, 0)
++            Edge.RIGHT -> moveGroupBy(width - margin - right, 0)
++            Edge.TOP -> moveGroupBy(0, margin - top)
++            Edge.BOTTOM -> moveGroupBy(0, height - margin - bottom)
++        }
++    }
++
++    /**
++     * ff-bgm1x: 고른 화면을 여백만 남기고 꽉 채운다. 세로 화면은 너비를, 가로 화면은 높이를 채우고
++     * 다른 축의 자리는 그대로 둔다. [ratio] 가 있으면 그 비율을 지킨다 (없으면 다른 축 크기 유지).
++     */
++    fun fillSelectedScreen(margin: Int, ratio: Float?) {
++        val view = selectedView ?: return
++        val position = view.getPosition()
++        if (height > width) {
++            val w = width - 2 * margin
++            val h = ratio?.let { (w / it).roundToInt() } ?: view.getHeight()
++            place(view, margin, position.y, w, h)
++        } else {
++            val h = height - 2 * margin
++            val w = ratio?.let { (h * it).roundToInt() } ?: view.getWidth()
++            place(view, position.x, margin, w, h)
++        }
++        refreshSelection()
++    }
++
++    // ff-bgm1x: 함께 고른 버튼들을 기준 버튼과 같은 크기로 (각 항목의 가운데는 유지)
++    fun sameSizeForSelection() {
++        val source = selectedView ?: return
++        if (source.component.isScreen()) return
++        val w = source.getWidth()
++        val h = source.getHeight()
++        extraSelection.filter { !it.component.isScreen() }.forEach {
++            val cx = it.getPosition().x + it.getWidth() / 2
++            val cy = it.getPosition().y + it.getHeight() / 2
++            place(it, cx - w / 2, cy - h / 2, w, h)
++        }
++    }
++
++    // ff-bgm1x: 짝(방향키↔ABXY, L↔R, SELECT↔START) 중 왼쪽에 있는 것을 기준으로 오른쪽 것을 거울 자리로 옮긴다
++    fun mirrorLeftToRight() {
++        val pairs = listOf(
++            LayoutComponent.DPAD to LayoutComponent.BUTTONS,
++            LayoutComponent.BUTTON_L to LayoutComponent.BUTTON_R,
++            LayoutComponent.BUTTON_SELECT to LayoutComponent.BUTTON_START,
++        )
++        pairs.forEach { (a, b) ->
++            val viewA = views[a] ?: return@forEach
++            val viewB = views[b] ?: return@forEach
++            val centerA = viewA.getPosition().x + viewA.getWidth() / 2
++            val centerB = viewB.getPosition().x + viewB.getWidth() / 2
++            val (left, right) = if (centerA <= centerB) viewA to viewB else viewB to viewA
++            val mirroredCenterX = width - (left.getPosition().x + left.getWidth() / 2)
++            val centerY = left.getPosition().y + left.getHeight() / 2
++            place(right, mirroredCenterX - right.getWidth() / 2, centerY - right.getHeight() / 2)
++        }
++    }
++
++    // ff-bgm1x: 크기 조절 막대 등을 고른 항목의 지금 값으로 다시 맞춘다
++    fun refreshSelection() {
++        selectedView?.let { selectView(it) }
+     }
+ 
+     fun setSelectedViewAlpha(alpha: Float) {
+@@ -241,20 +723,21 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         }
+     }
+ 
++    // ff-bgm1x: 고른 묶음을 한 덩어리로 가운데에 둔다
+     fun centerSelectedViewHorizontally() {
+-        val view = selectedView ?: return
+-        val centerX = (width - view.getWidth()) / 2
+-        val position = view.getPosition()
+-        view.setPosition(Point(centerX, position.y))
+-        modifiedByUser = true
++        val group = selection()
++        if (group.isEmpty()) return
++        val left = group.minOf { it.getPosition().x }
++        val right = group.maxOf { it.getPosition().x + it.getWidth() }
++        moveGroupBy((width - (right - left)) / 2 - left, 0)
+     }
+ 
+     fun centerSelectedViewVertically() {
+-        val view = selectedView ?: return
+-        val centerY = (height - view.getHeight()) / 2
+-        val position = view.getPosition()
+-        view.setPosition(Point(position.x, centerY))
+-        modifiedByUser = true
++        val group = selection()
++        if (group.isEmpty()) return
++        val top = group.minOf { it.getPosition().y }
++        val bottom = group.maxOf { it.getPosition().y + it.getHeight() }
++        moveGroupBy(0, (height - (bottom - top)) / 2 - top)
+     }
+ 
+     fun scaleSelectedView(scale: Float) {
+@@ -317,5 +800,10 @@ class LayoutEditorView(context: Context, attrs: AttributeSet?) : LayoutView(cont
+         }
+         currentlySelectedView.setPositionAndSize(Point(viewX, viewY), newViewWidth, newViewHeight)
+         modifiedByUser = true
++        notifySelectedViewChanged(currentlySelectedView)
++    }
++
++    companion object {
++        private const val PREF_GROUPS = "ff_layout_editor_groups"
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
+index 500dec61..99131967 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
+@@ -4,4 +4,9 @@ enum class LayoutComponentEditableProperty {
+     SIZE,
+     WIDTH,
+     HEIGHT,
+-}
+\ No newline at end of file
++    // ff-bgm1x: 자리(px)와 편집기 여백·격자(px)
++    X,
++    Y,
++    MARGIN,
++    GRID,
++}
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
+index e499adef..4ab2eafb 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/ui/LayoutComponentPropertyValueDialog.kt
+@@ -36,6 +36,10 @@ fun LayoutComponentPropertyValueDialog(
+             LayoutComponentEditableProperty.SIZE -> stringResource(R.string.label_size)
+             LayoutComponentEditableProperty.WIDTH -> stringResource(R.string.label_width)
+             LayoutComponentEditableProperty.HEIGHT -> stringResource(R.string.label_height)
++            LayoutComponentEditableProperty.X -> stringResource(R.string.ff_layout_x)
++            LayoutComponentEditableProperty.Y -> stringResource(R.string.ff_layout_y)
++            LayoutComponentEditableProperty.MARGIN -> stringResource(R.string.ff_layout_margin_title)
++            LayoutComponentEditableProperty.GRID -> stringResource(R.string.ff_layout_grid_title)
+             null -> ""
+         },
+         dialogState = dialogState,
+diff --git a/app/src/main/res/layout/view_layout_editor_manager.xml b/app/src/main/res/layout/view_layout_editor_manager.xml
+index 99766f84..baf6e170 100644
+--- a/app/src/main/res/layout/view_layout_editor_manager.xml
++++ b/app/src/main/res/layout/view_layout_editor_manager.xml
+@@ -55,10 +55,72 @@
+                 app:tint="@color/textLayoutEditor"
+                 android:contentDescription="@string/close" />
+ 
++            <!-- ff-bgm1x: 고른 항목의 왼쪽 위 자리 (px). 누르면 숫자로 입력 -->
+             <LinearLayout
+-                android:id="@+id/layout_size_labels"
++                android:id="@+id/layout_position"
+                 app:layout_constraintTop_toBottomOf="@id/button_delete_button"
+                 app:layout_constraintStart_toStartOf="parent"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:orientation="horizontal">
++
++                <LinearLayout
++                    android:id="@+id/layout_x_labels"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:clickable="true"
++                    android:focusable="true"
++                    android:background="?attr/selectableItemBackground"
++                    android:orientation="vertical"
++                    android:paddingVertical="4dp"
++                    android:paddingStart="16dp"
++                    android:paddingEnd="16dp">
++
++                    <TextView
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        android:text="@string/ff_layout_x" />
++
++                    <TextView
++                        android:id="@+id/text_x"
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        tools:text="100" />
++                </LinearLayout>
++
++                <LinearLayout
++                    android:id="@+id/layout_y_labels"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:clickable="true"
++                    android:focusable="true"
++                    android:background="?attr/selectableItemBackground"
++                    android:orientation="vertical"
++                    android:paddingVertical="4dp"
++                    android:paddingStart="16dp"
++                    android:paddingEnd="16dp">
++
++                    <TextView
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        android:text="@string/ff_layout_y" />
++
++                    <TextView
++                        android:id="@+id/text_y"
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        tools:text="100" />
++                </LinearLayout>
++            </LinearLayout>
++
++            <LinearLayout
++                android:id="@+id/layout_size_labels"
++                app:layout_constraintTop_toBottomOf="@id/layout_position"
++                app:layout_constraintStart_toStartOf="parent"
+                 app:layout_constraintEnd_toStartOf="@id/barrier_labels"
+                 app:layout_constraintWidth_min="wrap"
+                 android:layout_width="0dp"
+@@ -248,12 +310,24 @@
+                 android:paddingVertical="4dp"
+                 android:layout_marginStart="8dp"/>
+ 
++            <!-- ff-bgm1x: 배치 편의 기능 (Flow 로 줄바꿈해 나열) -->
++            <androidx.constraintlayout.helper.widget.Flow
++                android:id="@+id/flow_layout_tools"
++                android:layout_width="0dp"
++                android:layout_height="wrap_content"
++                app:layout_constraintTop_toBottomOf="@id/checkbox_above_screen"
++                app:layout_constraintStart_toStartOf="parent"
++                app:layout_constraintEnd_toEndOf="parent"
++                app:flow_wrapMode="chain"
++                app:flow_horizontalStyle="packed"
++                app:flow_horizontalBias="0"
++                app:flow_horizontalGap="4dp"
++                app:constraint_referenced_ids="button_center_horizontal,button_center_vertical,button_align_left,button_align_right,button_align_top,button_align_bottom,button_fill_screen,button_same_size,button_mirror,button_margin,button_grid" />
++
+             <Button
+                 android:id="@+id/button_center_horizontal"
+                 android:layout_width="wrap_content"
+                 android:layout_height="wrap_content"
+-                app:layout_constraintTop_toBottomOf="@id/checkbox_above_screen"
+-                app:layout_constraintStart_toStartOf="parent"
+                 android:text="@string/center_horizontal"
+                 style="@style/Button.Editor" />
+ 
+@@ -261,10 +335,69 @@
+                 android:id="@+id/button_center_vertical"
+                 android:layout_width="wrap_content"
+                 android:layout_height="wrap_content"
+-                app:layout_constraintStart_toEndOf="@id/button_center_horizontal"
+-                app:layout_constraintTop_toTopOf="@id/button_center_horizontal"
+                 android:text="@string/center_vertical"
+                 style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_left"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_left"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_right"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_right"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_top"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_top"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_bottom"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_bottom"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_fill_screen"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_fill"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_same_size"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_same_size"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_mirror"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_mirror"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_margin"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_grid"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                style="@style/Button.Editor" />
+         </androidx.constraintlayout.widget.ConstraintLayout>
+     </ScrollView>
+ 
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 4a7e1ddd..154114a5 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -243,6 +243,53 @@
+     <string name="interpolation">Interpolation</string>
+     <string name="bitrate">Bitrate</string>
+     <string name="volume">Volume</string>
++    <!-- ff-bgm1x -->
++    <string name="ff_bgm1x_bgm_1x">Keep BGM at 1x speed</string>
++    <string name="ff_bgm1x_bgm_1x_summary">Plays background music at normal speed while fast forwarding</string>
++    <string name="ff_bgm1x_ff_cutscenes">Fast forward during cutscenes</string>
++    <string name="ff_bgm1x_ff_cutscenes_summary">When off, fast forward pauses while cutscene music is playing</string>
++    <string name="ff_bgm1x_sfx_1x">Keep sound effects at 1x speed</string>
++    <string name="ff_bgm1x_sfx_1x_summary">Plays sound effects at normal speed while fast forwarding</string>
++    <string name="ff_bgm1x_sfx_volume">Sound effect volume</string>
++    <string name="ff_layout_x">X px</string>
++    <string name="ff_layout_y">Y px</string>
++    <string name="ff_layout_edge_left">◀ Left</string>
++    <string name="ff_layout_edge_right">Right ▶</string>
++    <string name="ff_layout_edge_top">▲ Top</string>
++    <string name="ff_layout_edge_bottom">▼ Bottom</string>
++    <string name="ff_layout_fill">Fill screen</string>
++    <string name="ff_layout_same_size">Same size for selected buttons</string>
++    <string name="ff_layout_mirror">Mirror left buttons to right</string>
++    <string name="ff_layout_margin">Margin %1$d px</string>
++    <string name="ff_layout_grid">Grid %1$d px</string>
++    <string name="ff_layout_margin_title">Margin (px)</string>
++    <string name="ff_layout_grid_title">Grid (px, 0 = off)</string>
++    <string name="ff_layout_new_panel">New panel</string>
++    <string name="ff_layout_use_original">Original panel</string>
++    <string name="ff_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="ff_layout_panel_collapse">Collapse</string>
++    <string name="ff_layout_panel_expand">Expand</string>
++    <string name="ff_layout_hint">Tap to select one (whole group if grouped), long-press to select several</string>
++    <string name="ff_layout_selected_many">%1$s and %2$d more selected (yellow = reference)</string>
++    <string name="ff_layout_w">W px</string>
++    <string name="ff_layout_h">H px</string>
++    <string name="ff_layout_choose_function">Choose button</string>
++    <string name="ff_layout_add_button">Add button</string>
++    <string name="ff_layout_change_function">Change function</string>
++    <string name="ff_layout_delete_button">Delete</string>
++    <string name="ff_layout_group">Group</string>
++    <string name="ff_layout_ungroup">Ungroup</string>
++    <string name="ff_layout_section_each">Align to each other (inside the group if one group is selected)</string>
++    <string name="ff_layout_section_screen">Relative to screen</string>
++    <string name="ff_layout_align_left">Left edges</string>
++    <string name="ff_layout_align_hcenter">Center (vertical line)</string>
++    <string name="ff_layout_align_right">Right edges</string>
++    <string name="ff_layout_align_top">Top edges</string>
++    <string name="ff_layout_align_vcenter">Same height</string>
++    <string name="ff_layout_align_bottom">Bottom edges</string>
++    <string name="ff_layout_dist_h">Space horizontally</string>
++    <string name="ff_layout_dist_v">Space vertically</string>
++    <string name="ff_layout_gap">Gap px (empty = even)</string>
+     <string name="volume_percentage">%1$d%%</string>
+     <string name="audio_latency">Audio latency</string>
+     <string name="microphone_source">Microphone source</string>
+diff --git a/app/src/main/res/xml/pref_audio.xml b/app/src/main/res/xml/pref_audio.xml
+index d01a0d7c..679526e5 100644
+--- a/app/src/main/res/xml/pref_audio.xml
++++ b/app/src/main/res/xml/pref_audio.xml
+@@ -39,6 +39,41 @@
+             app:min="0"
+             android:max="256" />
+ 
++    <!-- ff-bgm1x -->
++    <SwitchPreference
++            android:key="ff_bgm1x_bgm_1x"
++            android:title="@string/ff_bgm1x_bgm_1x"
++            android:summary="@string/ff_bgm1x_bgm_1x_summary"
++            android:dependency="sound_enabled"
++            app:iconSpaceReserved="false"
++            android:defaultValue="true" />
++
++    <SwitchPreference
++            android:key="ff_bgm1x_ff_cutscenes"
++            android:title="@string/ff_bgm1x_ff_cutscenes"
++            android:summary="@string/ff_bgm1x_ff_cutscenes_summary"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            android:defaultValue="false" />
++
++    <SwitchPreference
++            android:key="ff_bgm1x_sfx_1x"
++            android:title="@string/ff_bgm1x_sfx_1x"
++            android:summary="@string/ff_bgm1x_sfx_1x_summary"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            android:defaultValue="true" />
++
++    <SeekBarPreference
++            android:key="ff_bgm1x_sfx_volume"
++            android:title="@string/ff_bgm1x_sfx_volume"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            app:updatesContinuously="true"
++            android:defaultValue="256"
++            app:min="0"
++            android:max="256" />
++
+     <ListPreference
+             android:key="audio_latency"
+             android:title="@string/audio_latency"

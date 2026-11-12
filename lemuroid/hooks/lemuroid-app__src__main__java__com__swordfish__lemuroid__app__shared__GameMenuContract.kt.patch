@@ -1,0 +1,26 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
+index 70ae399c..63c1328c 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
+@@ -12,6 +12,12 @@ object GameMenuContract {
+     const val EXTRA_FAST_FORWARD = "EXTRA_FAST_FORWARD"
+     const val EXTRA_CURRENT_TILT_CONFIG = "EXTRA_CURRENT_TILT_CONFIG"
+     const val EXTRA_TILT_ALL_CONFIGS = "EXTRA_TILT_ALL_CONFIGS"
++    // ff-bgm1x: 이 게임의 빨리 감기 배수 (0 = 기본값) 와 기본 배수
++    const val EXTRA_GAME_FAST_FORWARD_SPEED = "EXTRA_GAME_FAST_FORWARD_SPEED"
++    const val EXTRA_DEFAULT_FAST_FORWARD_SPEED = "EXTRA_DEFAULT_FAST_FORWARD_SPEED"
++    // ff-bgm1x: 이 게임의 화면 방향 ("" = 기본값) 과 기본값
++    const val EXTRA_GAME_SCREEN_ORIENTATION = "EXTRA_GAME_SCREEN_ORIENTATION"
++    const val EXTRA_DEFAULT_SCREEN_ORIENTATION = "EXTRA_DEFAULT_SCREEN_ORIENTATION"
+ 
+     const val RESULT_RESET = "RESULT_RESET"
+     const val RESULT_SAVE = "RESULT_SAVE"
+@@ -22,4 +28,8 @@ object GameMenuContract {
+     const val RESULT_ENABLE_AUDIO = "RESULT_ENABLE_AUDIO"
+     const val RESULT_ENABLE_FAST_FORWARD = "RESULT_ENABLE_FAST_FORWARD"
+     const val RESULT_CHANGE_TILT_CONFIG = "RESULT_CHANGE_TILT_CONFIG"
++    const val RESULT_CHANGE_GAME_FAST_FORWARD_SPEED = "RESULT_CHANGE_GAME_FAST_FORWARD_SPEED"
++    // ff-bgm1x: 치트 화면에서 목록이 바뀜 (켜진 치트를 다시 건다)
++    const val RESULT_CHEATS_CHANGED = "RESULT_CHEATS_CHANGED"
++    const val RESULT_CHANGE_GAME_SCREEN_ORIENTATION = "RESULT_CHANGE_GAME_SCREEN_ORIENTATION"
+ }

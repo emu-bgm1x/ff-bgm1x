@@ -65,6 +65,8 @@ private:
 	};
 
 	void mixRealtime(int16_t* stereo, int frames, int sampleRate);
+	void updateFrame(mCore* core);
+	void applyPsgMute(mCore* core, uint8_t mask);
 	void loadRom(mCore* core);
 	int16_t recSample(int16_t in, bool right);
 
@@ -96,6 +98,7 @@ private:
 	std::atomic<int> m_volume{0x100};
 	std::atomic<bool> m_mute{false};
 	uint64_t m_frame = 0;
+	uint8_t m_psgMuted = 0;  // 에뮬레이터 출력에서 꺼 둔 PSG 채널 (비트 i = 채널 i+1)
 };
 
 }

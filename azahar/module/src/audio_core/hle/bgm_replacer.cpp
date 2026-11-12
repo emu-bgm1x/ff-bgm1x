@@ -1200,10 +1200,27 @@ void BgmReplacer::UpdateMixerVolumes(const std::array<float, 3>& volumes) {
     mixer_volume = volumes;
 }
 
-bool BgmReplacer::MirrorBegin(std::size_t source_id) {
-    if (!enabled || !voices_1x || !FastForwarding()) return false;
-    sfx_mirror.Begin(source_id);
-    return true;
+int BgmReplacer::MirrorBegin(std::size_t source_id) {
+    if (!enabled || !voices_1x) return 0;
+    const double limit = Settings::GetFrameLimit();
+    if (limit == 0 || limit > 100) {
+        sfx_mirror.Begin(source_id, SfxMirror::Mode::Record);
+        return 1;
+    }
+    if (limit < 100) {
+        sfx_mirror.Begin(source_id, SfxMirror::Mode::Ahead);
+        return 2;
+    }
+    return 0;
+}
+
+void BgmReplacer::MirrorAheadBuffer(std::size_t source_id, const AudioInterp::StereoBuffer16& pcm, bool loop) {
+    sfx_mirror.AheadBuffer(source_id, pcm, loop);
+}
+
+bool BgmReplacer::MirrorAheadUpdate(std::size_t source_id, const std::array<std::array<float, 4>, 3>& gain,
+                                    float rate) {
+    return sfx_mirror.AheadUpdate(source_id, gain, mirror_mixer_volume, rate);
 }
 
 void BgmReplacer::MirrorEnd(std::size_t source_id) {

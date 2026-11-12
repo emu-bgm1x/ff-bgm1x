@@ -1,0 +1,1208 @@
+diff --git a/buildSrc/src/main/java/deps.kt b/buildSrc/src/main/java/deps.kt
+index a478a8b2..c2e57f53 100644
+--- a/buildSrc/src/main/java/deps.kt
++++ b/buildSrc/src/main/java/deps.kt
+@@ -166,8 +166,9 @@ object deps {
+         const val composeHtmlText          = "de.charlex.compose.material3:material3-html-text:2.0.0-beta01"
+         const val collectionsImmutable     = "org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.8"
+         const val padkit                   = "io.github.swordfish90:padkit:${versions.padkit}"
+-        const val libretrodroid            = "com.github.Swordfish90:LibretroDroid:${versions.libretrodroid}"
+-//        const val libretrodroid            = "com.swordfish:libretrodroid:unspecified"
++//        const val libretrodroid            = "com.github.Swordfish90:LibretroDroid:${versions.libretrodroid}"
++        // ff-bgm1x: 수정한 LibretroDroid (publishToMavenLocal 로 올린 것)
++        const val libretrodroid            = "com.swordfish:libretrodroid:unspecified"
+     }
+ 
+     object plugins {
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
+index e81c42c8..8159cb8e 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
+@@ -31,6 +31,7 @@ import androidx.compose.runtime.CompositionLocalProvider
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.derivedStateOf
++import androidx.compose.runtime.key
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.ui.Alignment
+@@ -56,7 +57,18 @@ import com.swordfish.lemuroid.lib.controller.ControllerConfig
+ import com.swordfish.touchinput.controller.R
+ import com.swordfish.touchinput.radial.LemuroidPadTheme
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayout
++import com.swordfish.touchinput.radial.custom.CustomButtonFunction
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.CustomLayoutState
++import com.swordfish.touchinput.radial.custom.LocalCustomLayout
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.sensors.TiltConfiguration
++import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
++import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
++import gg.padkit.controls.ControlButton
++import gg.padkit.ids.Id
++import androidx.compose.foundation.layout.size
+ import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+ import com.swordfish.touchinput.radial.ui.GlassSurface
+ import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
+@@ -109,6 +121,21 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                 HapticFeedbackMode.PRESS_RELEASE -> HapticFeedbackType.PRESS_RELEASE
+             }
+ 
++        // ff-bgm1x: 버튼·게임 화면 자유 배치 (저장된 배치가 없으면 레무로이드 원래 배치)
++        val customLayoutState = remember { CustomLayoutState(CustomLayout()) }
++        val loadedCustomLayout = viewModel.getCustomLayout().collectAsState(null)
++        val customLayoutEditShown = viewModel.isCustomLayoutEditShown().collectAsState(false)
++        customLayoutState.screenWidth = constraints.maxWidth.toFloat()
++        customLayoutState.screenHeight = constraints.maxHeight.toFloat()
++        LaunchedEffect(loadedCustomLayout.value, customLayoutEditShown.value) {
++            customLayoutState.editing = customLayoutEditShown.value
++            if (!customLayoutEditShown.value) {
++                customLayoutState.selectOnly(null)
++                loadedCustomLayout.value?.let { customLayoutState.layout = it.layout }
++            }
++        }
++
++        CompositionLocalProvider(LocalCustomLayout provides customLayoutState) {
+         PadKit(
+             modifier = Modifier.fillMaxSize(),
+             onInputEvents = { viewModel.handleVirtualInputEvent(it) },
+@@ -148,6 +175,14 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                 gameView.viewport = viewport
+             }
+ 
++            // ff-bgm1x: 비율 유지를 끄면 게임 화면을 영역에 늘인다. 편집기가 쓸 게임 화면 비율도 읽어 둔다
++            val keepAspect = customLayoutState.layout.keepAspect
++            LaunchedEffect(keepAspect, customLayoutEditShown.value) {
++                val gameView = viewModel.retroGameView.retroGameViewFlow()
++                gameView.stretch = !keepAspect
++                customLayoutState.contentAspect = gameView.getContentAspectRatio()
++            }
++
+             ConstraintLayout(
+                 modifier = Modifier.fillMaxSize(),
+                 constraintSet =
+@@ -161,6 +196,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                         Modifier
+                             .layoutId(GameScreenLayout.CONSTRAINTS_GAME_VIEW)
+                             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top))
++                            .customLayoutElement(CustomLayoutKeys.GAME_VIEW)
+                             .onGloballyPositioned { viewportPosition.value = it.boundsInRoot() },
+                 )
+ 
+@@ -204,6 +240,66 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                     }
+                 }
+             }
++
++            // ff-bgm1x: 화면 빨리 감기 버튼 (편집 화면에서 켜야 보인다, 기본 위치는 오른쪽 위)
++            if (customLayoutState.layout.showFastForwardButton && touchControlsVisibleState.value) {
++                CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
++                    Box(
++                        modifier =
++                            Modifier
++                                .fillMaxSize()
++                                .windowInsetsPadding(WindowInsets.displayCutout)
++                                .padding(16.dp),
++                        contentAlignment = Alignment.TopEnd,
++                    ) {
++                        ControlButton(
++                            modifier =
++                                Modifier
++                                    .size(56.dp)
++                                    .customLayoutElement(CustomLayoutKeys.FAST_FORWARD),
++                            id = Id.Key(BaseGameScreenViewModel.FAST_FORWARD_BUTTON_KEY),
++                            foreground = { LemuroidButtonForeground(pressed = it, label = ">>") },
++                            background = { LemuroidControlBackground() },
++                        )
++                    }
++                }
++            }
++
++            // ff-bgm1x: 사용자가 만든 기능 버튼 (처음 자리는 화면 가운데)
++            if (customLayoutState.layout.customButtons.isNotEmpty() && touchControlsVisibleState.value) {
++                CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
++                    Box(
++                        modifier = Modifier.fillMaxSize(),
++                        contentAlignment = Alignment.Center,
++                    ) {
++                        customLayoutState.layout.customButtons.forEach { button ->
++                            key(button.uid) {
++                                val label = customFunctionName(CustomButtonFunction.of(button.function))
++                                ControlButton(
++                                    modifier =
++                                        Modifier
++                                            .size(56.dp)
++                                            .customLayoutElement(CustomLayoutKeys.custom(button.uid)),
++                                    id = Id.Key(CustomButtonFunction.keyCode(button)),
++                                    foreground = { LemuroidButtonForeground(pressed = it, label = label) },
++                                    background = { LemuroidControlBackground() },
++                                )
++                            }
++                        }
++                    }
++                }
++            }
++        }
++
++        if (customLayoutEditShown.value) {
++            CustomLayoutEditor(
++                state = customLayoutState,
++                initialForGame = loadedCustomLayout.value?.isGameSpecific ?: false,
++                onSave = { layout, forGame -> viewModel.saveCustomLayout(layout, forGame) },
++                onClear = { forGame -> viewModel.clearCustomLayout(forGame) },
++                onClose = { viewModel.showCustomLayoutEdit(false) },
++            )
++        }
+         }
+ 
+         val isLoading =
+@@ -325,6 +421,16 @@ private fun MenuEditTouchControls(
+                     modifier = Modifier.fillMaxWidth(),
+                     horizontalArrangement = Arrangement.Center,
+                 ) {
++                    // ff-bgm1x: 버튼 하나씩 자유 배치
++                    TextButton(
++                        onClick = {
++                            viewModel.showEditControls(false)
++                            viewModel.showCustomLayoutEdit(true)
++                        },
++                        modifier = Modifier.padding(8.dp),
++                    ) {
++                        Text(text = stringResource(com.swordfish.lemuroid.R.string.custom_layout_open))
++                    }
+                     TextButton(
+                         onClick = { viewModel.resetTouchControls() },
+                         modifier = Modifier.padding(8.dp),
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuActivity.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuActivity.kt
+index b8cbfc8d..8a3849ff 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuActivity.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuActivity.kt
+@@ -42,12 +42,14 @@ import androidx.navigation.compose.NavHost
+ import androidx.navigation.compose.currentBackStackEntryAsState
+ import androidx.navigation.compose.rememberNavController
+ import com.swordfish.lemuroid.R
++import com.swordfish.lemuroid.app.mobile.feature.gamemenu.cheats.GameMenuCheatsScreen
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.coreoptions.GameMenuCoreOptionsScreen
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.coreoptions.GameMenuCoreOptionsViewModel
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.states.GameMenuStatesScreen
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.states.GameMenuStatesViewModel
+ import com.swordfish.lemuroid.app.mobile.shared.compose.ui.AppTheme
+ import com.swordfish.lemuroid.app.shared.GameMenuContract
++import com.swordfish.lemuroid.app.shared.cheats.CheatsManager
+ import com.swordfish.lemuroid.app.shared.coreoptions.LemuroidCoreOption
+ import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
+ import com.swordfish.lemuroid.common.kotlin.serializable
+@@ -78,6 +80,12 @@ class GameMenuActivity : RetrogradeComponentActivity() {
+         val audioEnabled: Boolean,
+         val fastForwardSupported: Boolean,
+         val fastForwardEnabled: Boolean,
++        // ff-bgm1x: 이 게임의 빨리 감기 배수 (0 = 기본값) 와 기본 배수
++        val gameFastForwardSpeed: Int,
++        val defaultFastForwardSpeed: Int,
++        // ff-bgm1x: 이 게임의 화면 방향 ("" = 기본값) 과 기본값
++        val gameScreenOrientation: String,
++        val defaultScreenOrientation: String,
+         val numDisks: Int,
+         val currentDisk: Int,
+         val currentTiltConfiguration: TiltConfiguration,
+@@ -116,6 +124,14 @@ class GameMenuActivity : RetrogradeComponentActivity() {
+                     extras?.getBoolean(GameMenuContract.EXTRA_FAST_FORWARD_SUPPORTED, false) ?: false,
+                 fastForwardEnabled =
+                     extras?.getBoolean(GameMenuContract.EXTRA_FAST_FORWARD, false) ?: false,
++                gameFastForwardSpeed =
++                    extras?.getInt(GameMenuContract.EXTRA_GAME_FAST_FORWARD_SPEED, 0) ?: 0,
++                defaultFastForwardSpeed =
++                    extras?.getInt(GameMenuContract.EXTRA_DEFAULT_FAST_FORWARD_SPEED, 2) ?: 2,
++                gameScreenOrientation =
++                    extras?.getString(GameMenuContract.EXTRA_GAME_SCREEN_ORIENTATION) ?: "",
++                defaultScreenOrientation =
++                    extras?.getString(GameMenuContract.EXTRA_DEFAULT_SCREEN_ORIENTATION) ?: "auto",
+                 numDisks =
+                     extras?.getInt(GameMenuContract.EXTRA_DISKS, 0) ?: 0,
+                 currentDisk =
+@@ -226,6 +242,20 @@ class GameMenuActivity : RetrogradeComponentActivity() {
+                             gameMenuRequest,
+                         )
+                     }
++                    composable(GameMenuRoute.CHEATS) {
++                        GameMenuCheatsScreen(
++                            game = gameMenuRequest.game,
++                            cheatsManager = remember { CheatsManager(applicationContext) },
++                            onChanged = ::markCheatsChanged,
++                        )
++                    }
++                    composable(GameMenuRoute.CHEATS) {
++                        GameMenuCheatsScreen(
++                            game = gameMenuRequest.game,
++                            cheatsManager = CheatsManager(applicationContext),
++                            onChanged = ::markCheatsChanged,
++                        )
++                    }
+                 }
+             }
+         }
+@@ -257,9 +287,20 @@ class GameMenuActivity : RetrogradeComponentActivity() {
+         }
+     }
+ 
++    // ff-bgm1x: 치트가 바뀌었으면 어떤 방법으로 메뉴를 닫든 게임 화면이 다시 건다
++    private var cheatsChanged = false
++
++    private fun markCheatsChanged() {
++        cheatsChanged = true
++        setResult(RESULT_OK, Intent().putExtra(GameMenuContract.RESULT_CHEATS_CHANGED, true))
++    }
++
+     private fun onResult(block: Intent.() -> Unit) {
+         val resultIntent = Intent()
+         resultIntent.block()
++        if (cheatsChanged) {
++            resultIntent.putExtra(GameMenuContract.RESULT_CHEATS_CHANGED, true)
++        }
+         setResult(RESULT_OK, resultIntent)
+         finish()
+     }
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
+index 09b87eaa..20f28e1e 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuHomeScreen.kt
+@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.verticalScroll
+ import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Code
++import androidx.compose.material.icons.filled.ScreenRotation
+ import androidx.compose.material.icons.filled.Sensors
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.Text
+@@ -17,6 +19,8 @@ import com.alorma.compose.settings.storage.memory.rememberMemoryBooleanSettingSt
+ import com.alorma.compose.settings.storage.memory.rememberMemoryIntSettingState
+ import com.swordfish.lemuroid.R
+ import com.swordfish.lemuroid.app.mobile.feature.gamemenu.tilt.TiltConfigurationMenuEntry
++import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
++import com.swordfish.lemuroid.app.mobile.feature.settings.screenOrientationName
+ import com.swordfish.lemuroid.app.shared.GameMenuContract
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsList
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsMenuLink
+@@ -108,6 +112,30 @@ fun GameMenuHomeScreen(
+                     onResult { putExtra(GameMenuContract.RESULT_ENABLE_FAST_FORWARD, it) }
+                 },
+             )
++
++            // ff-bgm1x: 이 게임의 빨리 감기 배수 (첫 항목 = 기본값)
++            val speeds = listOf(0) + SettingsManager.FAST_FORWARD_SPEEDS
++            LemuroidSettingsList(
++                title = { Text(text = stringResource(id = R.string.game_menu_fast_forward_speed)) },
++                items =
++                    speeds.map {
++                        if (it == 0) {
++                            stringResource(R.string.game_menu_fast_forward_speed_default, gameMenuRequest.defaultFastForwardSpeed)
++                        } else {
++                            stringResource(R.string.fast_forward_speed_value, it)
++                        }
++                    },
++                icon = {
++                    Icon(
++                        painterResource(R.drawable.ic_menu_fast_forward),
++                        contentDescription = stringResource(id = R.string.game_menu_fast_forward_speed),
++                    )
++                },
++                state = rememberMemoryIntSettingState(speeds.indexOf(gameMenuRequest.gameFastForwardSpeed).coerceAtLeast(0)),
++                onItemSelected = { index, _ ->
++                    onResult { putExtra(GameMenuContract.RESULT_CHANGE_GAME_FAST_FORWARD_SPEED, speeds[index]) }
++                },
++            )
+         }
+ 
+         if (gameMenuRequest.numDisks > 1) {
+@@ -154,6 +182,45 @@ fun GameMenuHomeScreen(
+             )
+         }
+ 
++        // ff-bgm1x: 이 게임의 화면 방향 (첫 항목 = 기본값)
++        val orientations = listOf("") + SettingsManager.SCREEN_ORIENTATIONS
++        LemuroidSettingsList(
++            title = { Text(text = stringResource(id = R.string.game_menu_screen_orientation)) },
++            items =
++                orientations.map {
++                    if (it.isEmpty()) {
++                        stringResource(
++                            R.string.screen_orientation_default,
++                            screenOrientationName(gameMenuRequest.defaultScreenOrientation),
++                        )
++                    } else {
++                        screenOrientationName(it)
++                    }
++                },
++            icon = {
++                Icon(
++                    imageVector = Icons.Default.ScreenRotation,
++                    contentDescription = stringResource(id = R.string.game_menu_screen_orientation),
++                )
++            },
++            state = rememberMemoryIntSettingState(orientations.indexOf(gameMenuRequest.gameScreenOrientation).coerceAtLeast(0)),
++            onItemSelected = { index, _ ->
++                onResult { putExtra(GameMenuContract.RESULT_CHANGE_GAME_SCREEN_ORIENTATION, orientations[index]) }
++            },
++        )
++
++        // ff-bgm1x: 치트
++        LemuroidSettingsMenuLink(
++            title = { Text(text = stringResource(id = R.string.game_menu_cheats)) },
++            icon = {
++                Icon(
++                    imageVector = Icons.Default.Code,
++                    contentDescription = stringResource(id = R.string.game_menu_cheats),
++                )
++            },
++            onClick = { navController.navigateToRoute(GameMenuRoute.CHEATS) },
++        )
++
+         if (gameMenuRequest.allTiltConfigurations.isNotEmpty()) {
+             val tiltConfigurationEntries =
+                 gameMenuRequest.allTiltConfigurations
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
+index 7b6bca49..a09fc27f 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/gamemenu/GameMenuNavigationRoutes.kt
+@@ -44,6 +44,12 @@ enum class GameMenuRoute(
+         titleId = R.string.game_menu_settings,
+         parent = HOME,
+     ),
++    // ff-bgm1x
++    CHEATS(
++        route = "cheats",
++        titleId = R.string.game_menu_cheats,
++        parent = HOME,
++    ),
+     ;
+ 
+     fun canGoBack(): Boolean {
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
+index 7985ccc6..ceb4f146 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
+@@ -58,6 +58,20 @@ class SettingsManager(private val context: Context, sharedPreferences: Lazy<Shar
+ 
+     suspend fun allowDirectGameLoad() = booleanPreference(R.string.pref_key_allow_direct_game_load, true)
+ 
++    // ff-bgm1x: 빨리 감기 기본 배수 (게임별 값이 없을 때)
++    suspend fun fastForwardSpeed() =
++        stringPreference(R.string.pref_key_fast_forward_speed, DEFAULT_FAST_FORWARD_SPEED.toString())
++            .toIntOrNull() ?: DEFAULT_FAST_FORWARD_SPEED
++
++    // ff-bgm1x: 게임 화면 방향 기본값 (auto = 휴대폰 회전을 따라감)
++    suspend fun screenOrientation() = stringPreference(R.string.pref_key_screen_orientation, SCREEN_ORIENTATIONS.first())
++
++    companion object {
++        const val DEFAULT_FAST_FORWARD_SPEED = 2
++        val FAST_FORWARD_SPEEDS = (2..16).toList()
++        val SCREEN_ORIENTATIONS = listOf("auto", "landscape", "portrait")
++    }
++
+     private suspend fun booleanPreference(
+         keyId: Int,
+         default: Boolean,
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/general/SettingsScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/general/SettingsScreen.kt
+index 1084175d..ffbc9fb0 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/general/SettingsScreen.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/general/SettingsScreen.kt
+@@ -13,6 +13,8 @@ import androidx.navigation.NavController
+ import com.swordfish.lemuroid.R
+ import com.swordfish.lemuroid.app.mobile.feature.main.MainRoute
+ import com.swordfish.lemuroid.app.mobile.feature.main.navigateToRoute
++import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
++import com.swordfish.lemuroid.app.mobile.feature.settings.screenOrientationName
+ import com.swordfish.lemuroid.app.shared.library.LibraryIndexScheduler
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidCardSettingsGroup
+ import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsList
+@@ -189,6 +191,28 @@ private fun GeneralSettings() {
+             title = { Text(text = stringResource(id = R.string.settings_title_viewport_alignment)) },
+             items = stringListResource(R.array.pref_key_viewport_alignment_display_names),
+         )
++        // ff-bgm1x: 빨리 감기 기본 배수
++        LemuroidSettingsList(
++            state =
++                indexPreferenceState(
++                    R.string.pref_key_fast_forward_speed,
++                    SettingsManager.DEFAULT_FAST_FORWARD_SPEED.toString(),
++                    SettingsManager.FAST_FORWARD_SPEEDS.map { it.toString() },
++                ),
++            title = { Text(text = stringResource(id = R.string.settings_title_fast_forward_speed)) },
++            items = SettingsManager.FAST_FORWARD_SPEEDS.map { stringResource(R.string.fast_forward_speed_value, it) },
++        )
++        // ff-bgm1x: 게임 화면 방향 기본값
++        LemuroidSettingsList(
++            state =
++                indexPreferenceState(
++                    R.string.pref_key_screen_orientation,
++                    SettingsManager.SCREEN_ORIENTATIONS.first(),
++                    SettingsManager.SCREEN_ORIENTATIONS,
++                ),
++            title = { Text(text = stringResource(id = R.string.settings_title_screen_orientation)) },
++            items = SettingsManager.SCREEN_ORIENTATIONS.map { screenOrientationName(it) },
++        )
+     }
+ }
+ 
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
+index 70ae399c..63c1328c 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/GameMenuContract.kt
+@@ -12,6 +12,12 @@ object GameMenuContract {
+     const val EXTRA_FAST_FORWARD = "EXTRA_FAST_FORWARD"
+     const val EXTRA_CURRENT_TILT_CONFIG = "EXTRA_CURRENT_TILT_CONFIG"
+     const val EXTRA_TILT_ALL_CONFIGS = "EXTRA_TILT_ALL_CONFIGS"
++    // ff-bgm1x: 이 게임의 빨리 감기 배수 (0 = 기본값) 와 기본 배수
++    const val EXTRA_GAME_FAST_FORWARD_SPEED = "EXTRA_GAME_FAST_FORWARD_SPEED"
++    const val EXTRA_DEFAULT_FAST_FORWARD_SPEED = "EXTRA_DEFAULT_FAST_FORWARD_SPEED"
++    // ff-bgm1x: 이 게임의 화면 방향 ("" = 기본값) 과 기본값
++    const val EXTRA_GAME_SCREEN_ORIENTATION = "EXTRA_GAME_SCREEN_ORIENTATION"
++    const val EXTRA_DEFAULT_SCREEN_ORIENTATION = "EXTRA_DEFAULT_SCREEN_ORIENTATION"
+ 
+     const val RESULT_RESET = "RESULT_RESET"
+     const val RESULT_SAVE = "RESULT_SAVE"
+@@ -22,4 +28,8 @@ object GameMenuContract {
+     const val RESULT_ENABLE_AUDIO = "RESULT_ENABLE_AUDIO"
+     const val RESULT_ENABLE_FAST_FORWARD = "RESULT_ENABLE_FAST_FORWARD"
+     const val RESULT_CHANGE_TILT_CONFIG = "RESULT_CHANGE_TILT_CONFIG"
++    const val RESULT_CHANGE_GAME_FAST_FORWARD_SPEED = "RESULT_CHANGE_GAME_FAST_FORWARD_SPEED"
++    // ff-bgm1x: 치트 화면에서 목록이 바뀜 (켜진 치트를 다시 건다)
++    const val RESULT_CHEATS_CHANGED = "RESULT_CHEATS_CHANGED"
++    const val RESULT_CHANGE_GAME_SCREEN_ORIENTATION = "RESULT_CHANGE_GAME_SCREEN_ORIENTATION"
+ }
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameActivity.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameActivity.kt
+index 6d064206..918d4a88 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameActivity.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameActivity.kt
+@@ -15,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
+ import com.swordfish.lemuroid.app.mobile.feature.game.GameActivity
+ import com.swordfish.lemuroid.app.mobile.feature.game.GameService
+ import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
++import com.swordfish.lemuroid.app.mobile.feature.settings.screenOrientationToActivityInfo
+ import com.swordfish.lemuroid.app.mobile.shared.compose.ui.AppTheme
+ import com.swordfish.lemuroid.app.shared.GameMenuContract
+ import com.swordfish.lemuroid.app.shared.ImmersiveActivity
+@@ -89,6 +90,13 @@ abstract class BaseGameActivity : ImmersiveActivity() {
+     private val startGameTime = System.currentTimeMillis()
+     private var finishTriggered = false
+ 
++    private var defaultScreenOrientation = SettingsManager.SCREEN_ORIENTATIONS.first()
++
++    private fun applyScreenOrientation() {
++        val value = baseGameScreenViewModel.gameScreenOrientation().ifEmpty { defaultScreenOrientation }
++        requestedOrientation = screenOrientationToActivityInfo(value)
++    }
++
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         setUpExceptionsHandler()
+@@ -119,6 +127,12 @@ abstract class BaseGameActivity : ImmersiveActivity() {
+ 
+         lifecycle.addObserver(baseGameScreenViewModel)
+ 
++        // ff-bgm1x: 게임 화면 방향 (기본값 + 이 게임)
++        lifecycleScope.launch {
++            defaultScreenOrientation = baseGameScreenViewModel.defaultScreenOrientation()
++            applyScreenOrientation()
++        }
++
+         setContent {
+             AppTheme {
+                 BaseGameScreen(viewModel = baseGameScreenViewModel) {
+@@ -214,6 +228,19 @@ abstract class BaseGameActivity : ImmersiveActivity() {
+                     GameMenuContract.EXTRA_FAST_FORWARD,
+                     (baseGameScreenViewModel.retroGameView.retroGameView?.frameSpeed ?: 1) > 1,
+                 )
++                this.putExtra(
++                    GameMenuContract.EXTRA_GAME_FAST_FORWARD_SPEED,
++                    baseGameScreenViewModel.gameFastForwardSpeed(),
++                )
++                this.putExtra(
++                    GameMenuContract.EXTRA_DEFAULT_FAST_FORWARD_SPEED,
++                    baseGameScreenViewModel.defaultFastForwardSpeed(),
++                )
++                this.putExtra(
++                    GameMenuContract.EXTRA_GAME_SCREEN_ORIENTATION,
++                    baseGameScreenViewModel.gameScreenOrientation(),
++                )
++                this.putExtra(GameMenuContract.EXTRA_DEFAULT_SCREEN_ORIENTATION, defaultScreenOrientation)
+                 this.putExtra(GameMenuContract.EXTRA_CURRENT_TILT_CONFIG, currentTiltConfiguration)
+                 // TODO PADS... Make sure to avoid passing this if a physical pad is connected.
+                 this.putExtra(GameMenuContract.EXTRA_TILT_ALL_CONFIGS, tiltConfigurations.toTypedArray())
+@@ -397,14 +424,23 @@ abstract class BaseGameActivity : ImmersiveActivity() {
+                 }
+             }
+             if (data?.hasExtra(GameMenuContract.RESULT_ENABLE_FAST_FORWARD) == true) {
+-                baseGameScreenViewModel.retroGameView.retroGameView?.apply {
+-                    val fastForwardEnabled =
+-                        data.getBooleanExtra(
+-                            GameMenuContract.RESULT_ENABLE_FAST_FORWARD,
+-                            false,
+-                        )
+-                    this.frameSpeed = if (fastForwardEnabled) 2 else 1
+-                }
++                baseGameScreenViewModel.setFastForward(
++                    data.getBooleanExtra(GameMenuContract.RESULT_ENABLE_FAST_FORWARD, false),
++                )
++            }
++            if (data?.hasExtra(GameMenuContract.RESULT_CHANGE_GAME_SCREEN_ORIENTATION) == true) {
++                baseGameScreenViewModel.setGameScreenOrientation(
++                    data.getStringExtra(GameMenuContract.RESULT_CHANGE_GAME_SCREEN_ORIENTATION) ?: "",
++                )
++                applyScreenOrientation()
++            }
++            if (data?.getBooleanExtra(GameMenuContract.RESULT_CHEATS_CHANGED, false) == true) {
++                baseGameScreenViewModel.applyCheats()
++            }
++            if (data?.hasExtra(GameMenuContract.RESULT_CHANGE_GAME_FAST_FORWARD_SPEED) == true) {
++                baseGameScreenViewModel.setGameFastForwardSpeed(
++                    data.getIntExtra(GameMenuContract.RESULT_CHANGE_GAME_FAST_FORWARD_SPEED, 0),
++                )
+             }
+             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
+                 baseGameScreenViewModel.showEditControls(true)
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
+index 8f91e6c1..4f365522 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
+@@ -13,6 +13,9 @@ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.viewModelScope
+ import com.swordfish.lemuroid.app.mobile.feature.game.GameService
+ import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
++import com.swordfish.lemuroid.app.shared.cheats.CheatsManager
++import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelCustomLayout
++import com.swordfish.touchinput.radial.custom.CustomLayout
+ import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelInput
+ import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelRetroGameView
+ import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSaves
+@@ -36,7 +39,10 @@ import com.swordfish.lemuroid.lib.saves.StatesPreviewManager
+ import com.swordfish.libretrodroid.GLRetroView
+ import com.swordfish.touchinput.radial.sensors.TiltConfiguration
+ import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
++import com.swordfish.lemuroid.R
+ import gg.padkit.inputevents.InputEvent
++import com.swordfish.libretrodroid.Variable
++import com.swordfish.touchinput.radial.custom.CustomButtonFunction
+ import gg.padkit.inputstate.InputState
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
+@@ -46,13 +52,13 @@ import timber.log.Timber
+ 
+ class BaseGameScreenViewModel(
+     private val appContext: Context,
+-    game: Game,
+-    settingsManager: SettingsManager,
++    private val game: Game,
++    private val settingsManager: SettingsManager,
+     inputDeviceManager: InputDeviceManager,
+     controllerConfigsManager: ControllerConfigsManager,
+     system: GameSystem,
+     systemCoreConfig: SystemCoreConfig,
+-    sharedPreferences: SharedPreferences,
++    private val sharedPreferences: SharedPreferences,
+     savesManager: SavesManager,
+     statesManager: StatesManager,
+     statesPreviewManager: StatesPreviewManager,
+@@ -267,10 +273,64 @@ class BaseGameScreenViewModel(
+         }
+     }
+ 
++    // ff-bgm1x: 빨리 감기 배수. 게임별 값(0 이면 없음)이 있으면 그것, 없으면 설정의 기본값
++    private var defaultFastForwardSpeed = SettingsManager.DEFAULT_FAST_FORWARD_SPEED
++
++    // ff-bgm1x: 게임별 치트
++    private val cheatsManager = CheatsManager(appContext)
++
++    init {
++        viewModelScope.launch {
++            defaultFastForwardSpeed = settingsManager.fastForwardSpeed()
++        }
++        viewModelScope.launch {
++            retroGameView.waitGLEvent<GLRetroView.GLRetroEvents.FrameRendered>()
++            applyCheats()
++        }
++    }
++
++    // 켜진 치트만 다시 건다 (하나를 끄면 전부 지운 뒤 나머지를 다시 거는 방식)
++    fun applyCheats() {
++        retroGameView.retroGameView?.applyCheats(CheatsManager.enabledCodes(cheatsManager.load(game)))
++    }
++
++    private fun gameFastForwardSpeedKey() = "ff_bgm1x_fast_forward_speed_game_${game.id}"
++
++    fun gameFastForwardSpeed(): Int = sharedPreferences.getInt(gameFastForwardSpeedKey(), 0)
++
++    fun defaultFastForwardSpeed(): Int = defaultFastForwardSpeed
++
++    // ff-bgm1x: 게임 화면 방향. 이 게임 값("" 이면 없음)이 있으면 그것, 없으면 설정의 기본값
++    private fun gameScreenOrientationKey() = "ff_bgm1x_screen_orientation_game_${game.id}"
++
++    fun gameScreenOrientation(): String = sharedPreferences.getString(gameScreenOrientationKey(), "") ?: ""
++
++    fun setGameScreenOrientation(value: String) {
++        sharedPreferences.edit().putString(gameScreenOrientationKey(), value).apply()
++    }
++
++    suspend fun defaultScreenOrientation(): String = settingsManager.screenOrientation()
++
++    suspend fun screenOrientation(): String = gameScreenOrientation().ifEmpty { defaultScreenOrientation() }
++
++    fun fastForwardSpeed(): Int = gameFastForwardSpeed().takeIf { it > 0 } ?: defaultFastForwardSpeed
++
++    fun setGameFastForwardSpeed(speed: Int) {
++        sharedPreferences.edit().putInt(gameFastForwardSpeedKey(), speed).apply()
++        retroGameView.retroGameView?.apply {
++            if (frameSpeed > 1) frameSpeed = fastForwardSpeed()
++        }
++    }
++
++    fun setFastForward(enabled: Boolean) {
++        retroGameView.retroGameView?.apply {
++            frameSpeed = if (enabled) fastForwardSpeed() else 1
++        }
++    }
++
+     fun toggleFastForward() {
+-        Timber.d("Loading quick save")
+         retroGameView.retroGameView?.apply {
+-            frameSpeed = if (frameSpeed == 1) 2 else 1
++            frameSpeed = if (frameSpeed == 1) fastForwardSpeed() else 1
+         }
+     }
+ 
+@@ -303,8 +363,74 @@ class BaseGameScreenViewModel(
+         }
+     }
+ 
++    // ff-bgm1x: 코어 옵션(enabled/disabled)을 바꿔 설정에 저장하고 바로 코어에 알린다
++    private fun toggleCoreOption(
++        key: String,
++        defaultEnabled: Boolean,
++        nameRes: Int,
++    ) {
++        val prefKey = CoreVariablesManager.computeSharedPreferenceKey(key, game.systemId)
++        val current = sharedPreferences.getString(prefKey, if (defaultEnabled) "enabled" else "disabled")
++        val enabled = current != "enabled"
++        val value = if (enabled) "enabled" else "disabled"
++        sharedPreferences.edit().putString(prefKey, value).apply()
++        retroGameView.retroGameView?.updateVariables(Variable(key, value))
++        val state = appContext.getString(if (enabled) R.string.custom_func_state_on else R.string.custom_func_state_off)
++        sideEffects.showToast("${appContext.getString(nameRes)}: $state")
++    }
++
+     fun handleVirtualInputEvent(events: List<InputEvent>) {
+-        touchControls.handleVirtualInputEvent(events)
++        // ff-bgm1x: 화면의 빨리 감기 버튼은 게임에 보내지 않고 빨리 감기를 켜고 끈다
++        val (fastForward, others) =
++            events.partition { it is InputEvent.Button && it.id == FAST_FORWARD_BUTTON_KEY }
++        if (fastForward.any { (it as InputEvent.Button).pressed }) {
++            toggleFastForward()
++        }
++        // ff-bgm1x: 사용자가 만든 기능 버튼도 게임에 보내지 않고 그 기능을 실행한다
++        val (custom, rest) =
++            others.partition { it is InputEvent.Button && CustomButtonFunction.fromKeyCode(it.id) != null }
++        custom.forEach { event ->
++            event as InputEvent.Button
++            when (CustomButtonFunction.fromKeyCode(event.id)) {
++                CustomButtonFunction.MENU ->
++                    touchControls.handleVirtualInputEvent(listOf(InputEvent.Button(KeyEvent.KEYCODE_BUTTON_MODE, event.pressed)))
++                CustomButtonFunction.FAST_FORWARD -> if (event.pressed) toggleFastForward()
++                CustomButtonFunction.QUICK_SAVE -> if (event.pressed) sideEffects.saveQuickSave()
++                CustomButtonFunction.QUICK_LOAD -> if (event.pressed) sideEffects.loadQuickSave()
++                CustomButtonFunction.BGM_1X -> if (event.pressed) toggleCoreOption("mgba_ff_bgm1x", true, R.string.custom_func_bgm_1x)
++                CustomButtonFunction.SFX_1X -> if (event.pressed) toggleCoreOption("mgba_ff_bgm1x_sfx", true, R.string.custom_func_sfx_1x)
++                CustomButtonFunction.FF_CUTSCENES ->
++                    if (event.pressed) toggleCoreOption("mgba_ff_bgm1x_cutscenes", false, R.string.custom_func_ff_cutscenes)
++                CustomButtonFunction.NONE, null -> {}
++            }
++        }
++        touchControls.handleVirtualInputEvent(rest)
++    }
++
++    // ff-bgm1x: 버튼·게임 화면 자유 배치 (기본 / 이 게임)
++    private val customLayout = GameViewModelCustomLayout(sharedPreferences, game)
++
++    fun getCustomLayout(): Flow<GameViewModelCustomLayout.Loaded> =
++        customLayout.observe(touchControls.touchControllerIdFlow(), touchControls.screenOrientationFlow())
++
++    fun saveCustomLayout(
++        layout: CustomLayout,
++        forGame: Boolean,
++    ) {
++        customLayout.save(touchControls.currentTouchControllerId(), touchControls.currentScreenOrientation(), layout, forGame)
++    }
++
++    fun clearCustomLayout(forGame: Boolean) {
++        customLayout.clear(touchControls.currentTouchControllerId(), touchControls.currentScreenOrientation(), forGame)
++    }
++
++    // 자유 배치 편집 화면 표시
++    private val editCustomLayout = MutableStateFlow(false)
++
++    fun isCustomLayoutEditShown(): Flow<Boolean> = editCustomLayout
++
++    fun showCustomLayoutEdit(show: Boolean) {
++        editCustomLayout.value = show
+     }
+ 
+     override fun onCreate(owner: LifecycleOwner) {
+@@ -326,4 +452,9 @@ class BaseGameScreenViewModel(
+     fun sendMotionEvent(event: MotionEvent): Boolean {
+         return inputs.sendMotionEvent(event)
+     }
++
++    companion object {
++        // ff-bgm1x: 화면 빨리 감기 버튼의 가상 키 (게임에는 보내지 않는다)
++        const val FAST_FORWARD_BUTTON_KEY = KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
++    }
+ }
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
+index 80609be6..7078211c 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
+@@ -23,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.ExperimentalCoroutinesApi
+ import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.combine
+@@ -105,6 +104,15 @@ class GameViewModelTouchControls(
+         screenOrientation.value = orientation
+     }
+ 
++    // ff-bgm1x: 자유 배치 저장 위치를 정하는 데 쓴다
++    fun touchControllerIdFlow(): Flow<TouchControllerID> = touchControlId
++
++    fun screenOrientationFlow(): Flow<TouchControllerSettingsManager.Orientation> = screenOrientation
++
++    fun currentTouchControllerId(): TouchControllerID = touchControlId.value
++
++    fun currentScreenOrientation(): TouchControllerSettingsManager.Orientation = screenOrientation.value
++
+     fun isTouchControllerVisible(): Flow<Boolean> {
+         return inputs.getEnabledInputDevices()
+             .map { it.isEmpty() }
+@@ -140,19 +148,16 @@ class GameViewModelTouchControls(
+         }
+     }
+ 
++    // ff-bgm1x: 길게 누를 필요 없이 한 번 누르면 바로 메뉴를 연다
+     private fun onMenuPressed(pressed: Boolean) {
+-        menuPressed.value = pressed
++        menuPressed.value = false
+ 
+         if (pressed) {
+             loadingMenuJob?.cancel()
+             loadingMenuJob =
+                 scope.launch {
+-                    delay(MENU_LOADING_ANIMATION_MILLIS.toLong())
+                     sideEffects.showMenu(tilt, inputs)
+                 }
+-        } else {
+-            loadingMenuJob?.cancel()
+-            loadingMenuJob = null
+         }
+     }
+ 
+diff --git a/lemuroid-app/src/main/res/values-ko-rKR/strings.xml b/lemuroid-app/src/main/res/values-ko-rKR/strings.xml
+index 392b4f3d..6f3b379f 100644
+--- a/lemuroid-app/src/main/res/values-ko-rKR/strings.xml
++++ b/lemuroid-app/src/main/res/values-ko-rKR/strings.xml
+@@ -102,6 +102,86 @@
+     <string name="game_menu_edit_touch_controls">컨트롤 변경</string>
+     <string name="game_menu_mute_audio">음소거</string>
+     <string name="game_menu_fast_forward">빨리 감기</string>
++    <!-- ff-bgm1x -->
++    <string name="settings_title_fast_forward_speed">빨리 감기 배수</string>
++    <string name="fast_forward_speed_value">%1$d배</string>
++    <string name="game_menu_fast_forward_speed">빨리 감기 배수 (이 게임)</string>
++    <string name="game_menu_fast_forward_speed_default">기본값 (%1$d배)</string>
++    <string name="game_menu_cheats">치트</string>
++    <string name="game_menu_cheats_add">치트 추가</string>
++    <string name="game_menu_cheats_import">.cht 불러오기</string>
++    <string name="game_menu_cheats_empty">이 게임에 등록된 치트가 없습니다.</string>
++    <string name="game_menu_cheats_delete">삭제</string>
++    <string name="game_menu_cheats_name">이름</string>
++    <string name="game_menu_cheats_code">코드 (한 줄에 하나)</string>
++    <string name="game_menu_cheats_default_name">치트 %1$d</string>
++    <string name="custom_layout_open">버튼 하나씩 배치</string>
++    <string name="custom_layout_hint">누르면 하나 선택, 길게 누르면 여러 개 선택. 끌어서 옮기기</string>
++    <string name="custom_layout_game_view">게임 화면</string>
++    <string name="custom_layout_selected_button">고른 버튼</string>
++    <string name="custom_layout_size">크기 %1$d%%</string>
++    <string name="custom_layout_reset_item">고른 항목 원래대로</string>
++    <string name="custom_layout_show_fast_forward">빨리 감기 버튼 표시</string>
++    <string name="custom_layout_target_default">기본</string>
++    <string name="custom_layout_target_game">이 게임</string>
++    <string name="custom_layout_reset_all">모두 원래대로</string>
++    <string name="custom_layout_save">저장</string>
++    <string name="custom_layout_panel_handle">☰ 여기를 끌어 패널 옮기기</string>
++    <string name="custom_layout_panel_collapse">접기</string>
++    <string name="custom_layout_panel_expand">펴기</string>
++    <string name="custom_layout_x">X px</string>
++    <string name="custom_layout_y">Y px</string>
++    <string name="custom_layout_size_field">크기 %</string>
++    <string name="custom_layout_w">너비 px</string>
++    <string name="custom_layout_h">높이 px</string>
++    <string name="custom_layout_center_h">가로 가운데</string>
++    <string name="custom_layout_center_v">세로 가운데</string>
++    <string name="custom_layout_edge_left">◀ 왼쪽</string>
++    <string name="custom_layout_edge_right">오른쪽 ▶</string>
++    <string name="custom_layout_edge_top">▲ 위</string>
++    <string name="custom_layout_edge_bottom">▼ 아래</string>
++    <string name="custom_layout_fill">꽉 채우기</string>
++    <string name="custom_layout_same_size">고른 버튼 같은 크기로</string>
++    <string name="custom_layout_add_button">버튼 추가</string>
++    <string name="custom_layout_change_function">기능 바꾸기</string>
++    <string name="custom_layout_delete_button">버튼 삭제</string>
++    <string name="custom_layout_choose_function">추가할 기능 (화면에 없는 것만)</string>
++    <string name="custom_layout_group">그룹 만들기</string>
++    <string name="custom_layout_ungroup">그룹 풀기</string>
++    <string name="custom_layout_section_each">서로 맞추기 (그룹 하나만 고르면 그 안에서)</string>
++    <string name="custom_layout_align_left">왼끝 맞춤</string>
++    <string name="custom_layout_align_hcenter">좌우 가운데 맞춤</string>
++    <string name="custom_layout_align_right">오른끝 맞춤</string>
++    <string name="custom_layout_align_top">위끝 맞춤</string>
++    <string name="custom_layout_align_vcenter">높이 맞춤</string>
++    <string name="custom_layout_align_bottom">아래끝 맞춤</string>
++    <string name="custom_layout_dist_h">가로 등간격</string>
++    <string name="custom_layout_dist_v">세로 등간격</string>
++    <string name="custom_layout_gap">간격 px (빈칸이면 양 끝 사이 균등)</string>
++    <string name="custom_func_none">미지정</string>
++    <string name="custom_func_menu">메뉴</string>
++    <string name="custom_func_fast_forward">배속</string>
++    <string name="custom_func_quick_save">저장</string>
++    <string name="custom_func_quick_load">불러오기</string>
++    <string name="custom_func_bgm_1x">BGM 1배속</string>
++    <string name="custom_func_sfx_1x">효과음 1배속</string>
++    <string name="custom_func_ff_cutscenes">연출 중 배속</string>
++    <string name="custom_func_state_on">켜짐</string>
++    <string name="custom_func_state_off">꺼짐</string>
++    <string name="custom_layout_base_dpad">방향키</string>
++    <string name="custom_layout_base_analog">아날로그 스틱</string>
++    <string name="custom_layout_base_face">A·B 버튼</string>
++    <string name="custom_layout_selected_many">%1$s 외 %2$d개 선택 (노란 테두리 기준)</string>
++    <string name="custom_layout_mirror">왼쪽 기준 좌우 대칭</string>
++    <string name="custom_layout_margin">여백 px</string>
++    <string name="custom_layout_grid">격자 px (0 = 끔)</string>
++    <string name="custom_layout_keep_aspect">게임 화면 원래 비율 유지</string>
++    <string name="settings_title_screen_orientation">화면 방향</string>
++    <string name="game_menu_screen_orientation">화면 방향 (이 게임)</string>
++    <string name="screen_orientation_default">기본값 (%1$s)</string>
++    <string name="screen_orientation_auto">자동 (휴대폰 회전 따라감)</string>
++    <string name="screen_orientation_landscape">가로</string>
++    <string name="screen_orientation_portrait">세로</string>
+     <string name="game_menu_change_disk_disk">디스크 %1$s</string>
+     <string name="game_menu_tilt_sensor">기울기 센서</string>
+     <string name="game_loading_preparing_game">게임 준비 중…</string>
+diff --git a/lemuroid-app/src/main/res/values/keys.xml b/lemuroid-app/src/main/res/values/keys.xml
+index fa7f12fd..5f57d689 100644
+--- a/lemuroid-app/src/main/res/values/keys.xml
++++ b/lemuroid-app/src/main/res/values/keys.xml
+@@ -29,6 +29,9 @@
+     <string name="pref_key_shader_filter" translatable="false">shader_filter_0</string>
+     <string name="pref_key_hd_mode" translatable="false">hd_mode</string>
+     <string name="pref_key_viewport_alignment" translatable="false">viewport_alignment</string>
++    <!-- ff-bgm1x -->
++    <string name="pref_key_fast_forward_speed" translatable="false">ff_bgm1x_fast_forward_speed</string>
++    <string name="pref_key_screen_orientation" translatable="false">ff_bgm1x_screen_orientation</string>
+ 
+     <string-array translatable="false" name="pref_key_haptic_feedback_mode_values">
+         <item>none</item>
+diff --git a/lemuroid-app/src/main/res/values/strings.xml b/lemuroid-app/src/main/res/values/strings.xml
+index 861ee9ed..deddeba0 100644
+--- a/lemuroid-app/src/main/res/values/strings.xml
++++ b/lemuroid-app/src/main/res/values/strings.xml
+@@ -131,6 +131,86 @@
+     <string name="game_menu_edit_touch_controls">Edit Controls</string>
+     <string name="game_menu_mute_audio">Mute</string>
+     <string name="game_menu_fast_forward">Fast-Forward</string>
++    <!-- ff-bgm1x -->
++    <string name="settings_title_fast_forward_speed">Fast-forward speed</string>
++    <string name="fast_forward_speed_value">%1$dx</string>
++    <string name="game_menu_fast_forward_speed">Fast-forward speed (this game)</string>
++    <string name="game_menu_fast_forward_speed_default">Default (%1$dx)</string>
++    <string name="game_menu_cheats">Cheats</string>
++    <string name="game_menu_cheats_add">Add cheat</string>
++    <string name="game_menu_cheats_import">Import .cht</string>
++    <string name="game_menu_cheats_empty">No cheats for this game.</string>
++    <string name="game_menu_cheats_delete">Delete</string>
++    <string name="game_menu_cheats_name">Name</string>
++    <string name="game_menu_cheats_code">Code (one per line)</string>
++    <string name="game_menu_cheats_default_name">Cheat %1$d</string>
++    <string name="custom_layout_open">Move buttons</string>
++    <string name="custom_layout_hint">Tap to select one, long-press to select several. Drag to move.</string>
++    <string name="custom_layout_game_view">Game screen</string>
++    <string name="custom_layout_selected_button">Selected button</string>
++    <string name="custom_layout_size">Size %1$d%%</string>
++    <string name="custom_layout_reset_item">Reset selected</string>
++    <string name="custom_layout_show_fast_forward">Show fast-forward button</string>
++    <string name="custom_layout_target_default">Default</string>
++    <string name="custom_layout_target_game">This game</string>
++    <string name="custom_layout_reset_all">Reset all</string>
++    <string name="custom_layout_save">Save</string>
++    <string name="custom_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="custom_layout_panel_collapse">Collapse</string>
++    <string name="custom_layout_panel_expand">Expand</string>
++    <string name="custom_layout_x">X px</string>
++    <string name="custom_layout_y">Y px</string>
++    <string name="custom_layout_size_field">Size %</string>
++    <string name="custom_layout_w">W px</string>
++    <string name="custom_layout_h">H px</string>
++    <string name="custom_layout_center_h">Center H</string>
++    <string name="custom_layout_center_v">Center V</string>
++    <string name="custom_layout_edge_left">◀ Left</string>
++    <string name="custom_layout_edge_right">Right ▶</string>
++    <string name="custom_layout_edge_top">▲ Top</string>
++    <string name="custom_layout_edge_bottom">▼ Bottom</string>
++    <string name="custom_layout_fill">Fill screen</string>
++    <string name="custom_layout_same_size">Same size for selected buttons</string>
++    <string name="custom_layout_add_button">Add button</string>
++    <string name="custom_layout_change_function">Change function</string>
++    <string name="custom_layout_delete_button">Delete button</string>
++    <string name="custom_layout_choose_function">Add (only ones not on screen)</string>
++    <string name="custom_layout_group">Group</string>
++    <string name="custom_layout_ungroup">Ungroup</string>
++    <string name="custom_layout_section_each">Align to each other (inside the group if one group is selected)</string>
++    <string name="custom_layout_align_left">Left edges</string>
++    <string name="custom_layout_align_hcenter">Center (vertical line)</string>
++    <string name="custom_layout_align_right">Right edges</string>
++    <string name="custom_layout_align_top">Top edges</string>
++    <string name="custom_layout_align_vcenter">Same height</string>
++    <string name="custom_layout_align_bottom">Bottom edges</string>
++    <string name="custom_layout_dist_h">Space horizontally</string>
++    <string name="custom_layout_dist_v">Space vertically</string>
++    <string name="custom_layout_gap">Gap px (empty = even)</string>
++    <string name="custom_func_none">None</string>
++    <string name="custom_func_menu">Menu</string>
++    <string name="custom_func_fast_forward">FF</string>
++    <string name="custom_func_quick_save">Save</string>
++    <string name="custom_func_quick_load">Load</string>
++    <string name="custom_func_bgm_1x">BGM 1x</string>
++    <string name="custom_func_sfx_1x">SFX 1x</string>
++    <string name="custom_func_ff_cutscenes">FF in cutscenes</string>
++    <string name="custom_func_state_on">On</string>
++    <string name="custom_func_state_off">Off</string>
++    <string name="custom_layout_base_dpad">D-Pad</string>
++    <string name="custom_layout_base_analog">Analog stick</string>
++    <string name="custom_layout_base_face">A·B buttons</string>
++    <string name="custom_layout_selected_many">%1$s and %2$d more selected (yellow = reference)</string>
++    <string name="custom_layout_mirror">Mirror left buttons to right</string>
++    <string name="custom_layout_margin">Margin px</string>
++    <string name="custom_layout_grid">Grid px (0 = off)</string>
++    <string name="custom_layout_keep_aspect">Keep game aspect ratio</string>
++    <string name="settings_title_screen_orientation">Screen orientation</string>
++    <string name="game_menu_screen_orientation">Screen orientation (this game)</string>
++    <string name="screen_orientation_default">Default (%1$s)</string>
++    <string name="screen_orientation_auto">Auto (follow the phone)</string>
++    <string name="screen_orientation_landscape">Landscape</string>
++    <string name="screen_orientation_portrait">Portrait</string>
+     <string name="game_menu_change_disk_disk">Disk %1$s</string>
+     <string name="game_menu_tilt_sensor">Tilt Sensor</string>
+ 
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlAnalog.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlAnalog.kt
+index 14d7fe7f..070b67e2 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlAnalog.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlAnalog.kt
+@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import gg.padkit.PadKitScope
+@@ -22,7 +24,7 @@ fun LemuroidControlAnalog(
+ ) {
+     val theme = LocalLemuroidPadTheme.current
+     Box(
+-        modifier = modifier.padding(theme.padding),
++        modifier = modifier.customLayoutElement(CustomLayoutKeys.of(id)).padding(theme.padding),
+         contentAlignment = Alignment.Center,
+     ) {
+         ControlAnalog(
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
+index 7e1391e7..576b1a5c 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
+@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.padding
+ import androidx.compose.runtime.Composable
+ import androidx.compose.ui.Modifier
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import gg.padkit.PadKitScope
+@@ -21,7 +23,7 @@ fun LemuroidControlButton(
+ ) {
+     val theme = LocalLemuroidPadTheme.current
+     ControlButton(
+-        modifier = modifier.padding(theme.padding),
++        modifier = modifier.customLayoutElement(CustomLayoutKeys.of(id)).padding(theme.padding),
+         id = id,
+         foreground = { LemuroidButtonForeground(pressed = it, icon = icon, label = label) },
+         background = { LemuroidControlBackground() },
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
+index dedf9f7c..838497db 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
+@@ -6,6 +6,8 @@ import androidx.compose.runtime.State
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.geometry.Offset
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import com.swordfish.touchinput.radial.ui.LemuroidCrossForeground
+ import gg.padkit.PadKitScope
+@@ -30,7 +32,7 @@ fun LemuroidControlCross(
+ ) {
+     val theme = LocalLemuroidPadTheme.current
+     ControlCross(
+-        modifier = modifier.padding(theme.padding),
++        modifier = modifier.customLayoutElement(CustomLayoutKeys.of(id)).padding(theme.padding),
+         id = id,
+         allowDiagonals = allowDiagonals,
+         background = background,
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlFaceButtons.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlFaceButtons.kt
+index 734e6bcf..930540ae 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlFaceButtons.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlFaceButtons.kt
+@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.State
+ import androidx.compose.ui.Modifier
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidCompositeForeground
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import gg.padkit.PadKitScope
+@@ -28,10 +30,11 @@ fun LemuroidControlFaceButtons(
+     idsForegrounds: PersistentMap<Id.Key, @Composable (State<Boolean>) -> Unit>,
+ ) {
+     val theme = LocalLemuroidPadTheme.current
++    val placed = modifier.customLayoutElement("face_" + CustomLayoutKeys.of(idsForegrounds.keys.first()))
+     ControlFaceButtons(
+         modifier =
+-            modifier
+-                .run { if (applyPadding) padding(theme.padding) else modifier },
++            placed
++                .run { if (applyPadding) padding(theme.padding) else placed },
+         includeComposite = includeComposite,
+         ids = ids,
+         trackPointers = trackPointers,
+@@ -53,10 +56,11 @@ fun LemuroidControlFaceButtons(
+     idsForegrounds: PersistentMap<Id.Key, @Composable (State<Boolean>) -> Unit>,
+ ) {
+     val theme = LocalLemuroidPadTheme.current
++    val placed = modifier.customLayoutElement("face_" + CustomLayoutKeys.of(idsForegrounds.keys.first()))
+     ControlFaceButtons(
+         modifier =
+-            modifier
+-                .run { if (applyPadding) padding(theme.padding) else modifier },
++            placed
++                .run { if (applyPadding) padding(theme.padding) else placed },
+         primaryAnchors = primaryAnchors,
+         compositeAnchors = persistentListOf(),
+         trackPointers = trackPointers,
+diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+index 831ed794..2d1bfa34 100644
+--- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
++++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+@@ -579,6 +579,35 @@ data class GameSystem(
+                                         "mgba_solar_sensor_level",
+                                         R.string.setting_mgba_solar_sensor_level,
+                                     ),
++                                    // ff-bgm1x
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_cutscenes",
++                                        R.string.setting_mgba_ff_bgm1x_cutscenes,
++                                        arrayListOf(
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx_volume",
++                                        R.string.setting_mgba_ff_bgm1x_sfx_volume,
++                                    ),
+                                     ExposedSetting(
+                                         "mgba_interframe_blending",
+                                         R.string.setting_mgba_interframe_blending,
+@@ -601,17 +630,7 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
+-                                    ExposedSetting(
+-                                        "mgba_frameskip",
+-                                        R.string.setting_mgba_frameskip,
+-                                        arrayListOf(
+-                                            ExposedSetting.Value(
+-                                                "disabled",
+-                                                R.string.value_mgba_frameskip_disabled,
+-                                            ),
+-                                            ExposedSetting.Value("auto", R.string.value_mgba_frameskip_auto),
+-                                        ),
+-                                    ),
++                                    // ff-bgm1x: mgba_frameskip 은 뺐다 (이 코어는 0~10 값이라 '끔/자동' 이 맞지 않아 설정 화면이 꺼졌다)
+                                     ExposedSetting(
+                                         "mgba_color_correction",
+                                         R.string.setting_mgba_color_correction,
+diff --git a/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml b/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
+index 525ac0bc..3dabf065 100644
+--- a/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
++++ b/retrograde-app-shared/src/main/res/values-ko-rKR/strings.xml
+@@ -29,6 +29,13 @@
+     <string name="setting_gambatte_dark_filter_level">화면 어둡게 하기</string>
+     <string name="setting_gambatte_gbc_color_correction">색 보정</string>
+     <string name="setting_mgba_solar_sensor_level">태양광 센서 수준</string>
++    <!-- ff-bgm1x -->
++    <string name="setting_mgba_ff_bgm1x">BGM 1배속 유지 (배속 중)</string>
++    <string name="setting_mgba_ff_bgm1x_cutscenes">연출 중에도 배속</string>
++    <string name="setting_mgba_ff_bgm1x_sfx">효과음 1배속</string>
++    <string name="setting_mgba_ff_bgm1x_sfx_volume">1배속 효과음 볼륨</string>
++    <string name="value_mgba_ff_bgm1x_enabled">켬</string>
++    <string name="value_mgba_ff_bgm1x_disabled">끔</string>
+     <string name="setting_mgba_interframe_blending">LCD 고스팅</string>
+     <string name="setting_mgba_frameskip">프레임 스킵</string>
+     <string name="setting_mgba_color_correction">색 보정</string>
+diff --git a/retrograde-app-shared/src/main/res/values/strings.xml b/retrograde-app-shared/src/main/res/values/strings.xml
+index ea880801..271e0618 100644
+--- a/retrograde-app-shared/src/main/res/values/strings.xml
++++ b/retrograde-app-shared/src/main/res/values/strings.xml
+@@ -34,6 +34,13 @@
+     <string name="setting_gambatte_dark_filter_level">Darken screen</string>
+     <string name="setting_gambatte_gbc_color_correction">Color correction</string>
+     <string name="setting_mgba_solar_sensor_level">Solar sensor level</string>
++    <!-- ff-bgm1x -->
++    <string name="setting_mgba_ff_bgm1x">BGM at 1x speed (fast forward)</string>
++    <string name="setting_mgba_ff_bgm1x_cutscenes">Fast forward during cutscenes</string>
++    <string name="setting_mgba_ff_bgm1x_sfx">Sound effects at 1x speed</string>
++    <string name="setting_mgba_ff_bgm1x_sfx_volume">1x sound effect volume</string>
++    <string name="value_mgba_ff_bgm1x_enabled">Enabled</string>
++    <string name="value_mgba_ff_bgm1x_disabled">Disabled</string>
+     <string name="setting_mgba_interframe_blending">LCD ghosting</string>
+     <string name="setting_mgba_frameskip">Frameskip</string>
+     <string name="setting_mgba_color_correction">Color correction</string>

@@ -1,0 +1,51 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+index 044216e..3db3aed 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+@@ -1826,6 +1826,46 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView)
+                     ScaledFloatSetting.AUDIO_VOLUME.defaultValue
+                 )
+             )
++            // ff-bgm1x: PC 판 에뮬레이션 메뉴의 세 가지와 효과음 볼륨
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_BGM_1X,
++                    R.string.ff_bgm1x_bgm_1x,
++                    R.string.ff_bgm1x_bgm_1x_description,
++                    BooleanSetting.FF_BGM1X_BGM_1X.key,
++                    BooleanSetting.FF_BGM1X_BGM_1X.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES,
++                    R.string.ff_bgm1x_ff_cutscenes,
++                    R.string.ff_bgm1x_ff_cutscenes_description,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.key,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_VOICES_1X,
++                    R.string.ff_bgm1x_voices_1x,
++                    R.string.ff_bgm1x_voices_1x_description,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.key,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.defaultValue
++                )
++            )
++            add(
++                SliderSetting(
++                    IntSetting.FF_BGM1X_SFX_VOLUME,
++                    R.string.ff_bgm1x_sfx_volume,
++                    0,
++                    0,
++                    100,
++                    "%",
++                    IntSetting.FF_BGM1X_SFX_VOLUME.key,
++                    IntSetting.FF_BGM1X_SFX_VOLUME.defaultValue.toFloat()
++                )
++            )
+             add(
+                 SwitchSetting(
+                     BooleanSetting.ENABLE_AUDIO_STRETCHING,

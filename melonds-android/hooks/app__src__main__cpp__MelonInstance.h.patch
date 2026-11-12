@@ -1,0 +1,47 @@
+diff --git a/app/src/main/cpp/MelonInstance.h b/app/src/main/cpp/MelonInstance.h
+index cfbf3dc2..17cf8d60 100644
+--- a/app/src/main/cpp/MelonInstance.h
++++ b/app/src/main/cpp/MelonInstance.h
+@@ -14,13 +14,14 @@
+ #include "renderer/ScreenshotRenderer.h"
+ #include "retroachievements/RetroAchievementsManager.h"
+ #include "net/Net.h"
++#include "bgm1x/BgmReplacer.h"
+ 
+ using namespace melonDS;
+ 
+ namespace MelonDSAndroid
+ {
+ 
+-class MelonInstance
++class MelonInstance : public BgmReplacerHost
+ {
+ 
+ public:
+@@ -73,7 +74,16 @@ public:
+     std::string getRichPresenceStatus();
+     std::vector<RetroAchievements::RARuntimeAchievement> getRuntimeAchievements();
+ 
++    // ff-bgm1x: 오디오 스레드가 출력 버퍼에 1배속 소리를 더한다
++    void mixBgm(s16* buffer, int frames, int volume);
++    // 에뮬레이션 스레드: 연출 중이라 배속을 멈춰야 하는지
++    bool isBgmSpeedHold();
++    void setBgmOutputRate(int rate) { bgmOutputRate = rate; }
++    melonDS::NDS* bgmNds() override { return nds; }
++    int bgmAudioFreq() override { return bgmOutputRate; }
++
+ private:
++    void applyBgmConfiguration();
+     void updateRenderer();
+     void setBatteryLevels();
+     void setDateTime();
+@@ -100,6 +110,9 @@ private:
+     Renderer currentRenderer;
+     bool isRenderConfigurationDirty;
+     int frame;
++
++    std::unique_ptr<BgmReplacer> bgmReplacer;
++    std::atomic<int> bgmOutputRate {48000};
+ };
+ 
+ }

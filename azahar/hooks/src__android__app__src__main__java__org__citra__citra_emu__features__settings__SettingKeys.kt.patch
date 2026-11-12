@@ -1,0 +1,13 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+index 4a8c22d..62ca1e9 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+@@ -148,4 +148,8 @@ object SettingKeys {
+     external fun performance_overlay_position(): String
+     external fun enable_secondary_display(): String
+     external fun combo_button_buttons(): String
++    external fun ff_bgm1x_bgm_1x(): String
++    external fun ff_bgm1x_ff_cutscenes(): String
++    external fun ff_bgm1x_voices_1x(): String
++    external fun ff_bgm1x_sfx_volume(): String
+ }

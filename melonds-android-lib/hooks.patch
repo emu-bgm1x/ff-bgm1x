@@ -1,0 +1,41 @@
+diff --git a/src/NDS.cpp b/src/NDS.cpp
+index 25a3c0b..253761d 100644
+--- a/src/NDS.cpp
++++ b/src/NDS.cpp
+@@ -3577,6 +3577,7 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
+                 IPCFIFO9.Write(val);
+                 if ((IPCFIFOCnt7 & 0x0400) && wasempty)
+                     SetIRQ(1, IRQ_IPCRecv);
++                if (SoundFifoHook) SoundFifoHook(*this, val);  // ff-bgm1x
+             }
+         }
+         return;
+diff --git a/src/NDS.h b/src/NDS.h
+index 17e656e..761010f 100644
+--- a/src/NDS.h
++++ b/src/NDS.h
+@@ -250,6 +250,9 @@ private:
+ public: // TODO: Encapsulate the rest of these members
+     void* UserData;
+ 
++    // ff-bgm1x: ARM9 이 IPC FIFO 에 값을 쓸 때마다 불린다 (사운드 명령을 지켜보는 용도)
++    void (*SoundFifoHook)(NDS& nds, u32 fifoword) = nullptr;
++
+     int ConsoleType;
+     int CurCPU;
+ 
+diff --git a/src/SPU.cpp b/src/SPU.cpp
+index f42beee..845310d 100644
+--- a/src/SPU.cpp
++++ b/src/SPU.cpp
+@@ -335,7 +335,9 @@ void SPU::SetDegrade10Bit(AudioBitDepth depth)
+     switch (depth)
+     {
+     case AudioBitDepth::Auto:
+-        Degrade10Bit = (NDS.ConsoleType == 0);
++        // ff-bgm1x: 처음 켤 때(생성자)는 항상 16비트로 시작하는데, 롬을 다시 불러오면 이 함수가 불려
++        // DS 에서는 10비트로 바뀌었다. 같은 설정에서 소리가 달라지지 않게 자동은 16비트로 맞춘다
++        Degrade10Bit = false;
+         break;
+     case AudioBitDepth::_10Bit:
+         Degrade10Bit = true;

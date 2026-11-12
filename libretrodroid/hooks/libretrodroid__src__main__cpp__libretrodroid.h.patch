@@ -1,0 +1,38 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.h b/libretrodroid/src/main/cpp/libretrodroid.h
+index b507aee..86a8a8b 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.h
++++ b/libretrodroid/src/main/cpp/libretrodroid.h
+@@ -133,6 +133,8 @@ public:
+     void setShaderConfig(ShaderManager::Config shaderConfig);
+ 
+     void setViewportAlignment(unsigned int viewportAlignment);
++    // ff-bgm1x: 게임 화면을 비율 무시하고 영역에 늘이기
++    void setStretch(bool stretch);
+ 
+     void resetGlobalVariables();
+ 
+@@ -144,6 +146,8 @@ public:
+ 
+ private:
+     void updateAudioSampleRateMultiplier();
++    // ff-bgm1x: 연출 중(bgmSpeedHold)에는 배속하지 않는다
++    unsigned int effectiveFrameSpeed() const { return bgmSpeedHold ? 1 : frameSpeed; }
+     float findDefaultAspectRatio(const retro_system_av_info &system_av_info);
+     void afterGameLoad();
+ 
+@@ -157,6 +161,7 @@ protected:
+ 
+ private:
+     unsigned int frameSpeed = 1;
++    bool bgmSpeedHold = false;
+     bool audioEnabled = true;
+     bool preferLowLatencyAudio = false;
+     bool rumbleEnabled = false;
+@@ -167,6 +172,7 @@ private:
+ 
+     Rect viewportRect = Rect(0.0F, 0.0F, 1.0F, 1.0F);
+     unsigned int viewportAlignment = V_ALIGN_CENTER;
++    bool stretch = false;
+     float screenRefreshRate = 60.0;
+     int openglESVersion = 2;
+     bool skipDuplicateFrames = false;

@@ -1,0 +1,248 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
+index 8cb35d1c..86be7b37 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
+@@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import androidx.lifecycle.findViewTreeViewModelStoreOwner
+ import androidx.lifecycle.get
++import androidx.preference.PreferenceManager
+ import com.squareup.picasso.Callback
+ import com.squareup.picasso.Picasso
+ import me.magnum.melonds.R
+@@ -46,6 +47,7 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutComponentEditableProperty
+ import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
+ import me.magnum.melonds.ui.layouteditor.model.ScreenEditorState
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutBackgroundDialog
++import me.magnum.melonds.ui.layouteditor.ui.FfLayoutPanel
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutComponentPropertyValueDialog
+ import me.magnum.melonds.ui.layouteditor.ui.LayoutPropertiesDialog
+ import me.magnum.melonds.ui.theme.MelonTheme
+@@ -55,6 +57,9 @@ import kotlin.math.min
+ import kotlin.math.roundToInt
+ 
+ private const val CONTROLS_SLIDE_ANIMATION_DURATION_MS = 100L
++private const val PREF_MARGIN = "ff_layout_editor_margin"
++private const val PREF_GRID = "ff_layout_editor_grid"
++private const val PREF_NEW_PANEL = "ff_layout_editor_new_panel"
+ 
+ class LayoutEditorManagerView(
+     private val layoutTarget: LayoutTarget,
+@@ -100,6 +105,16 @@ class LayoutEditorManagerView(
+     private var bottomAspectRatio = ScreenAspectRatio.RATIO_4_3
+     private var updatingAspectSpinner = false
+ 
++    // ff-bgm1x: 꽉 채우기·가장자리 붙이기 여백과 격자 간격 (px). 편집기 설정이라 레이아웃이 아닌 앱 설정에 둔다
++    private val toolPreferences = PreferenceManager.getDefaultSharedPreferences(context)
++    private var layoutMargin = toolPreferences.getInt(PREF_MARGIN, 0)
++
++    // ff-bgm1x: 새 편집 패널(떠 있는 패널)을 쓰는지. 원래 아래 패널과 골라 쓸 수 있다
++    private var useNewPanel by mutableStateOf(toolPreferences.getBoolean(PREF_NEW_PANEL, true))
++    private var panelTick by mutableStateOf(0)
++    private var panelMargin by mutableStateOf(layoutMargin)
++    private var panelGrid by mutableStateOf(toolPreferences.getInt(PREF_GRID, 0))
++
+     private var showLayoutPropertiesDialog by mutableStateOf(initialEditorState?.isPropertiesDialogShown ?: false)
+     private var showBackgroundPropertiesDialog by mutableStateOf(initialEditorState?.isBackgroundPropertiesDialogShown ?: false)
+     private var shownEditablePropertyDialog by mutableStateOf<LayoutComponentEditableProperty?>(null)
+@@ -165,6 +180,10 @@ class LayoutEditorManagerView(
+                             LayoutComponentEditableProperty.SIZE -> binding.seekBarSize.progress + selectedViewMinSize
+                             LayoutComponentEditableProperty.WIDTH -> binding.seekBarWidth.progress + selectedViewMinSize
+                             LayoutComponentEditableProperty.HEIGHT -> binding.seekBarHeight.progress + selectedViewMinSize
++                            LayoutComponentEditableProperty.X -> binding.viewLayoutEditor.getSelectedView()?.getPosition()?.x ?: 0
++                            LayoutComponentEditableProperty.Y -> binding.viewLayoutEditor.getSelectedView()?.getPosition()?.y ?: 0
++                            LayoutComponentEditableProperty.MARGIN -> layoutMargin
++                            LayoutComponentEditableProperty.GRID -> binding.viewLayoutEditor.gridSize
+                             null -> 0
+                         },
+                         onValueChanged = {
+@@ -178,6 +197,18 @@ class LayoutEditorManagerView(
+                                     binding.seekBarHeight.progress = it - selectedViewMinSize
+                                     enforceAspectRatio(selectedAspectRatio, HEIGHT)
+                                 }
++                                LayoutComponentEditableProperty.X -> binding.viewLayoutEditor.moveSelectedViewTo(it, null)
++                                LayoutComponentEditableProperty.Y -> binding.viewLayoutEditor.moveSelectedViewTo(null, it)
++                                LayoutComponentEditableProperty.MARGIN -> {
++                                    layoutMargin = it.coerceAtLeast(0)
++                                    toolPreferences.edit().putInt(PREF_MARGIN, layoutMargin).apply()
++                                    updateToolLabels()
++                                }
++                                LayoutComponentEditableProperty.GRID -> {
++                                    binding.viewLayoutEditor.gridSize = it.coerceAtLeast(0)
++                                    toolPreferences.edit().putInt(PREF_GRID, binding.viewLayoutEditor.gridSize).apply()
++                                    updateToolLabels()
++                                }
+                                 null -> { /* no-op */ }
+                             }
+                             shownEditablePropertyDialog = null
+@@ -189,6 +220,39 @@ class LayoutEditorManagerView(
+                         title = stringResource(R.string.layout_name),
+                         dialogState = nameInputDialogState,
+                     )
++
++                    // ff-bgm1x: 새 편집 패널
++                    if (useNewPanel) {
++                        FfLayoutPanel(
++                            editor = binding.viewLayoutEditor,
++                            tick = panelTick,
++                            margin = panelMargin,
++                            grid = panelGrid,
++                            onMarginChanged = {
++                                layoutMargin = it
++                                panelMargin = it
++                                toolPreferences.edit().putInt(PREF_MARGIN, it).apply()
++                                updateToolLabels()
++                            },
++                            onGridChanged = {
++                                binding.viewLayoutEditor.gridSize = it
++                                panelGrid = it
++                                toolPreferences.edit().putInt(PREF_GRID, it).apply()
++                                updateToolLabels()
++                            },
++                            onFillScreen = {
++                                val view = binding.viewLayoutEditor.selectedViewOrNull()
++                                val ratio = when (view?.component) {
++                                    LayoutComponent.TOP_SCREEN -> topAspectRatio.ratio
++                                    LayoutComponent.BOTTOM_SCREEN -> bottomAspectRatio.ratio
++                                    else -> null
++                                }
++                                binding.viewLayoutEditor.fillSelectedScreen(layoutMargin, ratio)
++                            },
++                            onOpenMenu = { openMenu() },
++                            onUseOriginalEditor = { setNewPanel(false) },
++                        )
++                    }
+                 }
+             }
+         }
+@@ -228,15 +292,69 @@ class LayoutEditorManagerView(
+         binding.buttonCenterVertical.setOnClickListener {
+             binding.viewLayoutEditor.centerSelectedViewVertically()
+         }
++        // ff-bgm1x: 배치 편의 기능
++        binding.buttonAlignLeft.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.LEFT, layoutMargin)
++        }
++        binding.buttonAlignRight.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.RIGHT, layoutMargin)
++        }
++        binding.buttonAlignTop.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.TOP, layoutMargin)
++        }
++        binding.buttonAlignBottom.setOnClickListener {
++            binding.viewLayoutEditor.alignSelectedView(LayoutEditorView.Edge.BOTTOM, layoutMargin)
++        }
++        binding.buttonFillScreen.setOnClickListener {
++            binding.viewLayoutEditor.fillSelectedScreen(layoutMargin, selectedAspectRatio.ratio)
++        }
++        binding.buttonSameSize.setOnClickListener {
++            binding.viewLayoutEditor.sameSizeForSelection()
++        }
++        binding.buttonMirror.setOnClickListener {
++            binding.viewLayoutEditor.mirrorLeftToRight()
++        }
++        binding.buttonMargin.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.MARGIN
++        }
++        binding.buttonGrid.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.GRID
++        }
++        binding.layoutXLabels.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.X
++        }
++        binding.layoutYLabels.setOnClickListener {
++            shownEditablePropertyDialog = LayoutComponentEditableProperty.Y
++        }
++        binding.viewLayoutEditor.gridSize = toolPreferences.getInt(PREF_GRID, 0)
++        binding.viewLayoutEditor.onEditorChanged = { panelTick++ }
++        binding.viewLayoutEditor.onSelectedViewChanged = { view ->
++            panelTick++
++            binding.textX.text = view.getPosition().x.toString()
++            binding.textY.text = view.getPosition().y.toString()
++            // 길게 눌러 함께 고르면 "고른 버튼 같은 크기로" 를 보인다
++            binding.buttonSameSize.isVisible =
++                !view.component.isScreen() && binding.viewLayoutEditor.selectionCount() > 1
++        }
++        updateToolLabels()
+ 
+         binding.viewLayoutEditor.setLayoutComponentViewBuilderFactory(EditorLayoutComponentViewBuilderFactory())
+         binding.viewLayoutEditor.setOnClickListener {
++            // 새 편집 패널에서는 빈 곳을 누르면 고른 것만 해제한다
++            if (useNewPanel) {
++                binding.viewLayoutEditor.clearSelection()
++                return@setOnClickListener
++            }
+             if (areBottomControlsShown)
+                 hideBottomControls()
+             else
+                 showBottomControls()
+         }
+         binding.viewLayoutEditor.setOnViewSelectedListener { view, widthScale, heightScale, maxWidth, maxHeight, minSize ->
++            if (useNewPanel) {
++                panelTick++
++                return@setOnViewSelectedListener
++            }
+             hideBottomControls()
+             // Force the scaling controls to restart so the new view always
+             // receives fresh listeners even if they were already visible.
+@@ -366,6 +484,16 @@ class LayoutEditorManagerView(
+         }
+ 
+         hideScalingControls(false)
++
++        // ff-bgm1x: 원래 아래 패널에 "새 편집 패널" 버튼을 넣고, 새 패널을 쓰면 아래 패널을 숨긴다
++        binding.layoutControls.addView(
++            android.widget.Button(context, null, 0, R.style.Button_Editor).apply {
++                setText(R.string.ff_layout_new_panel)
++                setOnClickListener { setNewPanel(true) }
++            },
++            binding.layoutControls.childCount - 1,
++        )
++        if (useNewPanel) hideBottomControls(false)
+     }
+ 
+     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+@@ -376,6 +504,19 @@ class LayoutEditorManagerView(
+         }
+     }
+ 
++    // ff-bgm1x: 새 편집 패널 ↔ 원래 아래 패널
++    private fun setNewPanel(enabled: Boolean) {
++        useNewPanel = enabled
++        toolPreferences.edit().putBoolean(PREF_NEW_PANEL, enabled).apply()
++        binding.viewLayoutEditor.clearSelection()
++        if (enabled) {
++            hideBottomControls(false)
++            hideScalingControls(false)
++        } else {
++            showBottomControls(false)
++        }
++    }
++
+     fun handleBackNavigation() {
+         if (areScalingControlsShown) {
+             hideScalingControls(true)
+@@ -572,8 +713,9 @@ class LayoutEditorManagerView(
+         binding.seekBarAlpha.isVisible = isScreen
+         binding.layoutAspectRatio.isVisible = isScreen
+         binding.checkboxAboveScreen.isVisible = isScreen
+-        binding.buttonCenterHorizontal.isVisible = isScreen
+-        binding.buttonCenterVertical.isVisible = isScreen
++        // ff-bgm1x: 정렬은 버튼에도 쓴다. 꽉 채우기는 화면만, 같은 크기는 버튼만
++        binding.buttonFillScreen.isVisible = isScreen
++        binding.buttonSameSize.isVisible = !isScreen && binding.viewLayoutEditor.selectionCount() > 1
+ 
+         currentWidthScale = widthScale
+         currentHeightScale = heightScale
+@@ -627,6 +769,11 @@ class LayoutEditorManagerView(
+         areScalingControlsShown = false
+     }
+ 
++    private fun updateToolLabels() {
++        binding.buttonMargin.text = resources.getString(R.string.ff_layout_margin, layoutMargin)
++        binding.buttonGrid.text = resources.getString(R.string.ff_layout_grid, binding.viewLayoutEditor.gridSize)
++    }
++
+     private fun enforceAspectRatio(aspectRatio: ScreenAspectRatio, priority: AspectRatioEnforcementPriority) {
+         val ratio = aspectRatio.ratio ?: return
+ 

@@ -1,0 +1,59 @@
+diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+index 831ed794..2d1bfa34 100644
+--- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
++++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+@@ -579,6 +579,35 @@ data class GameSystem(
+                                         "mgba_solar_sensor_level",
+                                         R.string.setting_mgba_solar_sensor_level,
+                                     ),
++                                    // ff-bgm1x
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_cutscenes",
++                                        R.string.setting_mgba_ff_bgm1x_cutscenes,
++                                        arrayListOf(
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx_volume",
++                                        R.string.setting_mgba_ff_bgm1x_sfx_volume,
++                                    ),
+                                     ExposedSetting(
+                                         "mgba_interframe_blending",
+                                         R.string.setting_mgba_interframe_blending,
+@@ -601,17 +630,7 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
+-                                    ExposedSetting(
+-                                        "mgba_frameskip",
+-                                        R.string.setting_mgba_frameskip,
+-                                        arrayListOf(
+-                                            ExposedSetting.Value(
+-                                                "disabled",
+-                                                R.string.value_mgba_frameskip_disabled,
+-                                            ),
+-                                            ExposedSetting.Value("auto", R.string.value_mgba_frameskip_auto),
+-                                        ),
+-                                    ),
++                                    // ff-bgm1x: mgba_frameskip 은 뺐다 (이 코어는 0~10 값이라 '끔/자동' 이 맞지 않아 설정 화면이 꺼졌다)
+                                     ExposedSetting(
+                                         "mgba_color_correction",
+                                         R.string.setting_mgba_color_correction,

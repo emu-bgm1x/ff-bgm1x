@@ -1,0 +1,14 @@
+diff --git a/app/CMakeLists.txt b/app/CMakeLists.txt
+index deee01eb..b0cc5692 100644
+--- a/app/CMakeLists.txt
++++ b/app/CMakeLists.txt
+@@ -62,6 +62,9 @@ add_library(
+         ${ANDROID-CPP}/renderer/FrameQueue.cpp
+         ${ANDROID-CPP}/renderer/ScreenshotRenderer.cpp
+         ${ANDROID-CPP}/retroachievements/RetroAchievementsManager.cpp
++        # ff-bgm1x
++        ${ANDROID-CPP}/bgm1x/BgmReplacer.cpp
++        ${ANDROID-CPP}/bgm1x/NitroSynth.cpp
+ )
+ 
+ target_include_directories(melonDS-android-frontend PUBLIC

@@ -1,0 +1,30 @@
+diff --git a/libretrodroid/src/main/cpp/audio.cpp b/libretrodroid/src/main/cpp/audio.cpp
+index c6e721a..bd28ddb 100644
+--- a/libretrodroid/src/main/cpp/audio.cpp
++++ b/libretrodroid/src/main/cpp/audio.cpp
+@@ -105,6 +105,11 @@ void Audio::setPlaybackSpeed(const double newPlaybackSpeed) {
+     playbackSpeed = newPlaybackSpeed;
+ }
+ 
++void Audio::setPostMix(PostMix mix) {
++    std::lock_guard<std::mutex> lock(postMixMutex);
++    postMix = mix;
++}
++
+ oboe::DataCallbackResult Audio::onAudioReady(oboe::AudioStream *oboeStream, void *audioData, int32_t numFrames) {
+     double dynamicBufferFactor = computeDynamicBufferConversionFactor(0.001 * numFrames);
+     double finalConversionFactor = baseConversionFactor * dynamicBufferFactor * playbackSpeed;
+@@ -120,6 +125,13 @@ oboe::DataCallbackResult Audio::onAudioReady(oboe::AudioStream *oboeStream, void
+     auto outputArray = reinterpret_cast<int16_t *>(audioData);
+     resampler.resample(temporaryAudioBuffer.get(), currentFramesToSubmit, outputArray, numFrames);
+ 
++    {
++        std::lock_guard<std::mutex> lock(postMixMutex);
++        if (postMix) {
++            postMix(outputArray, numFrames, oboeStream->getSampleRate());
++        }
++    }
++
+     latencyTuner->tune();
+ 
+     return oboe::DataCallbackResult::Continue;

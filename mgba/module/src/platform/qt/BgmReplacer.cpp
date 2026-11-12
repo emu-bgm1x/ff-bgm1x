@@ -127,6 +127,27 @@ void BgmReplacer::onReset(mCore* core) {
 }
 
 void BgmReplacer::onFrame(mCore* core) {
+	updateFrame(core);
+	// 대체 중인 소리가 쓰는 PSG 채널은 에뮬레이터 출력에서 끈다 (게임 메모리·진행은 그대로).
+	// 트랙 볼륨만 0 으로 바꾸면 이미 시작된 PSG 소리가 몇 프레임 더 울려, 배속 중 원본 효과음이 같이 들렸다
+	const uint8_t mask = (!m_gb && m_enabled && m_liveMulti.located()) ? m_liveMulti.replacedPsgMask() : 0;
+	applyPsgMute(core, mask);
+}
+
+void BgmReplacer::applyPsgMute(mCore* core, uint8_t mask) {
+	if (mask == m_psgMuted) {
+		return;
+	}
+	for (int i = 0; i < 4; ++i) {
+		const bool want = (mask >> i) & 1;
+		if (want != (bool) ((m_psgMuted >> i) & 1)) {
+			core->enableAudioChannel(core, i, !want);
+		}
+	}
+	m_psgMuted = mask;
+}
+
+void BgmReplacer::updateFrame(mCore* core) {
 	if (m_gb) {
 		m_gb->onFrame(core, m_enabled, m_sfx1x);
 		return;

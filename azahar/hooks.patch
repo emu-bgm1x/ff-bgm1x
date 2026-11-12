@@ -1,3 +1,860 @@
+diff --git a/CMakeModules/GenerateSettingKeys.cmake b/CMakeModules/GenerateSettingKeys.cmake
+index f75bfe5..75d17e2 100644
+--- a/CMakeModules/GenerateSettingKeys.cmake
++++ b/CMakeModules/GenerateSettingKeys.cmake
+@@ -276,6 +276,11 @@ if (ANDROID)
+         "performance_overlay_position"
+         "enable_secondary_display"
+         "combo_button_buttons"
++        # ff-bgm1x: PC 판은 레지스트리에 저장하므로 Android 에만 둔다
++        "ff_bgm1x_bgm_1x"
++        "ff_bgm1x_ff_cutscenes"
++        "ff_bgm1x_voices_1x"
++        "ff_bgm1x_sfx_volume"
+     )
+         string(REPLACE "_" "_1" KEY_JNI_ESCAPED ${KEY})
+         set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+index b72ed24..0d30422 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+@@ -1087,6 +1087,8 @@ object NativeLibrary {
+         const val BUTTON_GPIO14 = 782
+         const val BUTTON_SWAP = 800
+         const val BUTTON_TURBO = 801
++        // ff-bgm1x: 화면 메뉴 버튼 (한 번 누르면 에뮬레이션 메뉴를 연다, 코어에는 의미 없음)
++        const val BUTTON_MENU = 802
+     }
+ 
+     /**
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+index 108fd3c..1ac0635 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+@@ -354,7 +354,8 @@ class EmulationActivity : AppCompatActivity() {
+             return false
+         }
+ 
+-        if (emulationFragment.isDrawerOpen()) {
++        // ff-bgm1x: 배치 편집기가 열려 있으면 키보드 입력(숫자 칸)이 화면으로 가야 한다
++        if (emulationFragment.isDrawerOpen() || emulationFragment.isLayoutEditorOpen()) {
+             return super.dispatchKeyEvent(event)
+         }
+ 
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+index c7fb0d3..ebda6c0 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+@@ -71,6 +71,45 @@ class ScreenAdjustmentUtil(
+         NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+     }
+ 
++    // ff-bgm1x: 화면 배치 편집기용. 지금 저장된 사용자 배치 (x, y, 너비, 높이) 를 위·아래 화면 순서로 돌려준다
++    fun customLayout(portrait: Boolean): Pair<IntArray, IntArray> {
++        val s = customLayoutSettings(portrait)
++        return intArrayOf(s[0].int, s[1].int, s[2].int, s[3].int) to
++            intArrayOf(s[4].int, s[5].int, s[6].int, s[7].int)
++    }
++
++    // ff-bgm1x: 편집기에서 정한 사용자 배치를 저장하고, 배치를 '사용자 지정' 으로 바꿔 바로 적용한다
++    fun applyCustomLayout(portrait: Boolean, top: IntArray, bottom: IntArray) {
++        val s = customLayoutSettings(portrait)
++        val values = top + bottom
++        for (i in s.indices) {
++            s[i].int = values[i].coerceAtLeast(0)
++            settings.saveSetting(s[i], SettingsFile.FILE_NAME_CONFIG)
++        }
++        if (portrait) {
++            changePortraitOrientation(PortraitScreenLayout.CUSTOM_PORTRAIT_LAYOUT.int)
++        } else {
++            changeScreenOrientation(ScreenLayout.CUSTOM_LAYOUT.int)
++        }
++    }
++
++    private fun customLayoutSettings(portrait: Boolean): List<IntSetting> =
++        if (portrait) {
++            listOf(
++                IntSetting.PORTRAIT_TOP_X, IntSetting.PORTRAIT_TOP_Y,
++                IntSetting.PORTRAIT_TOP_WIDTH, IntSetting.PORTRAIT_TOP_HEIGHT,
++                IntSetting.PORTRAIT_BOTTOM_X, IntSetting.PORTRAIT_BOTTOM_Y,
++                IntSetting.PORTRAIT_BOTTOM_WIDTH, IntSetting.PORTRAIT_BOTTOM_HEIGHT
++            )
++        } else {
++            listOf(
++                IntSetting.LANDSCAPE_TOP_X, IntSetting.LANDSCAPE_TOP_Y,
++                IntSetting.LANDSCAPE_TOP_WIDTH, IntSetting.LANDSCAPE_TOP_HEIGHT,
++                IntSetting.LANDSCAPE_BOTTOM_X, IntSetting.LANDSCAPE_BOTTOM_Y,
++                IntSetting.LANDSCAPE_BOTTOM_WIDTH, IntSetting.LANDSCAPE_BOTTOM_HEIGHT
++            )
++        }
++
+     fun changeSecondaryOrientation(layoutOption: Int) {
+         IntSetting.SECONDARY_DISPLAY_LAYOUT.int = layoutOption
+         settings.saveSetting(IntSetting.SECONDARY_DISPLAY_LAYOUT, SettingsFile.FILE_NAME_CONFIG)
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+index 4a8c22d..62ca1e9 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+@@ -148,4 +148,8 @@ object SettingKeys {
+     external fun performance_overlay_position(): String
+     external fun enable_secondary_display(): String
+     external fun combo_button_buttons(): String
++    external fun ff_bgm1x_bgm_1x(): String
++    external fun ff_bgm1x_ff_cutscenes(): String
++    external fun ff_bgm1x_voices_1x(): String
++    external fun ff_bgm1x_sfx_volume(): String
+ }
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+index b45c270..7546eaf 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+@@ -93,6 +93,9 @@ enum class BooleanSetting(
+         Settings.SECTION_AUDIO,
+         false
+     ),
++    FF_BGM1X_BGM_1X(SettingKeys.ff_bgm1x_bgm_1x(), Settings.SECTION_AUDIO, true),
++    FF_BGM1X_FF_CUTSCENES(SettingKeys.ff_bgm1x_ff_cutscenes(), Settings.SECTION_AUDIO, false),
++    FF_BGM1X_VOICES_1X(SettingKeys.ff_bgm1x_voices_1x(), Settings.SECTION_AUDIO, true),
+     CPU_JIT(SettingKeys.use_cpu_jit(), Settings.SECTION_CORE, true),
+     HW_SHADER(SettingKeys.use_hw_shader(), Settings.SECTION_RENDERER, true),
+     SHADER_JIT(SettingKeys.use_shader_jit(), Settings.SECTION_RENDERER, true),
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
+index f4108f3..56c16da 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
+@@ -65,7 +65,8 @@ enum class IntSetting(
+     ),
+     RENDER_3D_WHICH_DISPLAY(SettingKeys.render_3d_which_display(), Settings.SECTION_RENDERER, 0),
+     ASPECT_RATIO(SettingKeys.aspect_ratio(), Settings.SECTION_LAYOUT, 0),
+-    UPDATE_CHECK_CHANNEL(SettingKeys.update_check_channel(), Settings.SECTION_MISC, 0);
++    UPDATE_CHECK_CHANNEL(SettingKeys.update_check_channel(), Settings.SECTION_MISC, 0),
++    FF_BGM1X_SFX_VOLUME(SettingKeys.ff_bgm1x_sfx_volume(), Settings.SECTION_AUDIO, 100);
+ 
+     override var int: Int = defaultValue
+ 
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+index 044216e..3db3aed 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+@@ -1826,6 +1826,46 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView)
+                     ScaledFloatSetting.AUDIO_VOLUME.defaultValue
+                 )
+             )
++            // ff-bgm1x: PC 판 에뮬레이션 메뉴의 세 가지와 효과음 볼륨
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_BGM_1X,
++                    R.string.ff_bgm1x_bgm_1x,
++                    R.string.ff_bgm1x_bgm_1x_description,
++                    BooleanSetting.FF_BGM1X_BGM_1X.key,
++                    BooleanSetting.FF_BGM1X_BGM_1X.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES,
++                    R.string.ff_bgm1x_ff_cutscenes,
++                    R.string.ff_bgm1x_ff_cutscenes_description,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.key,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_VOICES_1X,
++                    R.string.ff_bgm1x_voices_1x,
++                    R.string.ff_bgm1x_voices_1x_description,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.key,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.defaultValue
++                )
++            )
++            add(
++                SliderSetting(
++                    IntSetting.FF_BGM1X_SFX_VOLUME,
++                    R.string.ff_bgm1x_sfx_volume,
++                    0,
++                    0,
++                    100,
++                    "%",
++                    IntSetting.FF_BGM1X_SFX_VOLUME.key,
++                    IntSetting.FF_BGM1X_SFX_VOLUME.defaultValue.toFloat()
++                )
++            )
+             add(
+                 SwitchSetting(
+                     BooleanSetting.ENABLE_AUDIO_STRETCHING,
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+index 63430da..2364efd 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+@@ -67,8 +67,11 @@ import org.citra.citra_emu.databinding.FragmentEmulationBinding
+ import org.citra.citra_emu.display.PortraitScreenLayout
+ import org.citra.citra_emu.display.ScreenAdjustmentUtil
+ import org.citra.citra_emu.display.ScreenLayout
++import org.citra.citra_emu.display.ScreenLayoutEditor
+ import org.citra.citra_emu.display.SecondaryDisplayLayout
+ import org.citra.citra_emu.features.hotkeys.Hotkey
++import org.citra.citra_emu.features.hotkeys.HotkeyUtility
++import org.citra.citra_emu.overlay.FfCustomButtons
+ import org.citra.citra_emu.features.settings.model.BooleanSetting
+ import org.citra.citra_emu.features.settings.model.IntSetting
+ import org.citra.citra_emu.features.settings.model.SettingsViewModel
+@@ -233,6 +236,28 @@ class EmulationFragment :
+             binding.doneControlConfig.visibility = View.GONE
+             binding.surfaceInputOverlay.setIsInEditMode(false)
+         }
++        // ff-bgm1x: 화면 메뉴 버튼은 한 번 누르면 메뉴(서랍)를 연다
++        binding.surfaceInputOverlay.onMenuButtonPressed = {
++            binding.drawerLayout.post { binding.drawerLayout.open() }
++        }
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        val customHotkeys = HotkeyUtility(screenAdjustmentUtil, requireContext())
++        binding.surfaceInputOverlay.onCustomFunction = { function ->
++            when (function) {
++                FfCustomButtons.Function.NONE -> {}
++                FfCustomButtons.Function.MENU -> binding.drawerLayout.post { binding.drawerLayout.open() }
++                FfCustomButtons.Function.SWAP_SCREEN -> customHotkeys.handleHotkey(Hotkey.SWAP_SCREEN.button)
++                FfCustomButtons.Function.CYCLE_LAYOUT -> customHotkeys.handleHotkey(Hotkey.CYCLE_LAYOUT.button)
++                FfCustomButtons.Function.PAUSE_OR_RESUME -> customHotkeys.handleHotkey(Hotkey.PAUSE_OR_RESUME.button)
++                FfCustomButtons.Function.QUICKSAVE -> customHotkeys.handleHotkey(Hotkey.QUICKSAVE.button)
++                FfCustomButtons.Function.QUICKLOAD -> customHotkeys.handleHotkey(Hotkey.QUICKLOAD.button)
++                FfCustomButtons.Function.TURBO -> customHotkeys.handleHotkey(Hotkey.TURBO_LIMIT.button)
++                FfCustomButtons.Function.CLOSE_GAME -> customHotkeys.handleHotkey(Hotkey.CLOSE_GAME.button)
++                FfCustomButtons.Function.BGM_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_BGM_1X, R.string.ff_func_bgm_1x)
++                FfCustomButtons.Function.VOICES_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_VOICES_1X, R.string.ff_func_voices_1x)
++                FfCustomButtons.Function.FF_CUTSCENES -> toggleFfOption(BooleanSetting.FF_BGM1X_FF_CUTSCENES, R.string.ff_func_ff_cutscenes)
++            }
++        }
+ 
+         // Show/hide the "Stats" overlay
+         updateShowPerformanceOverlay()
+@@ -263,7 +288,11 @@ class EmulationFragment :
+             }
+ 
+             override fun onDrawerClosed(drawerView: View) {
+-                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++                // ff-bgm1x: 배치 편집기가 열려 있으면 서랍을 잠가 둔다 (왼쪽 끝을 끄는 동작과 겹치지 않게)
++                binding.drawerLayout.setDrawerLockMode(
++                    if (closeLayoutEditor != null) DrawerLayout.LOCK_MODE_LOCKED_CLOSED
++                    else EmulationMenuSettings.drawerLockMode
++                )
+                 binding.surfaceInputOverlay.isClickable = true
+                 binding.surfaceInputOverlay.isFocusable = true
+                 binding.surfaceInputOverlay.isFocusableInTouchMode = true
+@@ -443,6 +472,12 @@ class EmulationFragment :
+                         return
+                     }
+ 
++                    // ff-bgm1x: 배치 편집기가 열려 있으면 뒤로 = 저장하지 않고 닫기
++                    closeLayoutEditor?.let {
++                        it()
++                        return
++                    }
++
+                     if (binding.drawerLayout.isOpen) {
+                         binding.drawerLayout.close()
+                     } else {
+@@ -1024,6 +1059,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_screen_layout_edit_custom -> {
++                    showScreenLayoutEditor(false)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1083,6 +1123,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_portrait_layout_edit_custom -> {
++                    showScreenLayoutEditor(true)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1254,9 +1299,62 @@ class EmulationFragment :
+         }
+     }
+ 
++    // ff-bgm1x: 위·아래 화면 사용자 배치를 게임 화면 위에서 끌어서 정하는 편집기
++    // ff-bgm1x: 1배속 옵션을 켜고 끄고, 설정 파일에 저장해 바로 적용한다
++    private fun toggleFfOption(setting: BooleanSetting, nameRes: Int) {
++        setting.boolean = !setting.boolean
++        settings.saveSetting(setting, SettingsFile.FILE_NAME_CONFIG)
++        NativeLibrary.reloadSettings()
++        val state = getString(if (setting.boolean) R.string.ff_func_state_on else R.string.ff_func_state_off)
++        Toast.makeText(requireContext(), "${getString(nameRes)}: $state", Toast.LENGTH_SHORT).show()
++    }
++
++    // ff-bgm1x: 배치 편집기가 열려 있을 때 닫는 함수 (닫혀 있으면 null)
++    private var closeLayoutEditor: (() -> Unit)? = null
++
++    fun isLayoutEditorOpen(): Boolean = closeLayoutEditor != null
++
++    private fun showScreenLayoutEditor(portrait: Boolean) {
++        binding.drawerLayout.close()
++        val parent = binding.surfaceEmulation.parent as ViewGroup
++        val (top, bottom) = screenAdjustmentUtil.customLayout(portrait)
++        var editor: View? = null
++        // 편집기가 버튼을 사각형으로 그리므로 편집하는 동안 실제 버튼은 숨긴다
++        val overlay = binding.surfaceInputOverlay
++        val overlayVisibility = overlay.visibility
++        // 편집기는 버튼 층과 같은 자리(노치 여백 안쪽)에 둔다. 화면 좌표는 게임 화면 층 기준이라 그 차이를 넘긴다
++        val screenOffsetX = binding.surfaceEmulation.left - overlay.left
++        val screenOffsetY = binding.surfaceEmulation.top - overlay.top
++        editor = ScreenLayoutEditor(
++            requireContext(),
++            top,
++            bottom,
++            overlay,
++            screenOffsetX,
++            screenOffsetY,
++            onSave = { t, b -> screenAdjustmentUtil.applyCustomLayout(portrait, t, b) },
++            onClose = {
++                editor?.let { parent.removeView(it) }
++                overlay.visibility = overlayVisibility
++                closeLayoutEditor = null
++                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++            }
++        )
++        overlay.visibility = View.INVISIBLE
++        closeLayoutEditor = { (editor as ScreenLayoutEditor).close() }
++        binding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
++        val overlayParams = overlay.layoutParams as ViewGroup.MarginLayoutParams
++        parent.addView(
++            editor,
++            ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
++                setMargins(overlayParams.leftMargin, overlayParams.topMargin, overlayParams.rightMargin, overlayParams.bottomMargin)
++            }
++        )
++    }
++
+     private fun showToggleControlsDialog() {
+         val editor = preferences.edit()
+-        val enabledButtons = BooleanArray(17)
++        val enabledButtons = BooleanArray(18)  // ff-bgm1x: 17 = 메뉴 버튼 (기본 켜짐)
+         enabledButtons.forEachIndexed { i: Int, _: Boolean ->
+             // Buttons that are disabled by default
+             var defaultValue = true
+@@ -1469,7 +1567,7 @@ class EmulationFragment :
+ 
+         val editor = preferences.edit()
+         // TODO: This code sucks balls. We need to do this differently. -OS
+-        for (i in 0 until 17) {
++        for (i in 0 until 18) {  // ff-bgm1x: 17 = 메뉴 버튼
+             var defaultValue = true
+             when (i) {
+                 6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
+index 06c5ff2..400b541 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
+@@ -11,6 +11,8 @@ import android.content.res.Configuration
+ import android.graphics.Bitmap
+ import android.graphics.BitmapFactory
+ import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.Paint
+ import android.graphics.Rect
+ import android.graphics.drawable.VectorDrawable
+ import android.util.AttributeSet
+@@ -23,6 +25,8 @@ import androidx.core.content.ContextCompat
+ import androidx.core.view.ViewCompat
+ import androidx.preference.PreferenceManager
+ import java.lang.NullPointerException
++import kotlin.math.abs
++import kotlin.math.max
+ import kotlin.math.min
+ import org.citra.citra_emu.CitraApplication
+ import org.citra.citra_emu.NativeLibrary
+@@ -55,10 +59,18 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+     // Stores the ID of the pointer that interacted with the 3DS touchscreen.
+     private var touchscreenPointerId = -1
+ 
++    // ff-bgm1x: 화면 메뉴 버튼을 누르면 부른다 (EmulationFragment 가 메뉴를 연다)
++    var onMenuButtonPressed: (() -> Unit)? = null
++
++    // ff-bgm1x: 사용자가 만든 기능 버튼을 누르면 부른다 (EmulationFragment 가 기능을 실행한다)
++    var onCustomFunction: ((FfCustomButtons.Function) -> Unit)? = null
++    private var customFunctions: Map<Int, FfCustomButtons.Function> = emptyMap()
++
+     init {
+         if (!preferences.getBoolean("OverlayInit", false)) {
+             defaultOverlay()
+         }
++        defaultMenuButtonIfMissing()
+ 
+         // Reset 3ds touchscreen pointer ID
+         touchscreenPointerId = -1
+@@ -196,8 +208,19 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                         button.status == NativeLibrary.ButtonState.PRESSED
+                     ) {
+                         TurboHelper.toggleTurbo(true)
++                    } else if (button.id == NativeLibrary.ButtonType.BUTTON_MENU &&
++                        button.status == NativeLibrary.ButtonState.PRESSED
++                    ) {
++                        onMenuButtonPressed?.invoke()
+                     } else if (button.id == Hotkey.COMBO_BUTTON.button) {
+                         ComboHelper.comboActivate(button.status)
++                    } else if (FfCustomButtons.isCustom(button.id)) {
++                        // 사용자가 만든 기능 버튼: 코어에는 보내지 않는다
++                        if (button.status == NativeLibrary.ButtonState.PRESSED) {
++                            customFunctions[button.id]?.let { onCustomFunction?.invoke(it) }
++                        }
++                        shouldUpdateView = true
++                        continue
+                     }
+ 
+                     NativeLibrary.onGamePadEvent(
+@@ -608,6 +631,25 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             )
+         }
+ 
++        // ff-bgm1x: 화면 메뉴 버튼 (기본으로 보인다)
++        if (preferences.getBoolean("buttonToggle17", true)) {
++            overlayButtons.add(
++                initializeOverlayButton(
++                    context,
++                    R.drawable.button_menu,
++                    R.drawable.button_menu_pressed,
++                    NativeLibrary.ButtonType.BUTTON_MENU,
++                    orientation
++                )
++            )
++        }
++
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        customFunctions = FfCustomButtons.load(preferences)
++        customFunctions.forEach { (id, function) ->
++            overlayButtons.add(initializeCustomButton(context, id, function, orientation))
++        }
++
+         if (preferences.getBoolean("buttonToggle16", false)) {
+             overlayButtons.add(
+                 initializeOverlayButton(
+@@ -647,6 +689,37 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             .apply()
+     }
+ 
++    // ff-bgm1x: 화면 배치 편집기에서 버튼도 같이 다루기 위한 정보.
++    // posId 는 자리 설정 키("<posId><방향>-X/Y"), scaleId 는 크기 설정 키("controlScale-<scaleId>", 0~150, 50 = 기본)
++    class EditableControl(val posId: Int, val scaleId: Int, val isButton: Boolean, val bounds: Rect)
++
++    fun editableControls(): List<EditableControl> {
++        val list = ArrayList<EditableControl>()
++        overlayButtons.forEach { list.add(EditableControl(it.id, it.id, true, Rect(it.bounds))) }
++        overlayDpads.forEach { list.add(EditableControl(it.upId, NativeLibrary.ButtonType.DPAD, false, Rect(it.bounds))) }
++        overlayJoysticks.forEach { list.add(EditableControl(it.joystickId, it.joystickId, false, Rect(it.bounds))) }
++        return list
++    }
++
++    fun controlScale(scaleId: Int): Int = preferences.getInt("controlScale-$scaleId", 50)
++
++    fun customFunction(id: Int): FfCustomButtons.Function? = customFunctions[id]
++
++    // 새 기능 버튼의 크기 설정 50 일 때 너비 (px)
++    fun customButtonBaseSize(): Float {
++        val dm = context.resources.displayMetrics
++        return min(dm.widthPixels, dm.heightPixels) * CUSTOM_BUTTON_SCALE *
++            (preferences.getInt("controlScale", 50) + 50) / 100f
++    }
++
++    // 자리·크기를 저장한다. 다 바꾼 뒤 refreshControls() 를 불러야 화면에 반영된다
++    fun saveControlPlacement(posId: Int, scaleId: Int, x: Int, y: Int, scale: Int) {
++        val orientation =
++            if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) "-Portrait" else ""
++        saveControlPosition(posId, x, y, orientation)
++        preferences.edit().putInt("controlScale-$scaleId", scale.coerceIn(0, 150)).apply()
++    }
++
+     fun setIsInEditMode(isInEditMode: Boolean) {
+         this.isInEditMode = isInEditMode
+     }
+@@ -677,6 +750,37 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             .apply()
+     }
+ 
++    // ff-bgm1x: 메뉴 버튼이 생기기 전에 배치를 저장했으면 그 키가 없어 (0,0) 에 놓인다. 없을 때만 기본 자리를 넣는다.
++    // 예전 기본 자리(R 버튼, 세로 화면 X 버튼과 겹치는 곳)에 그대로 있으면 새 기본 자리로 한 번 옮긴다
++    private fun defaultMenuButtonIfMissing() {
++        val key = NativeLibrary.ButtonType.BUTTON_MENU.toString()
++        val outMetrics = DisplayMetrics()
++        (context as Activity).windowManager.defaultDisplay.getMetrics(outMetrics)
++        val longSide = maxOf(outMetrics.widthPixels, outMetrics.heightPixels).toFloat()
++        val shortSide = minOf(outMetrics.widthPixels, outMetrics.heightPixels).toFloat()
++        fun near(k: String, v: Float) = abs(preferences.getFloat(k, -1f) - v) < 2f
++        val atOldDefault = !preferences.getBoolean("FfMenuMoved2", false) &&
++            (near("$key-X", 910f / 1000 * longSide) && near("$key-Y", 30f / 1000 * shortSide) ||
++                near("$key-Portrait-X", 860f / 1000 * shortSide) && near("$key-Portrait-Y", 675f / 1000 * longSide) ||
++                near("$key-Portrait-X", 640f / 1000 * shortSide) && near("$key-Portrait-Y", 794f / 1000 * longSide))
++        preferences.edit().putBoolean("FfMenuMoved2", true).apply()
++        if (!atOldDefault && preferences.contains("$key-X") && preferences.contains("$key-Portrait-X")) {
++            return
++        }
++        preferences.edit()
++            .putFloat("$key-X", resources.getInteger(R.integer.N3DS_BUTTON_MENU_X).toFloat() / 1000 * longSide)
++            .putFloat("$key-Y", resources.getInteger(R.integer.N3DS_BUTTON_MENU_Y).toFloat() / 1000 * shortSide)
++            .putFloat(
++                "$key-Portrait-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_X).toFloat() / 1000 * shortSide
++            )
++            .putFloat(
++                "$key-Portrait-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_Y).toFloat() / 1000 * longSide
++            )
++            .apply()
++    }
++
+     fun resetButtonPlacement() {
+         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+         if (isLandscape) {
+@@ -835,6 +939,14 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_TURBO.toString() + "-Y",
+                 resources.getInteger(R.integer.N3DS_BUTTON_TURBO_Y).toFloat() / 1000 * maxY
+             )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + "-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_X).toFloat() / 1000 * maxX
++            )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + "-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_Y).toFloat() / 1000 * maxY
++            )
+             .putFloat(
+                 Hotkey.COMBO_BUTTON.button.toString() + "-X",
+                 resources.getInteger(R.integer.N3DS_BUTTON_COMBO_X).toFloat() / 1000 * maxX
+@@ -997,6 +1109,14 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_TURBO.toString() + portrait + "-Y",
+                 resources.getInteger(R.integer.N3DS_BUTTON_TURBO_PORTRAIT_Y).toFloat() / 1000 * maxY
+             )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + portrait + "-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_X).toFloat() / 1000 * maxX
++            )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + portrait + "-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_Y).toFloat() / 1000 * maxY
++            )
+             .putFloat(
+                 Hotkey.COMBO_BUTTON.button.toString() + portrait + "-X",
+                 resources.getInteger(R.integer.N3DS_BUTTON_COMBO_PORTRAIT_X).toFloat() / 1000 * maxX
+@@ -1114,7 +1234,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_HOME,
+                 NativeLibrary.ButtonType.BUTTON_START,
+                 NativeLibrary.ButtonType.BUTTON_SELECT,
+-                NativeLibrary.ButtonType.BUTTON_SWAP -> 0.08f
++                NativeLibrary.ButtonType.BUTTON_SWAP,
++                NativeLibrary.ButtonType.BUTTON_MENU -> 0.08f
+ 
+                 NativeLibrary.ButtonType.BUTTON_TURBO -> 0.10f
+ 
+@@ -1163,6 +1284,63 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             return overlayDrawable
+         }
+ 
++        private const val CUSTOM_BUTTON_SCALE = 0.11f
++
++        // ff-bgm1x: 기능 이름을 쓴 동그란 버튼 그림 (글자는 동그라미 안에 들어가게 줄인다)
++        private fun customButtonBitmap(size: Int, label: String, pressed: Boolean): Bitmap {
++            val bitmap = Bitmap.createBitmap(max(size, 1), max(size, 1), Bitmap.Config.ARGB_8888)
++            val canvas = Canvas(bitmap)
++            val r = size / 2f
++            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
++            paint.color = if (pressed) 0xFFB0B0B0.toInt() else 0xFF5A5A5A.toInt()
++            canvas.drawCircle(r, r, r * 0.95f, paint)
++            paint.style = Paint.Style.STROKE
++            paint.strokeWidth = size * 0.04f
++            paint.color = 0xFFE0E0E0.toInt()
++            canvas.drawCircle(r, r, r * 0.92f, paint)
++            paint.style = Paint.Style.FILL
++            paint.color = Color.WHITE
++            paint.textAlign = Paint.Align.CENTER
++            var textSize = size * 0.3f
++            paint.textSize = textSize
++            val maxW = size * 0.8f
++            val w = paint.measureText(label)
++            if (w > maxW) {
++                textSize *= maxW / w
++                paint.textSize = textSize
++            }
++            canvas.drawText(label, r, r + textSize / 3f, paint)
++            return bitmap
++        }
++
++        private fun initializeCustomButton(
++            context: Context,
++            id: Int,
++            function: FfCustomButtons.Function,
++            orientation: String
++        ): InputOverlayDrawableButton {
++            val dm = context.resources.displayMetrics
++            var scale = CUSTOM_BUTTON_SCALE
++            scale *= (preferences.getInt("controlScale", 50) + 50).toFloat() / 100f
++            scale *= (preferences.getInt("controlScale-$id", 50) + 50).toFloat() / 100f
++            val size = (min(dm.widthPixels, dm.heightPixels) * scale).toInt()
++            val label = context.getString(function.labelRes)
++            val opacity: Int = preferences.getInt("controlOpacity", 50) * 255 / 100
++            val overlayDrawable = InputOverlayDrawableButton(
++                context.resources,
++                customButtonBitmap(size, label, false),
++                customButtonBitmap(size, label, true),
++                id,
++                opacity
++            )
++            // 자리가 없으면 화면 가운데
++            val x = preferences.getFloat("$id$orientation-X", ((dm.widthPixels - size) / 2).toFloat()).toInt()
++            val y = preferences.getFloat("$id$orientation-Y", ((dm.heightPixels - size) / 2).toFloat()).toInt()
++            overlayDrawable.setBounds(x, y, x + size, y + size)
++            overlayDrawable.setPosition(x, y)
++            return overlayDrawable
++        }
++
+         /**
+          * Initializes an [InputOverlayDrawableDpad]
+          *
+diff --git a/src/android/app/src/main/jni/config.cpp b/src/android/app/src/main/jni/config.cpp
+index f5f80bf..2367299 100644
+--- a/src/android/app/src/main/jni/config.cpp
++++ b/src/android/app/src/main/jni/config.cpp
+@@ -2,6 +2,7 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <iomanip>
+ #include <memory>
+ #include <ranges>
+@@ -9,6 +10,7 @@
+ #include <unordered_map>
+ #include <INIReader.h>
+ #include <boost/hana/string.hpp>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/file_util.h"
+ #include "common/logging/backend.h"
+ #include "common/logging/log.h"
+@@ -251,6 +253,19 @@ void Config::ReadValues() {
+     ReadSetting("Audio", Settings::values.input_type);
+     ReadSetting("Audio", Settings::values.input_device);
+ 
++    // ff-bgm1x: 설정 화면에서 바꾸면 reloadSettings 로 다시 읽혀 바로 적용된다
++    {
++        auto& bgm = AudioCore::HLE::BgmReplacer::Instance();
++        bgm.SetEnabled(android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_bgm_1x, true));
++        bgm.SetFastForwardCutscenes(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_ff_cutscenes, false));
++        bgm.SetVoices1x(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_voices_1x, true));
++        const long sfx_volume =
++            android_config->GetInteger("Audio", Settings::Keys::ff_bgm1x_sfx_volume, 100);
++        bgm.SetSfxVolume(std::clamp(sfx_volume, 0L, 100L) / 100.0f);
++    }
++
+     // Data Storage
+     ReadSetting("Data Storage", Settings::values.use_virtual_sd);
+ 
+diff --git a/src/android/app/src/main/jni/default_ini.h b/src/android/app/src/main/jni/default_ini.h
+index 9422927..7203383 100644
+--- a/src/android/app/src/main/jni/default_ini.h
++++ b/src/android/app/src/main/jni/default_ini.h
+@@ -428,6 +428,22 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
+ # 0 (default): No, 1: Yes
+ )") DECLARE_KEY(simulate_headphones_plugged) BOOST_HANA_STRING(R"(
+ 
++# ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_bgm_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 연출 중에도 배속 (끄면 연출 동안 배속을 잠시 멈춤)
++# 0 (default): 끔, 1: 켬
++)") DECLARE_KEY(ff_bgm1x_ff_cutscenes) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 대사·효과음 1배속
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_voices_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 1배속으로 내는 효과음의 볼륨 (0~100)
++# 100 (default)
++)") DECLARE_KEY(ff_bgm1x_sfx_volume) BOOST_HANA_STRING(R"(
++
+ # Output volume.
+ # 1.0 (default): 100%, 0.0; mute
+ )") DECLARE_KEY(volume) BOOST_HANA_STRING(R"(
+diff --git a/src/android/app/src/main/jni/native.cpp b/src/android/app/src/main/jni/native.cpp
+index fd52ce0..7db53ec 100644
+--- a/src/android/app/src/main/jni/native.cpp
++++ b/src/android/app/src/main/jni/native.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include <core/hle/service/cfg/cfg.h>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/arch.h"
+ 
+ #if CITRA_ARCH(arm64)
+@@ -379,6 +380,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
+             SCOPE_EXIT({ Settings::values.volume = volume; });
+             Settings::values.volume = 0;
+ 
++            // ff-bgm1x: 사용자가 일시정지한 동안 대체 재생도 멈춘다
++            AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(false);
++            SCOPE_EXIT({ AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(true); });
++
+             std::unique_lock pause_lock{paused_mutex};
+             running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
+             window->PollEvents();
+diff --git a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+index 0fe950e..93362e5 100644
+--- a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+@@ -29,4 +29,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_screen_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>
+diff --git a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+index 866824a..101ade3 100644
+--- a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+@@ -17,4 +17,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_portrait_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>
+diff --git a/src/android/app/src/main/res/values/arrays.xml b/src/android/app/src/main/res/values/arrays.xml
+index 5e8aff3..cc34867 100644
+--- a/src/android/app/src/main/res/values/arrays.xml
++++ b/src/android/app/src/main/res/values/arrays.xml
+@@ -189,6 +189,7 @@
+         <item>@string/button_swap</item>
+         <item>@string/button_turbo</item>
+         <item>@string/button_combo</item>
++        <item>@string/button_menu</item>
+     </string-array>
+ 
+     <string-array name="comboOptions">
+diff --git a/src/android/app/src/main/res/values/integers.xml b/src/android/app/src/main/res/values/integers.xml
+index 5843e67..e7c6cdf 100644
+--- a/src/android/app/src/main/res/values/integers.xml
++++ b/src/android/app/src/main/res/values/integers.xml
+@@ -35,6 +35,9 @@
+     <integer name="N3DS_BUTTON_SWAP_Y">850</integer>
+     <integer name="N3DS_BUTTON_TURBO_X">630</integer>
+     <integer name="N3DS_BUTTON_TURBO_Y">850</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_X">630</integer>
++    <integer name="N3DS_BUTTON_MENU_Y">850</integer>
+     <integer name="N3DS_BUTTON_COMBO_X">740</integer>
+     <integer name="N3DS_BUTTON_COMBO_Y">480</integer>
+ 
+@@ -71,6 +74,9 @@
+     <integer name="N3DS_BUTTON_SWAP_PORTRAIT_Y">675</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_X">453</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_Y">720</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_X">280</integer>
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_Y">794</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_X">450</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_Y">925</integer>
+ 
+diff --git a/src/android/app/src/main/res/values/strings.xml b/src/android/app/src/main/res/values/strings.xml
+index 12bb68c..52ebb1f 100644
+--- a/src/android/app/src/main/res/values/strings.xml
++++ b/src/android/app/src/main/res/values/strings.xml
+@@ -165,6 +165,7 @@
+     <string name="button_home">HOME</string>
+     <string name="button_swap">Swap Screens</string>
+     <string name="button_turbo">Turbo</string>
++    <string name="button_menu">Menu</string>
+     <string name="button_combo">Combo Button</string>
+     <string name="button_x" translatable="false">X</string>
+     <string name="button_y" translatable="false">Y</string>
+@@ -364,6 +365,70 @@
+     <string name="realtime_audio_description">Scales audio playback speed to account for drops in emulation framerate. This means that audio will play at full speed even while the game framerate is low. May cause audio desync issues.</string>
+     <string name="simulate_headphones_plugged">Simulate Headphones Plugged In</string>
+     <string name="simulate_headphones_plugged_description">Simulates whether headphones are plugged in to the emulated 3DS system.</string>
++    <!-- ff-bgm1x -->
++    <string name="ff_bgm1x_bgm_1x">BGM 1배속 유지 (배속 중)</string>
++    <string name="ff_bgm1x_bgm_1x_description">배속 중에도 BGM 을 1배속으로 재생합니다.</string>
++    <string name="ff_bgm1x_ff_cutscenes">연출 중에도 배속</string>
++    <string name="ff_bgm1x_ff_cutscenes_description">끄면 연출 음악·동영상이 나오는 동안 배속을 잠시 멈춥니다.</string>
++    <string name="ff_bgm1x_voices_1x">대사·효과음 1배속</string>
++    <string name="ff_bgm1x_voices_1x_description">배속 중이나 느린 속도(속도 제한 100% 미만)에서도 대사와 효과음을 1배속으로 냅니다.</string>
++    <string name="ff_bgm1x_layout_edit">화면·버튼 배치 직접 편집…</string>
++    <string name="ff_bgm1x_layout_top_screen">위 화면</string>
++    <string name="ff_bgm1x_layout_bottom_screen">아래 화면</string>
++    <string name="ff_bgm1x_layout_panel_handle">☰ 여기를 끌어 패널 옮기기 · 화면·버튼을 끌어 옮기고, 모서리로 크기 조절</string>
++    <string name="ff_bgm1x_layout_width">너비</string>
++    <string name="ff_bgm1x_layout_height">높이</string>
++    <string name="ff_bgm1x_layout_keep_aspect">원래 비율 유지</string>
++    <string name="ff_bgm1x_layout_fix_aspect">비율 맞추기</string>
++    <string name="ff_bgm1x_layout_save">저장</string>
++    <string name="ff_bgm1x_layout_size_percent">크기 %</string>
++    <string name="ff_bgm1x_layout_center_h">가로 가운데</string>
++    <string name="ff_bgm1x_layout_center_v">세로 가운데</string>
++    <string name="ff_bgm1x_layout_edge_left">◀ 왼쪽</string>
++    <string name="ff_bgm1x_layout_edge_right">오른쪽 ▶</string>
++    <string name="ff_bgm1x_layout_edge_top">▲ 위</string>
++    <string name="ff_bgm1x_layout_edge_bottom">▼ 아래</string>
++    <string name="ff_bgm1x_layout_fill">꽉 채우기</string>
++    <string name="ff_bgm1x_layout_same_size">고른 버튼 같은 크기로</string>
++    <string name="ff_bgm1x_layout_mirror">왼쪽 기준 좌우 대칭</string>
++    <string name="ff_bgm1x_layout_margin">여백 px</string>
++    <string name="ff_bgm1x_layout_grid">격자 px (0 = 끔)</string>
++    <string name="ff_bgm1x_layout_hint">누르면 하나(그룹이면 그룹 전체) 선택, 길게 누르면 여러 개 선택</string>
++    <string name="ff_bgm1x_layout_add_button">버튼 추가</string>
++    <string name="ff_bgm1x_layout_change_function">기능 바꾸기</string>
++    <string name="ff_bgm1x_layout_delete">버튼 삭제 (다시 추가 가능)</string>
++    <string name="ff_bgm1x_layout_choose_function">추가할 기능 (화면에 없는 것만)</string>
++    <string name="ff_bgm1x_layout_group">그룹 만들기</string>
++    <string name="ff_bgm1x_layout_ungroup">그룹 풀기</string>
++    <string name="ff_bgm1x_layout_section_each">서로 맞추기 (그룹 하나만 고르면 그 안에서)</string>
++    <string name="ff_bgm1x_layout_section_screen">화면 기준</string>
++    <string name="ff_bgm1x_layout_align_left">왼끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_hcenter">좌우 가운데 맞춤</string>
++    <string name="ff_bgm1x_layout_align_right">오른끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_top">위끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_vcenter">높이 맞춤</string>
++    <string name="ff_bgm1x_layout_align_bottom">아래끝 맞춤</string>
++    <string name="ff_bgm1x_layout_dist_h">가로 등간격</string>
++    <string name="ff_bgm1x_layout_dist_v">세로 등간격</string>
++    <string name="ff_bgm1x_layout_gap">간격 px (빈칸이면 양 끝 사이 균등)</string>
++    <string name="ff_func_none">미지정</string>
++    <string name="ff_func_menu">메뉴</string>
++    <string name="ff_func_swap_screen">화면 전환</string>
++    <string name="ff_func_cycle_layout">배치 바꾸기</string>
++    <string name="ff_func_pause">일시정지</string>
++    <string name="ff_func_quicksave">빠른 저장</string>
++    <string name="ff_func_quickload">빠른 불러오기</string>
++    <string name="ff_func_turbo">터보</string>
++    <string name="ff_func_close_game">게임 닫기</string>
++    <string name="ff_func_bgm_1x">BGM 1배속</string>
++    <string name="ff_func_voices_1x">효과음 1배속</string>
++    <string name="ff_func_ff_cutscenes">연출 중 배속</string>
++    <string name="ff_func_state_on">켜짐</string>
++    <string name="ff_func_state_off">꺼짐</string>
++    <string name="ff_bgm1x_layout_selected_many">%1$s 외 %2$d개 선택 (노란 테두리 기준)</string>
++    <string name="ff_bgm1x_layout_collapse">접기</string>
++    <string name="ff_bgm1x_layout_expand">펴기</string>
++    <string name="ff_bgm1x_sfx_volume">효과음 볼륨</string>
+     <string name="audio_input_type">Audio Input Device</string>
+     <string name="sound_output_mode">Sound Output Mode</string>
+ 
 diff --git a/src/audio_core/CMakeLists.txt b/src/audio_core/CMakeLists.txt
 index f6f8bf9..4b3734d 100644
 --- a/src/audio_core/CMakeLists.txt
@@ -109,7 +966,7 @@ index 03dab65..16900fd 100644
          config.output_format_dirty.Assign(0);
          state.output_format = config.output_format;
 diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
-index 4728526..fac8b8d 100755
+index 4728526..e9df2f9 100755
 --- a/src/audio_core/hle/source.cpp
 +++ b/src/audio_core/hle/source.cpp
 @@ -5,6 +5,7 @@
@@ -120,7 +977,21 @@ index 4728526..fac8b8d 100755
  #include "audio_core/hle/common.h"
  #include "audio_core/hle/source.h"
  #include "audio_core/interpolate.h"
-@@ -28,6 +29,46 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+@@ -18,6 +19,13 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+                                   const s16_le (&adpcm_coeffs)[16]) {
+     ParseConfig(config, adpcm_coeffs);
+ 
++    // ff-bgm1x: 새 소리를 시작했으면 효과음 미러 방식을 정한다
++    if (mirror_new && state.enabled) {
++        mirror_new = false;
++        if (mirror_mode) BgmReplacer::Instance().MirrorEnd(source_id);
++        mirror_mode = BgmReplacer::Instance().MirrorBegin(source_id);
++    }
++
+     if (state.enabled) {
+         GenerateFrame();
+     }
+@@ -28,6 +36,44 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
  void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
      const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
      if (!state.enabled) {
@@ -130,8 +1001,8 @@ index 4728526..fac8b8d 100755
 +            bgm_replaced = false;
 +            BgmReplacer::Instance().OnSourceIdle(source_id);
 +        }
-+        if (mirrored) {
-+            mirrored = false;
++        if (mirror_mode) {
++            mirror_mode = 0;
 +            BgmReplacer::Instance().MirrorEnd(source_id);
 +        }
 +        return;
@@ -142,8 +1013,8 @@ index 4728526..fac8b8d 100755
 +        if (intermediate_mix_id == 0) {
 +            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
 +        }
-+        if (mirrored) {
-+            mirrored = false;
++        if (mirror_mode) {
++            mirror_mode = 0;
 +            BgmReplacer::Instance().MirrorEnd(source_id);
 +        }
 +        state.gain_ramp_start.at(intermediate_mix_id) = gains;
@@ -152,22 +1023,20 @@ index 4728526..fac8b8d 100755
 +    }
 +
 +    // ff-bgm1x: 효과음 음성 미러. 배속 중에 시작한 소리는 이 음성의 출력(볼륨 포함)을 녹음해 1배속으로 내고,
-+    // 원본 믹스에서는 뺀다 (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
-+    if (intermediate_mix_id == 0) {
-+        if (mirror_new) {
-+            mirror_new = false;
-+            if (mirrored) BgmReplacer::Instance().MirrorEnd(source_id);
-+            mirrored = BgmReplacer::Instance().MirrorBegin(source_id);
-+        }
-+        if (mirrored && !BgmReplacer::Instance().MirrorFeed(source_id, current_frame, state.gain)) {
-+            mirrored = false;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
-+        }
++    // 느린 속도에서 시작한 소리는 앞당겨 해독한 버퍼를 지금 볼륨·재생 배율로 낸다. 어느 쪽이든 원본 믹스에서는 뺀다
++    // (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
++    if (intermediate_mix_id == 0 && mirror_mode) {
++        const bool alive =
++            mirror_mode == 1
++                ? BgmReplacer::Instance().MirrorFeed(source_id, current_frame, state.gain)
++                : BgmReplacer::Instance().MirrorAheadUpdate(source_id, state.gain, state.rate_multiplier);
++        if (!alive) mirror_mode = 0;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
 +    }
-+    if (mirrored) {
++    if (mirror_mode) {
          state.gain_ramp_start.at(intermediate_mix_id) = gains;
          state.gain_ramp_active.at(intermediate_mix_id) = false;
          return;
-@@ -64,6 +105,15 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+@@ -64,6 +110,15 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
  void Source::Reset() {
      current_frame.fill({});
      state = {};
@@ -175,15 +1044,15 @@ index 4728526..fac8b8d 100755
 +        bgm_replaced = false;
 +        BgmReplacer::Instance().OnSourceIdle(source_id);
 +    }
-+    if (mirrored) {
-+        mirrored = false;
++    if (mirror_mode) {
++        mirror_mode = 0;
 +        BgmReplacer::Instance().MirrorEnd(source_id);
 +    }
 +    mirror_new = true;
  }
  
  void Source::Sleep() {
-@@ -102,6 +152,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+@@ -102,6 +157,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
  
      if (config.enable_dirty) {
          config.enable_dirty.Assign(0);
@@ -191,7 +1060,7 @@ index 4728526..fac8b8d 100755
          state.enabled = config.enable != 0;
          LOG_TRACE(Audio_DSP, "source_id={} enable={}", source_id, state.enabled);
      }
-@@ -281,6 +332,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+@@ -281,6 +337,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
  
      if (config.embedded_buffer_dirty) {
          config.embedded_buffer_dirty.Assign(0);
@@ -199,7 +1068,15 @@ index 4728526..fac8b8d 100755
          // HACK
          // Luigi's Mansion Dark Moon configures the embedded buffer with an extremely large value
          // for length, causing the Dequeue method to allocate a buffer of that size, eating up all
-@@ -462,13 +514,28 @@ bool Source::DequeueBuffer() {
+@@ -449,6 +506,7 @@ bool Source::DequeueBuffer() {
+ 
+     Buffer buf = state.input_queue.top();
+     state.input_queue.pop();
++    const bool loop_repeat = buf.has_played;  // ff-bgm1x: 반복 버퍼가 다시 돌아옴
+ 
+     if (buf.adpcm_dirty) {
+         state.adpcm_state.yn1 = buf.adpcm_yn[0];
+@@ -462,13 +520,28 @@ bool Source::DequeueBuffer() {
          const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
          switch (buf.format) {
          case Format::PCM8:
@@ -228,8 +1105,25 @@ index 4728526..fac8b8d 100755
              state.current_buffer =
                  Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
              break;
+@@ -506,6 +579,16 @@ bool Source::DequeueBuffer() {
+         state.current_buffer.begin(),
+         std::next(state.current_buffer.begin(), state.current_sample_number));
+ 
++    // ff-bgm1x: 느린 속도의 효과음 미러 - 받은 버퍼 전체를 넘겨 실제 시간으로 낸다 (BGM 음성은 BGM 쪽이 맡는다)
++    if (mirror_mode == 2) {
++        if (bgm_replaced) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        } else if (!loop_repeat) {
++            BgmReplacer::Instance().MirrorAheadBuffer(source_id, state.current_buffer, buf.is_looping);
++        }
++    }
++
+     LOG_TRACE(Audio_DSP,
+               "source_id={} buffer_id={} from_queue={} current_buffer.size()={}, "
+               "buf.has_played={}, buf.play_position={}",
 diff --git a/src/audio_core/hle/source.h b/src/audio_core/hle/source.h
-index 1223f68..5c857b6 100755
+index 1223f68..2916744 100755
 --- a/src/audio_core/hle/source.h
 +++ b/src/audio_core/hle/source.h
 @@ -69,6 +69,9 @@ public:
@@ -238,7 +1132,7 @@ index 1223f68..5c857b6 100755
      const std::size_t source_id;
 +    bool bgm_replaced = false;  // ff-bgm1x: 이 음성을 1배속 대체 재생 중
 +    bool mirror_new = false;    // ff-bgm1x: 새 소리 시작 (켜짐, 리셋, 새 임베디드 버퍼)
-+    bool mirrored = false;      // ff-bgm1x: 이 소리를 효과음 미러로 1배속 재생 중 (원본 믹스에서 뺀다)
++    int mirror_mode = 0;        // ff-bgm1x: 효과음 미러 0 = 원본, 1 = 녹음(배속), 2 = 앞당겨 해독(느린 속도)
      Memory::MemorySystem* memory_system{};
      StereoFrame16 current_frame;
      StereoFrame16 backup_frame; // TODO(PabloMK7): Check if we actually need this

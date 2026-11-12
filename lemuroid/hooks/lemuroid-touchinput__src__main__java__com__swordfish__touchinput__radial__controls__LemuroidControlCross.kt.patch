@@ -1,0 +1,22 @@
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
+index dedf9f7c..838497db 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlCross.kt
+@@ -6,6 +6,8 @@ import androidx.compose.runtime.State
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.geometry.Offset
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import com.swordfish.touchinput.radial.ui.LemuroidCrossForeground
+ import gg.padkit.PadKitScope
+@@ -30,7 +32,7 @@ fun LemuroidControlCross(
+ ) {
+     val theme = LocalLemuroidPadTheme.current
+     ControlCross(
+-        modifier = modifier.padding(theme.padding),
++        modifier = modifier.customLayoutElement(CustomLayoutKeys.of(id)).padding(theme.padding),
+         id = id,
+         allowDiagonals = allowDiagonals,
+         background = background,

@@ -1,0 +1,13 @@
+diff --git a/app/src/main/cpp/MelonDS.h b/app/src/main/cpp/MelonDS.h
+index fd2d8cf0..3bbac1f8 100644
+--- a/app/src/main/cpp/MelonDS.h
++++ b/app/src/main/cpp/MelonDS.h
+@@ -61,6 +61,8 @@ namespace MelonDSAndroid {
+     extern void updateMotionData(float ax, float ay, float az, float rx, float ry, float rz);
+     extern void start();
+     extern u32 loop();
++    // ff-bgm1x: 연출 중이라 배속을 멈춰야 하는지 (에뮬레이션 스레드)
++    extern bool isBgmSpeedHold();
+     extern Frame* getPresentationFrame(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
+     extern void pause();
+     extern void resume();

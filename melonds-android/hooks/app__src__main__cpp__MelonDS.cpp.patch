@@ -1,0 +1,16 @@
+diff --git a/app/src/main/cpp/MelonDS.cpp b/app/src/main/cpp/MelonDS.cpp
+index 0a88d23b..67c8e19f 100644
+--- a/app/src/main/cpp/MelonDS.cpp
++++ b/app/src/main/cpp/MelonDS.cpp
+@@ -210,6 +210,11 @@ namespace MelonDSAndroid
+         return instance->runFrame();
+     }
+ 
++    bool isBgmSpeedHold()
++    {
++        return instance && instance->isBgmSpeedHold();
++    }
++
+     Frame* getPresentationFrame(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline)
+     {
+         if (!instance)

@@ -1,0 +1,40 @@
+diff --git a/src/android/app/src/main/jni/config.cpp b/src/android/app/src/main/jni/config.cpp
+index f5f80bf..2367299 100644
+--- a/src/android/app/src/main/jni/config.cpp
++++ b/src/android/app/src/main/jni/config.cpp
+@@ -2,6 +2,7 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <iomanip>
+ #include <memory>
+ #include <ranges>
+@@ -9,6 +10,7 @@
+ #include <unordered_map>
+ #include <INIReader.h>
+ #include <boost/hana/string.hpp>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/file_util.h"
+ #include "common/logging/backend.h"
+ #include "common/logging/log.h"
+@@ -251,6 +253,19 @@ void Config::ReadValues() {
+     ReadSetting("Audio", Settings::values.input_type);
+     ReadSetting("Audio", Settings::values.input_device);
+ 
++    // ff-bgm1x: 설정 화면에서 바꾸면 reloadSettings 로 다시 읽혀 바로 적용된다
++    {
++        auto& bgm = AudioCore::HLE::BgmReplacer::Instance();
++        bgm.SetEnabled(android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_bgm_1x, true));
++        bgm.SetFastForwardCutscenes(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_ff_cutscenes, false));
++        bgm.SetVoices1x(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_voices_1x, true));
++        const long sfx_volume =
++            android_config->GetInteger("Audio", Settings::Keys::ff_bgm1x_sfx_volume, 100);
++        bgm.SetSfxVolume(std::clamp(sfx_volume, 0L, 100L) / 100.0f);
++    }
++
+     // Data Storage
+     ReadSetting("Data Storage", Settings::values.use_virtual_sd);
+ 

@@ -122,6 +122,11 @@ public:
     // 연출 곡(반복 없는 긴 곡, 대체하지 않음)을 게임이 재생 중인지
     bool cutsceneActive() const { return cutscene_; }
 
+    // 대체 중인 플레이어(1배속으로 대신 내는 음악·효과음)가 쓰는 PSG(CGB) 채널. 비트 i = 채널 i+1.
+    // 트랙 볼륨을 0 으로 바꿔도 이미 시작된 PSG 소리는 몇 프레임 더 울리므로, 이 채널들은 에뮬레이터 출력에서 끈다.
+    // onFrame(mute=true) 끝에 갱신된다 (에뮬레이션 스레드)
+    uint8_t replacedPsgMask() const { return psgMask_; }
+
     // "효과음 1배속": 트랙이 적은 플레이어(효과음용)가 내는 반복 없는 소리도 1배속으로 끝까지 낸다
     // (다음 소리부터 적용). 곡 머리가 롬에 없는 소리(포켓몬 울음소리 등)는 대상이 아니다
     void setSfx1x(bool on) { sfx1x_ = on; }
@@ -154,6 +159,7 @@ private:
     bool jingleLagging(const Player& p) const;
     bool anyJingleLagging(const Player* except) const;
     void cutLaggingJingles(const Player* except);
+    uint8_t computePsgMask(GbaBus& bus, bool seStarted) const;
     const Rom* rom_;
     EngineConfig cfg_;
     std::mutex mtx_;
@@ -164,4 +170,6 @@ private:
     std::unordered_map<uint32_t, bool> musicCache_;
     std::unordered_map<uint32_t, int> kindCache_;
     std::atomic<bool> cutscene_{false};
+    uint8_t psgMask_ = 0;
+    bool seStarted_ = false;  // 이번 프레임에 대체할 효과음을 게임이 새로 냈다 (아직 채널이 정해지지 않음)
 };

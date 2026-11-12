@@ -1,0 +1,95 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.cpp b/libretrodroid/src/main/cpp/libretrodroid.cpp
+index 60640c4..f2161be 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroid.cpp
+@@ -34,6 +34,7 @@
+ #include "fpssync.h"
+ #include "input.h"
+ #include "rumble.h"
++#include "sensors.h"
+ #include "shadermanager.h"
+ #include "utils/javautils.h"
+ #include "environment.h"
+@@ -84,7 +85,7 @@ int16_t LibretroDroid::callback_set_input_state(
+ 
+ void LibretroDroid::updateAudioSampleRateMultiplier() {
+     if (audio) {
+-        audio->setPlaybackSpeed(frameSpeed);
++        audio->setPlaybackSpeed(effectiveFrameSpeed());
+     }
+ }
+ 
+@@ -217,6 +218,7 @@ void LibretroDroid::onSurfaceCreated() {
+     );
+ 
+     video = std::unique_ptr<Video>(newVideo);
++    video->updateStretch(stretch);
+ 
+     if (Environment::getInstance().getHwContextReset() != nullptr) {
+         Environment::getInstance().getHwContextReset()();
+@@ -413,8 +415,14 @@ void LibretroDroid::destroy() {
+         Environment::getInstance().getHwContextDestroy()();
+     }
+ 
++    // ff-bgm1x: 오디오 스레드가 닫힐 코어의 함수를 부르지 않게 먼저 끊는다
++    if (audio) {
++        audio->setPostMix(nullptr);
++    }
++
+     core->retro_unload_game();
+     core->retro_deinit();
++    Sensors::getInstance().deinit();
+ 
+     video = nullptr;
+     core = nullptr;
+@@ -456,7 +464,16 @@ void LibretroDroid::step() {
+         frames = std::min(requestedFrames, 2u);
+     }
+ 
+-    for (size_t i = 0; i < frames * frameSpeed; i++)
++    // ff-bgm1x: 연출 중이면 코어가 배속을 멈추라고 알려 준다
++    if (core->ff_bgm1x_speed_hold) {
++        bool hold = core->ff_bgm1x_speed_hold();
++        if (hold != bgmSpeedHold) {
++            bgmSpeedHold = hold;
++            updateAudioSampleRateMultiplier();
++        }
++    }
++
++    for (size_t i = 0; i < frames * effectiveFrameSpeed(); i++)
+         core->retro_run();
+ 
+     if (video && !video->rendersInVideoCallback()) {
+@@ -514,6 +531,10 @@ void LibretroDroid::setFrameSpeed(unsigned int speed) {
+ 
+ void LibretroDroid::setAudioEnabled(bool enabled) {
+     audioEnabled = enabled;
++    // ff-bgm1x: 소리를 끄면 1배속 소리도 섞지 않는다
++    if (audio && core) {
++        audio->setPostMix(enabled ? core->ff_bgm1x_mix : nullptr);
++    }
+ }
+ 
+ void LibretroDroid::setShaderConfig(ShaderManager::Config shaderConfig) {
+@@ -615,6 +636,8 @@ void LibretroDroid::afterGameLoad() {
+         preferLowLatencyAudio
+     );
+ 
++    audio->setPostMix(audioEnabled ? core->ff_bgm1x_mix : nullptr);
++    bgmSpeedHold = false;
+     updateAudioSampleRateMultiplier();
+ 
+     defaultAspectRatio = findDefaultAspectRatio(system_av_info);
+@@ -651,4 +674,12 @@ void LibretroDroid::setViewportAlignment(unsigned int viewportAlignment) {
+     }
+ }
+ 
++void LibretroDroid::setStretch(bool stretch) {
++    this->stretch = stretch;
++
++    if (video) {
++        this->video->updateStretch(stretch);
++    }
++}
++
+ } //namespace libretrodroid

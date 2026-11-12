@@ -1,0 +1,24 @@
+diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+index 2a85bf86..8215d8e0 100644
+--- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
++++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+@@ -657,12 +657,17 @@ void* emulate(void*)
+         double currentTick = getCurrentMillis();
+         double delay = currentTick - lastTick;
+ 
++        // ff-bgm1x: 연출 중(연출 중에도 배속 꺼짐)이면 배속 중이어도 1배속으로 돈다
++        const bool bgmHold = isFastForwardEnabled && MelonDSAndroid::isBgmSpeedHold();
++        const float frameTargetFps = bgmHold ? 60.0f : (float) targetFps;
++        const bool frameLimitFps = limitFps || bgmHold;
++
+         // All times are in ms
+-        double frameTimeStep = (double) nLines / ((float) targetFps * 263.0) * 1000.0;
++        double frameTimeStep = (double) nLines / (frameTargetFps * 263.0) * 1000.0;
+         if (frameTimeStep < 1)
+             frameTimeStep = 1;
+ 
+-        if (limitFps)
++        if (frameLimitFps)
+         {
+             frameLimitError += frameTimeStep - delay;
+             if (frameLimitError < -frameTimeStep)

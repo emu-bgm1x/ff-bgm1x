@@ -1,0 +1,168 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+index 63430da..2364efd 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+@@ -67,8 +67,11 @@ import org.citra.citra_emu.databinding.FragmentEmulationBinding
+ import org.citra.citra_emu.display.PortraitScreenLayout
+ import org.citra.citra_emu.display.ScreenAdjustmentUtil
+ import org.citra.citra_emu.display.ScreenLayout
++import org.citra.citra_emu.display.ScreenLayoutEditor
+ import org.citra.citra_emu.display.SecondaryDisplayLayout
+ import org.citra.citra_emu.features.hotkeys.Hotkey
++import org.citra.citra_emu.features.hotkeys.HotkeyUtility
++import org.citra.citra_emu.overlay.FfCustomButtons
+ import org.citra.citra_emu.features.settings.model.BooleanSetting
+ import org.citra.citra_emu.features.settings.model.IntSetting
+ import org.citra.citra_emu.features.settings.model.SettingsViewModel
+@@ -233,6 +236,28 @@ class EmulationFragment :
+             binding.doneControlConfig.visibility = View.GONE
+             binding.surfaceInputOverlay.setIsInEditMode(false)
+         }
++        // ff-bgm1x: 화면 메뉴 버튼은 한 번 누르면 메뉴(서랍)를 연다
++        binding.surfaceInputOverlay.onMenuButtonPressed = {
++            binding.drawerLayout.post { binding.drawerLayout.open() }
++        }
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        val customHotkeys = HotkeyUtility(screenAdjustmentUtil, requireContext())
++        binding.surfaceInputOverlay.onCustomFunction = { function ->
++            when (function) {
++                FfCustomButtons.Function.NONE -> {}
++                FfCustomButtons.Function.MENU -> binding.drawerLayout.post { binding.drawerLayout.open() }
++                FfCustomButtons.Function.SWAP_SCREEN -> customHotkeys.handleHotkey(Hotkey.SWAP_SCREEN.button)
++                FfCustomButtons.Function.CYCLE_LAYOUT -> customHotkeys.handleHotkey(Hotkey.CYCLE_LAYOUT.button)
++                FfCustomButtons.Function.PAUSE_OR_RESUME -> customHotkeys.handleHotkey(Hotkey.PAUSE_OR_RESUME.button)
++                FfCustomButtons.Function.QUICKSAVE -> customHotkeys.handleHotkey(Hotkey.QUICKSAVE.button)
++                FfCustomButtons.Function.QUICKLOAD -> customHotkeys.handleHotkey(Hotkey.QUICKLOAD.button)
++                FfCustomButtons.Function.TURBO -> customHotkeys.handleHotkey(Hotkey.TURBO_LIMIT.button)
++                FfCustomButtons.Function.CLOSE_GAME -> customHotkeys.handleHotkey(Hotkey.CLOSE_GAME.button)
++                FfCustomButtons.Function.BGM_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_BGM_1X, R.string.ff_func_bgm_1x)
++                FfCustomButtons.Function.VOICES_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_VOICES_1X, R.string.ff_func_voices_1x)
++                FfCustomButtons.Function.FF_CUTSCENES -> toggleFfOption(BooleanSetting.FF_BGM1X_FF_CUTSCENES, R.string.ff_func_ff_cutscenes)
++            }
++        }
+ 
+         // Show/hide the "Stats" overlay
+         updateShowPerformanceOverlay()
+@@ -263,7 +288,11 @@ class EmulationFragment :
+             }
+ 
+             override fun onDrawerClosed(drawerView: View) {
+-                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++                // ff-bgm1x: 배치 편집기가 열려 있으면 서랍을 잠가 둔다 (왼쪽 끝을 끄는 동작과 겹치지 않게)
++                binding.drawerLayout.setDrawerLockMode(
++                    if (closeLayoutEditor != null) DrawerLayout.LOCK_MODE_LOCKED_CLOSED
++                    else EmulationMenuSettings.drawerLockMode
++                )
+                 binding.surfaceInputOverlay.isClickable = true
+                 binding.surfaceInputOverlay.isFocusable = true
+                 binding.surfaceInputOverlay.isFocusableInTouchMode = true
+@@ -443,6 +472,12 @@ class EmulationFragment :
+                         return
+                     }
+ 
++                    // ff-bgm1x: 배치 편집기가 열려 있으면 뒤로 = 저장하지 않고 닫기
++                    closeLayoutEditor?.let {
++                        it()
++                        return
++                    }
++
+                     if (binding.drawerLayout.isOpen) {
+                         binding.drawerLayout.close()
+                     } else {
+@@ -1024,6 +1059,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_screen_layout_edit_custom -> {
++                    showScreenLayoutEditor(false)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1083,6 +1123,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_portrait_layout_edit_custom -> {
++                    showScreenLayoutEditor(true)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1254,9 +1299,62 @@ class EmulationFragment :
+         }
+     }
+ 
++    // ff-bgm1x: 위·아래 화면 사용자 배치를 게임 화면 위에서 끌어서 정하는 편집기
++    // ff-bgm1x: 1배속 옵션을 켜고 끄고, 설정 파일에 저장해 바로 적용한다
++    private fun toggleFfOption(setting: BooleanSetting, nameRes: Int) {
++        setting.boolean = !setting.boolean
++        settings.saveSetting(setting, SettingsFile.FILE_NAME_CONFIG)
++        NativeLibrary.reloadSettings()
++        val state = getString(if (setting.boolean) R.string.ff_func_state_on else R.string.ff_func_state_off)
++        Toast.makeText(requireContext(), "${getString(nameRes)}: $state", Toast.LENGTH_SHORT).show()
++    }
++
++    // ff-bgm1x: 배치 편집기가 열려 있을 때 닫는 함수 (닫혀 있으면 null)
++    private var closeLayoutEditor: (() -> Unit)? = null
++
++    fun isLayoutEditorOpen(): Boolean = closeLayoutEditor != null
++
++    private fun showScreenLayoutEditor(portrait: Boolean) {
++        binding.drawerLayout.close()
++        val parent = binding.surfaceEmulation.parent as ViewGroup
++        val (top, bottom) = screenAdjustmentUtil.customLayout(portrait)
++        var editor: View? = null
++        // 편집기가 버튼을 사각형으로 그리므로 편집하는 동안 실제 버튼은 숨긴다
++        val overlay = binding.surfaceInputOverlay
++        val overlayVisibility = overlay.visibility
++        // 편집기는 버튼 층과 같은 자리(노치 여백 안쪽)에 둔다. 화면 좌표는 게임 화면 층 기준이라 그 차이를 넘긴다
++        val screenOffsetX = binding.surfaceEmulation.left - overlay.left
++        val screenOffsetY = binding.surfaceEmulation.top - overlay.top
++        editor = ScreenLayoutEditor(
++            requireContext(),
++            top,
++            bottom,
++            overlay,
++            screenOffsetX,
++            screenOffsetY,
++            onSave = { t, b -> screenAdjustmentUtil.applyCustomLayout(portrait, t, b) },
++            onClose = {
++                editor?.let { parent.removeView(it) }
++                overlay.visibility = overlayVisibility
++                closeLayoutEditor = null
++                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++            }
++        )
++        overlay.visibility = View.INVISIBLE
++        closeLayoutEditor = { (editor as ScreenLayoutEditor).close() }
++        binding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
++        val overlayParams = overlay.layoutParams as ViewGroup.MarginLayoutParams
++        parent.addView(
++            editor,
++            ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
++                setMargins(overlayParams.leftMargin, overlayParams.topMargin, overlayParams.rightMargin, overlayParams.bottomMargin)
++            }
++        )
++    }
++
+     private fun showToggleControlsDialog() {
+         val editor = preferences.edit()
+-        val enabledButtons = BooleanArray(17)
++        val enabledButtons = BooleanArray(18)  // ff-bgm1x: 17 = 메뉴 버튼 (기본 켜짐)
+         enabledButtons.forEachIndexed { i: Int, _: Boolean ->
+             // Buttons that are disabled by default
+             var defaultValue = true
+@@ -1469,7 +1567,7 @@ class EmulationFragment :
+ 
+         val editor = preferences.edit()
+         // TODO: This code sucks balls. We need to do this differently. -OS
+-        for (i in 0 until 17) {
++        for (i in 0 until 18) {  // ff-bgm1x: 17 = 메뉴 버튼
+             var defaultValue = true
+             when (i) {
+                 6, 7, 12, 13, 14, 15, 16 -> defaultValue = false

@@ -1,0 +1,12 @@
+diff --git a/libretrodroid/src/main/cpp/video.h b/libretrodroid/src/main/cpp/video.h
+index 05bd6b6..4967ec3 100644
+--- a/libretrodroid/src/main/cpp/video.h
++++ b/libretrodroid/src/main/cpp/video.h
+@@ -71,6 +71,7 @@ public:
+     void updateScreenSize(unsigned screenWidth, unsigned screenHeight);
+     void updateViewportSize(Rect viewportRect);
+     void updateViewportAlignment(unsigned int viewportAlignment);
++    void updateStretch(bool stretch);
+     void updateRendererSize(unsigned width, unsigned height);
+     void updateRotation(float rotation);
+     void updateShaderType(ShaderManager::Config shaderConfig);

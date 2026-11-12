@@ -1,0 +1,160 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
+index e81c42c8..8159cb8e 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
+@@ -31,6 +31,7 @@ import androidx.compose.runtime.CompositionLocalProvider
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.derivedStateOf
++import androidx.compose.runtime.key
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.ui.Alignment
+@@ -56,7 +57,18 @@ import com.swordfish.lemuroid.lib.controller.ControllerConfig
+ import com.swordfish.touchinput.controller.R
+ import com.swordfish.touchinput.radial.LemuroidPadTheme
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayout
++import com.swordfish.touchinput.radial.custom.CustomButtonFunction
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.CustomLayoutState
++import com.swordfish.touchinput.radial.custom.LocalCustomLayout
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.sensors.TiltConfiguration
++import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
++import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
++import gg.padkit.controls.ControlButton
++import gg.padkit.ids.Id
++import androidx.compose.foundation.layout.size
+ import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+ import com.swordfish.touchinput.radial.ui.GlassSurface
+ import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
+@@ -109,6 +121,21 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                 HapticFeedbackMode.PRESS_RELEASE -> HapticFeedbackType.PRESS_RELEASE
+             }
+ 
++        // ff-bgm1x: 버튼·게임 화면 자유 배치 (저장된 배치가 없으면 레무로이드 원래 배치)
++        val customLayoutState = remember { CustomLayoutState(CustomLayout()) }
++        val loadedCustomLayout = viewModel.getCustomLayout().collectAsState(null)
++        val customLayoutEditShown = viewModel.isCustomLayoutEditShown().collectAsState(false)
++        customLayoutState.screenWidth = constraints.maxWidth.toFloat()
++        customLayoutState.screenHeight = constraints.maxHeight.toFloat()
++        LaunchedEffect(loadedCustomLayout.value, customLayoutEditShown.value) {
++            customLayoutState.editing = customLayoutEditShown.value
++            if (!customLayoutEditShown.value) {
++                customLayoutState.selectOnly(null)
++                loadedCustomLayout.value?.let { customLayoutState.layout = it.layout }
++            }
++        }
++
++        CompositionLocalProvider(LocalCustomLayout provides customLayoutState) {
+         PadKit(
+             modifier = Modifier.fillMaxSize(),
+             onInputEvents = { viewModel.handleVirtualInputEvent(it) },
+@@ -148,6 +175,14 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                 gameView.viewport = viewport
+             }
+ 
++            // ff-bgm1x: 비율 유지를 끄면 게임 화면을 영역에 늘인다. 편집기가 쓸 게임 화면 비율도 읽어 둔다
++            val keepAspect = customLayoutState.layout.keepAspect
++            LaunchedEffect(keepAspect, customLayoutEditShown.value) {
++                val gameView = viewModel.retroGameView.retroGameViewFlow()
++                gameView.stretch = !keepAspect
++                customLayoutState.contentAspect = gameView.getContentAspectRatio()
++            }
++
+             ConstraintLayout(
+                 modifier = Modifier.fillMaxSize(),
+                 constraintSet =
+@@ -161,6 +196,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                         Modifier
+                             .layoutId(GameScreenLayout.CONSTRAINTS_GAME_VIEW)
+                             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top))
++                            .customLayoutElement(CustomLayoutKeys.GAME_VIEW)
+                             .onGloballyPositioned { viewportPosition.value = it.boundsInRoot() },
+                 )
+ 
+@@ -204,6 +240,66 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
+                     }
+                 }
+             }
++
++            // ff-bgm1x: 화면 빨리 감기 버튼 (편집 화면에서 켜야 보인다, 기본 위치는 오른쪽 위)
++            if (customLayoutState.layout.showFastForwardButton && touchControlsVisibleState.value) {
++                CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
++                    Box(
++                        modifier =
++                            Modifier
++                                .fillMaxSize()
++                                .windowInsetsPadding(WindowInsets.displayCutout)
++                                .padding(16.dp),
++                        contentAlignment = Alignment.TopEnd,
++                    ) {
++                        ControlButton(
++                            modifier =
++                                Modifier
++                                    .size(56.dp)
++                                    .customLayoutElement(CustomLayoutKeys.FAST_FORWARD),
++                            id = Id.Key(BaseGameScreenViewModel.FAST_FORWARD_BUTTON_KEY),
++                            foreground = { LemuroidButtonForeground(pressed = it, label = ">>") },
++                            background = { LemuroidControlBackground() },
++                        )
++                    }
++                }
++            }
++
++            // ff-bgm1x: 사용자가 만든 기능 버튼 (처음 자리는 화면 가운데)
++            if (customLayoutState.layout.customButtons.isNotEmpty() && touchControlsVisibleState.value) {
++                CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
++                    Box(
++                        modifier = Modifier.fillMaxSize(),
++                        contentAlignment = Alignment.Center,
++                    ) {
++                        customLayoutState.layout.customButtons.forEach { button ->
++                            key(button.uid) {
++                                val label = customFunctionName(CustomButtonFunction.of(button.function))
++                                ControlButton(
++                                    modifier =
++                                        Modifier
++                                            .size(56.dp)
++                                            .customLayoutElement(CustomLayoutKeys.custom(button.uid)),
++                                    id = Id.Key(CustomButtonFunction.keyCode(button)),
++                                    foreground = { LemuroidButtonForeground(pressed = it, label = label) },
++                                    background = { LemuroidControlBackground() },
++                                )
++                            }
++                        }
++                    }
++                }
++            }
++        }
++
++        if (customLayoutEditShown.value) {
++            CustomLayoutEditor(
++                state = customLayoutState,
++                initialForGame = loadedCustomLayout.value?.isGameSpecific ?: false,
++                onSave = { layout, forGame -> viewModel.saveCustomLayout(layout, forGame) },
++                onClear = { forGame -> viewModel.clearCustomLayout(forGame) },
++                onClose = { viewModel.showCustomLayoutEdit(false) },
++            )
++        }
+         }
+ 
+         val isLoading =
+@@ -325,6 +421,16 @@ private fun MenuEditTouchControls(
+                     modifier = Modifier.fillMaxWidth(),
+                     horizontalArrangement = Arrangement.Center,
+                 ) {
++                    // ff-bgm1x: 버튼 하나씩 자유 배치
++                    TextButton(
++                        onClick = {
++                            viewModel.showEditControls(false)
++                            viewModel.showCustomLayoutEdit(true)
++                        },
++                        modifier = Modifier.padding(8.dp),
++                    ) {
++                        Text(text = stringResource(com.swordfish.lemuroid.R.string.custom_layout_open))
++                    }
+                     TextButton(
+                         onClick = { viewModel.resetTouchControls() },
+                         modifier = Modifier.padding(8.dp),

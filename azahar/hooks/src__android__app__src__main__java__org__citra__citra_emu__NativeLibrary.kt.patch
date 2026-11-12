@@ -1,0 +1,13 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+index b72ed24..0d30422 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+@@ -1087,6 +1087,8 @@ object NativeLibrary {
+         const val BUTTON_GPIO14 = 782
+         const val BUTTON_SWAP = 800
+         const val BUTTON_TURBO = 801
++        // ff-bgm1x: 화면 메뉴 버튼 (한 번 누르면 에뮬레이션 메뉴를 연다, 코어에는 의미 없음)
++        const val BUTTON_MENU = 802
+     }
+ 
+     /**

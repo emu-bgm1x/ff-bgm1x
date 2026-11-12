@@ -1,0 +1,46 @@
+diff --git a/app/src/main/res/xml/pref_audio.xml b/app/src/main/res/xml/pref_audio.xml
+index d01a0d7c..679526e5 100644
+--- a/app/src/main/res/xml/pref_audio.xml
++++ b/app/src/main/res/xml/pref_audio.xml
+@@ -39,6 +39,41 @@
+             app:min="0"
+             android:max="256" />
+ 
++    <!-- ff-bgm1x -->
++    <SwitchPreference
++            android:key="ff_bgm1x_bgm_1x"
++            android:title="@string/ff_bgm1x_bgm_1x"
++            android:summary="@string/ff_bgm1x_bgm_1x_summary"
++            android:dependency="sound_enabled"
++            app:iconSpaceReserved="false"
++            android:defaultValue="true" />
++
++    <SwitchPreference
++            android:key="ff_bgm1x_ff_cutscenes"
++            android:title="@string/ff_bgm1x_ff_cutscenes"
++            android:summary="@string/ff_bgm1x_ff_cutscenes_summary"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            android:defaultValue="false" />
++
++    <SwitchPreference
++            android:key="ff_bgm1x_sfx_1x"
++            android:title="@string/ff_bgm1x_sfx_1x"
++            android:summary="@string/ff_bgm1x_sfx_1x_summary"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            android:defaultValue="true" />
++
++    <SeekBarPreference
++            android:key="ff_bgm1x_sfx_volume"
++            android:title="@string/ff_bgm1x_sfx_volume"
++            android:dependency="ff_bgm1x_bgm_1x"
++            app:iconSpaceReserved="false"
++            app:updatesContinuously="true"
++            android:defaultValue="256"
++            app:min="0"
++            android:max="256" />
++
+     <ListPreference
+             android:key="audio_latency"
+             android:title="@string/audio_latency"

@@ -9,7 +9,7 @@
 | 새 파일 (`module/`) | 하는 일 |
 |---|---|
 | `bgm_replacer.cpp/.h` | 중심. 게임 RomFS 의 BGM 파일(.bcstm, .aac)을 색인하고, DSP 음성에 들어오는 버퍼를 보고 BGM 인지 알아낸 뒤, 그 음성은 원본 믹스에서 빼고 같은 곡을 직접 해독해 실제 시간 기준(1배속)으로 출력에 섞는다. 곡 분류(반복 곡, 팡파레, 연출 곡), 대사 겹침 소리, 연출 중 배속 멈춤 판단, 효과음 미러의 켜고 끄기·볼륨도 여기서 한다. 싱글턴 `BgmReplacer::Instance()`. |
-| `sfx_mirror.cpp/.h` | 효과음 음성 미러. 배속 중에 DSP 음성이 새 소리를 시작하면, 그 음성의 실제 출력(해독·음높이·필터 적용 후, 게임이 준 믹스별 볼륨 × 믹서 볼륨을 곱해 스테레오로 접은 것)을 게임 시간 그대로 쌓고, 출력 쪽에서 원래 샘플레이트로(=1배속) 다시 낸다. 게임이 계속 내는 소리가 2.5초 넘게 밀리면 따라잡는다. 사운드 라이브러리(시퀀스, 뱅크)는 해석하지 않는다. |
+| `sfx_mirror.cpp/.h` | 효과음 음성 미러. DSP 음성이 새 소리를 시작할 때의 속도로 방식을 정한다. **녹음(배속 중)**: 그 음성의 실제 출력(해독·음높이·필터 적용 후, 게임이 준 믹스별 볼륨 × 믹서 볼륨을 곱해 스테레오로 접은 것)을 게임 시간 그대로 쌓고, 출력 쪽에서 원래 샘플레이트로(=1배속) 다시 낸다. 게임이 계속 내는 소리가 2.5초 넘게 밀리면 따라잡는다. **앞당겨 해독(느린 속도)**: 음성이 버퍼를 받을 때 해독된 버퍼 전체를 받아 두고, 프레임마다 받는 볼륨·재생 배율로 실제 시간에 낸다. 반복 버퍼는 음성이 꺼질 때까지 되풀이. 사운드 라이브러리(시퀀스, 뱅크)는 해석하지 않는다. |
 
 효과음 쪽은 **게임 데이터를 해석하지 않고 DSP 음성의 출력만 다시 낸다** 는 것이 핵심이다. 새 버전에서도 이 원칙을 지킬 것
 (악보·뱅크를 읽어 다시 연주하는 방식은 v3 에서 시도했다가, 변형·볼륨·멈춤을 게임마다 맞히지 못해 버렸다).
@@ -30,18 +30,20 @@
 | `audio_core/hle/hle.cpp` | `DspHle::Impl::Initialize` | `Reset()` — 게임을 새로 켤 때 상태 초기화 |
 | 〃 | `GenerateCurrentFrame` 맨 앞 | `OnDspFrame()` — DSP 오디오 프레임(160 샘플)마다. **게임 시간**의 기준 |
 | `audio_core/hle/mixers.cpp` | `Mixers::ParseConfig` | `UpdateMixerVolumes(intermediate_mixer_volume)` — 대체 BGM·효과음 미러도 게임 믹서 볼륨을 따르게 |
-| `audio_core/hle/source.h` | `Source` 멤버 | `bool bgm_replaced`, `bool mirror_new`, `bool mirrored` |
+| `audio_core/hle/source.h` | `Source` 멤버 | `bool bgm_replaced`, `bool mirror_new`, `int mirror_mode` (0 원본, 1 녹음, 2 앞당겨 해독) |
+| `audio_core/hle/source.cpp` | `Source::Tick`, `ParseConfig` 직후·`GenerateFrame` **전** | `mirror_new` 면 `MirrorBegin(id)` 로 방식을 정한다 (앞당겨 해독은 첫 버퍼의 해독부터 받아야 하므로 해독 전에) |
 | `audio_core/hle/source.cpp` | `Source::ParseConfig` 의 enable 처리 | 꺼져 있던 음성이 켜지면 `mirror_new = true` (새 소리) |
 | 〃 | `ParseConfig` 의 `embedded_buffer_dirty` 처리 | `mirror_new = true` (새 임베디드 버퍼 = 음 하나의 시작) |
 | 〃 | `Source::DequeueBuffer` 의 ADPCM 분기 | `OnAdpcmBuffer(...)` 결과로 `bgm_replaced` 설정 (계수+데이터로 BGM 스트림 판별) |
+| 〃 | `Source::DequeueBuffer` 끝 (해독·시작 위치 처리 후) | 앞당겨 해독 중이면 `MirrorAheadBuffer(id, current_buffer, is_looping)`. 반복 버퍼가 다시 돌아온 것(`has_played`)은 넘기지 않는다. BGM 음성으로 밝혀지면 미러를 끝낸다 |
 | 〃 | 같은 함수 PCM16 분기 | `OnPcmBuffer(...)` (AAC 를 푼 버퍼 판별), 아니면 `OnSourceIdle` |
 | 〃 | PCM8 분기 | `bgm_replaced` 해제 + `OnSourceIdle` |
-| 〃 | `Source::MixInto` | 비활성 음성: `OnSourceIdle`, 미러 중이면 `MirrorEnd`. `bgm_replaced` 음성: 원본 믹스에 넣지 않고 `UpdateSourceGain(id, gain)` 만. 그 밖의 음성: 믹스 0 을 처리할 때 `mirror_new` 면 `MirrorBegin(id)` (배속 중이면 true), 미러 중이면 `MirrorFeed(id, current_frame, gain)` 하고 원본 믹스에 넣지 않는다 |
+| 〃 | `Source::MixInto` | 비활성 음성: `OnSourceIdle`, 미러 중이면 `MirrorEnd`. `bgm_replaced` 음성: 원본 믹스에 넣지 않고 `UpdateSourceGain(id, gain)` 만. 미러 중인 음성: 믹스 0 을 처리할 때 녹음이면 `MirrorFeed(id, current_frame, gain)`, 앞당겨 해독이면 `MirrorAheadUpdate(id, gain, rate_multiplier)` 하고 원본 믹스에 넣지 않는다 |
 | 〃 | `Source::Reset` | `OnSourceIdle`, 미러 중이면 `MirrorEnd`, `mirror_new = true` |
 | `audio_core/hle/aac_decoder.cpp` | `AACDecoder::Decode`, 실제 해독 직전 | `OnAacDecode(data, len, dst_ch0, dst_ch1)` — AAC 프레임이 어느 파일 몇 번째인지, 어디로 풀리는지 |
 | `core/file_sys/romfs_reader.cpp` | `DirectRomFSReader::ReadFile` 맨 앞 | `OnRomFsRead(*this, offset, length)` — 동영상(.moflex) 읽기 = 연출 감지 |
 | `core/hle/service/cam/y2r_u.cpp` | `Y2R_U::StartConversion` 맨 앞 | `OnVideoFrame()` — 동영상 화면 변환 = 연출 감지 |
-| `common/settings.h/.cpp` | `GetFrameLimit()` | 전역 `std::atomic<bool> cutscene_speed_hold`. 켜져 있으면 제한 없음(0)이나 100 초과 속도를 100 으로 — 연출 중 배속 멈춤. BgmReplacer 가 켜고 끈다. 효과음 미러는 `GetFrameLimit()` 가 0 이거나 100 초과일 때(=배속 중)만 켠다 |
+| `common/settings.h/.cpp` | `GetFrameLimit()` | 전역 `std::atomic<bool> cutscene_speed_hold`. 켜져 있으면 제한 없음(0)이나 100 초과 속도를 100 으로 — 연출 중 배속 멈춤. BgmReplacer 가 켜고 끈다. 효과음 미러는 `GetFrameLimit()` 가 0 이거나 100 초과면 녹음, 100 미만이면 앞당겨 해독, 정확히 100 이면 끈다 |
 | `citra_qt/bootmanager.h` | `EmuThread::SetRunning` | `SetEmulationRunning(running)` — 사용자 일시정지 때만 1배속 소리도 멈춤 |
 | `citra_qt/citra_qt.cpp` | `GMainWindow::ConnectMenuEvents` 맨 앞 | Emulation 메뉴에 체크 항목 3개 (BGM 1배속 유지 / 연출 중에도 배속 / 대사·효과음 1배속). `QSettings("ff-bgm1x","azahar")` 에 저장, 시작 때 읽어 `SetEnabled / SetFastForwardCutscenes / SetVoices1x / SetSfxVolume` |
 | 〃 | `InitializeHotkeys` | 단축키 3개가 위 메뉴 항목(objectName `ff_bgm1x_*`)을 토글 |
@@ -83,3 +85,22 @@
 - **반향(aux) 믹스**: 게임이 믹스 1·2 로 보내는 소리는 실제로는 게임의 반향 효과를 거쳐 돌아오지만, 미러는 그 볼륨만큼 원래 소리로 더한다.
 - 오래 켜 두면(18시간) 메모리 사용이 크게 늘어난 사례가 있다 (v3 이전, 원인은 밝히지 못했다).
 - 줄바꿈: 이 자료는 LF. Windows 에서 `core.autocrlf` 때문에 패치가 통째로 다르게 보이면 줄바꿈 차이부터 의심한다.
+
+## 6. 안드로이드판 (`src/android/`)
+
+같은 저장소의 안드로이드 앱에도 넣었습니다. 소리 부분(`src/audio_core/`)은 PC 판과 같고, 아래만 더해집니다.
+
+| 파일 | 역할 |
+|---|---|
+| `jni/config.cpp`, `default_ini.h`, `SettingKeys.kt`, `BooleanSetting.kt`, `IntSetting.kt`, `SettingsFragmentPresenter.kt`, `CMakeModules/GenerateSettingKeys.cmake` | 1배속 설정을 안드로이드 설정 화면(오디오)에 |
+| `jni/native.cpp`, `NativeLibrary.kt` | 배속 중 연출 곡 멈춤 상태 전달, 화면 메뉴 버튼 번호(`BUTTON_MENU` = 802) |
+| `overlay/InputOverlay.kt` | 화면 메뉴 버튼(한 번 누르면 메뉴), 기능 버튼(`FfCustomButtons`, 번호 900~999), 편집기용 버튼 정보 |
+| `fragments/EmulationFragment.kt`, `activities/EmulationActivity.kt` | 배치 편집기 열기·닫기, 편집 중 서랍 잠금·키보드 입력, 기능 버튼 실행(1배속 옵션 켜기/끄기 포함) |
+| `display/ScreenAdjustmentUtil.kt`, `menu_*_screen_layout.xml` | 사용자 화면 배치 읽기·쓰기, "화면·버튼 배치 직접 편집" 메뉴 |
+| `res/values/integers.xml`, `arrays.xml`, `strings.xml` | 메뉴 버튼 기본 자리, 이름, 문구 |
+
+새 파일(`module/src/android/`): `display/ScreenLayoutEditor.kt`(화면·버튼 통합 편집기: 끌기, px 숫자, 여러 개 선택, 그룹,
+서로 맞추기, 등간격, 버튼 추가·삭제), `overlay/FfCustomButtons.kt`(기능 버튼 목록 저장), 메뉴 버튼 그림.
+
+빌드: `src/android` 에서 `./gradlew assembleVanillaRelWithDebInfo` (JDK 17).
+확인: 화면 메뉴 버튼, 화면 배치 편집기(편집 패널이 상태 표시줄·노치 아래에 오고, 사각형이 실제 버튼 자리와 겹치는지), 기능 버튼.

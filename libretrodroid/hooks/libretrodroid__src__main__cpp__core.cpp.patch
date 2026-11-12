@@ -1,0 +1,18 @@
+diff --git a/libretrodroid/src/main/cpp/core.cpp b/libretrodroid/src/main/cpp/core.cpp
+index f72d78d..17661e8 100644
+--- a/libretrodroid/src/main/cpp/core.cpp
++++ b/libretrodroid/src/main/cpp/core.cpp
+@@ -64,6 +64,13 @@ void Core::open(const std::string& soCorePath) {
+     retro_set_audio_sample_batch = (void (*)(retro_audio_sample_batch_t)) get_symbol(libHandle, "retro_set_audio_sample_batch");
+     retro_set_input_poll = (void (*)(retro_input_poll_t)) get_symbol(libHandle, "retro_set_input_poll");
+     retro_set_input_state = (void (*)(retro_input_state_t)) get_symbol(libHandle, "retro_set_input_state");
++
++    // ff-bgm1x: 있을 때만 쓴다
++    ff_bgm1x_mix = (void (*)(int16_t*, int, int)) dlsym(libHandle, "ff_bgm1x_mix");
++    ff_bgm1x_speed_hold = (bool (*)()) dlsym(libHandle, "ff_bgm1x_speed_hold");
++    if (ff_bgm1x_mix) {
++        LOGI("Core provides ff_bgm1x_mix");
++    }
+ }
+ 
+ void Core::close() {

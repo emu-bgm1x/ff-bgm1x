@@ -1,0 +1,476 @@
+diff --git a/libretrodroid/src/main/cpp/CMakeLists.txt b/libretrodroid/src/main/cpp/CMakeLists.txt
+index 5a845df..e0f1222 100644
+--- a/libretrodroid/src/main/cpp/CMakeLists.txt
++++ b/libretrodroid/src/main/cpp/CMakeLists.txt
+@@ -64,6 +64,8 @@ add_library(libretrodroid SHARED
+         rumble.cpp
+         rumblestate.h
+         rumblestate.cpp
++        sensors.h
++        sensors.cpp
+         utils/javautils.h
+         utils/javautils.cpp
+         utils/utils.cpp
+diff --git a/libretrodroid/src/main/cpp/audio.cpp b/libretrodroid/src/main/cpp/audio.cpp
+index c6e721a..bd28ddb 100644
+--- a/libretrodroid/src/main/cpp/audio.cpp
++++ b/libretrodroid/src/main/cpp/audio.cpp
+@@ -105,6 +105,11 @@ void Audio::setPlaybackSpeed(const double newPlaybackSpeed) {
+     playbackSpeed = newPlaybackSpeed;
+ }
+ 
++void Audio::setPostMix(PostMix mix) {
++    std::lock_guard<std::mutex> lock(postMixMutex);
++    postMix = mix;
++}
++
+ oboe::DataCallbackResult Audio::onAudioReady(oboe::AudioStream *oboeStream, void *audioData, int32_t numFrames) {
+     double dynamicBufferFactor = computeDynamicBufferConversionFactor(0.001 * numFrames);
+     double finalConversionFactor = baseConversionFactor * dynamicBufferFactor * playbackSpeed;
+@@ -120,6 +125,13 @@ oboe::DataCallbackResult Audio::onAudioReady(oboe::AudioStream *oboeStream, void
+     auto outputArray = reinterpret_cast<int16_t *>(audioData);
+     resampler.resample(temporaryAudioBuffer.get(), currentFramesToSubmit, outputArray, numFrames);
+ 
++    {
++        std::lock_guard<std::mutex> lock(postMixMutex);
++        if (postMix) {
++            postMix(outputArray, numFrames, oboeStream->getSampleRate());
++        }
++    }
++
+     latencyTuner->tune();
+ 
+     return oboe::DataCallbackResult::Continue;
+diff --git a/libretrodroid/src/main/cpp/audio.h b/libretrodroid/src/main/cpp/audio.h
+index b0cb5ed..20bb48c 100644
+--- a/libretrodroid/src/main/cpp/audio.h
++++ b/libretrodroid/src/main/cpp/audio.h
+@@ -19,6 +19,7 @@
+ #define LIBRETRODROID_AUDIO_H
+ 
+ #include <array>
++#include <mutex>
+ #include <unistd.h>
+ #include <oboe/Oboe.h>
+ #include <oboe/FifoBuffer.h>
+@@ -56,6 +57,10 @@ public:
+     void write(const int16_t *data, size_t frames);
+     void setPlaybackSpeed(const double newPlaybackSpeed);
+ 
++    // ff-bgm1x: 출력 직전의 버퍼에 소리를 더하는 함수 (배속과 무관한 1배속 소리)
++    using PostMix = void (*)(int16_t* stereo, int frames, int sampleRate);
++    void setPostMix(PostMix mix);
++
+ private:
+     static int32_t roundToEven(int32_t x);
+     double computeDynamicBufferConversionFactor(double dt);
+@@ -88,6 +93,10 @@ private:
+ 
+     double playbackSpeed = 1.0;
+ 
++    // setPostMix(nullptr) 가 돌아오면 그 뒤로는 postMix 를 부르지 않는다 (코어를 닫기 전에 쓴다)
++    std::mutex postMixMutex;
++    PostMix postMix = nullptr;
++
+     std::unique_ptr<AudioLatencySettings> audioLatencySettings;
+ };
+ 
+diff --git a/libretrodroid/src/main/cpp/core.cpp b/libretrodroid/src/main/cpp/core.cpp
+index f72d78d..17661e8 100644
+--- a/libretrodroid/src/main/cpp/core.cpp
++++ b/libretrodroid/src/main/cpp/core.cpp
+@@ -64,6 +64,13 @@ void Core::open(const std::string& soCorePath) {
+     retro_set_audio_sample_batch = (void (*)(retro_audio_sample_batch_t)) get_symbol(libHandle, "retro_set_audio_sample_batch");
+     retro_set_input_poll = (void (*)(retro_input_poll_t)) get_symbol(libHandle, "retro_set_input_poll");
+     retro_set_input_state = (void (*)(retro_input_state_t)) get_symbol(libHandle, "retro_set_input_state");
++
++    // ff-bgm1x: 있을 때만 쓴다
++    ff_bgm1x_mix = (void (*)(int16_t*, int, int)) dlsym(libHandle, "ff_bgm1x_mix");
++    ff_bgm1x_speed_hold = (bool (*)()) dlsym(libHandle, "ff_bgm1x_speed_hold");
++    if (ff_bgm1x_mix) {
++        LOGI("Core provides ff_bgm1x_mix");
++    }
+ }
+ 
+ void Core::close() {
+diff --git a/libretrodroid/src/main/cpp/core.h b/libretrodroid/src/main/cpp/core.h
+index 2957566..6789bdc 100644
+--- a/libretrodroid/src/main/cpp/core.h
++++ b/libretrodroid/src/main/cpp/core.h
+@@ -50,6 +50,10 @@ public:
+     void (*retro_set_input_poll)(retro_input_poll_t);
+     void (*retro_set_input_state)(retro_input_state_t);
+ 
++    // ff-bgm1x: 수정한 mGBA 코어만 가진 함수 (없으면 nullptr)
++    void (*ff_bgm1x_mix)(int16_t* stereo, int frames, int sampleRate) = nullptr;
++    bool (*ff_bgm1x_speed_hold)(void) = nullptr;
++
+     Core(const std::string& soCorePath);
+     ~Core();
+ 
+diff --git a/libretrodroid/src/main/cpp/environment.cpp b/libretrodroid/src/main/cpp/environment.cpp
+index 941de81..c30629a 100644
+--- a/libretrodroid/src/main/cpp/environment.cpp
++++ b/libretrodroid/src/main/cpp/environment.cpp
+@@ -30,6 +30,7 @@
+ #include "environment.h"
+ #include "vfs/vfs.h"
+ #include "microphone/microphoneinterface.h"
++#include "sensors.h"
+ 
+ void Environment::initialize(
+     const std::string &requiredSystemDirectory,
+@@ -270,6 +271,13 @@ bool Environment::handle_callback_environment(unsigned cmd, void *data) {
+             ((struct retro_rumble_interface*) data)->set_rumble_state = &callback_set_rumble_state;
+             return true;
+ 
++        // ff-bgm1x: 휴대폰 센서 (가속도, 자이로, 조도)
++        case RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE:
++            LOGD("Called RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE");
++            ((struct retro_sensor_interface*) data)->set_sensor_state = &libretrodroid::Sensors::callbackSetSensorState;
++            ((struct retro_sensor_interface*) data)->get_sensor_input = &libretrodroid::Sensors::callbackGetSensorInput;
++            return true;
++
+         case RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
+             LOGD("Called RETRO_ENVIRONMENT_GET_LOG_INTERFACE");
+             ((struct retro_log_callback*) data)->log = &callback_retro_log;
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.cpp b/libretrodroid/src/main/cpp/libretrodroid.cpp
+index 60640c4..f2161be 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroid.cpp
+@@ -34,6 +34,7 @@
+ #include "fpssync.h"
+ #include "input.h"
+ #include "rumble.h"
++#include "sensors.h"
+ #include "shadermanager.h"
+ #include "utils/javautils.h"
+ #include "environment.h"
+@@ -84,7 +85,7 @@ int16_t LibretroDroid::callback_set_input_state(
+ 
+ void LibretroDroid::updateAudioSampleRateMultiplier() {
+     if (audio) {
+-        audio->setPlaybackSpeed(frameSpeed);
++        audio->setPlaybackSpeed(effectiveFrameSpeed());
+     }
+ }
+ 
+@@ -217,6 +218,7 @@ void LibretroDroid::onSurfaceCreated() {
+     );
+ 
+     video = std::unique_ptr<Video>(newVideo);
++    video->updateStretch(stretch);
+ 
+     if (Environment::getInstance().getHwContextReset() != nullptr) {
+         Environment::getInstance().getHwContextReset()();
+@@ -413,8 +415,14 @@ void LibretroDroid::destroy() {
+         Environment::getInstance().getHwContextDestroy()();
+     }
+ 
++    // ff-bgm1x: 오디오 스레드가 닫힐 코어의 함수를 부르지 않게 먼저 끊는다
++    if (audio) {
++        audio->setPostMix(nullptr);
++    }
++
+     core->retro_unload_game();
+     core->retro_deinit();
++    Sensors::getInstance().deinit();
+ 
+     video = nullptr;
+     core = nullptr;
+@@ -456,7 +464,16 @@ void LibretroDroid::step() {
+         frames = std::min(requestedFrames, 2u);
+     }
+ 
+-    for (size_t i = 0; i < frames * frameSpeed; i++)
++    // ff-bgm1x: 연출 중이면 코어가 배속을 멈추라고 알려 준다
++    if (core->ff_bgm1x_speed_hold) {
++        bool hold = core->ff_bgm1x_speed_hold();
++        if (hold != bgmSpeedHold) {
++            bgmSpeedHold = hold;
++            updateAudioSampleRateMultiplier();
++        }
++    }
++
++    for (size_t i = 0; i < frames * effectiveFrameSpeed(); i++)
+         core->retro_run();
+ 
+     if (video && !video->rendersInVideoCallback()) {
+@@ -514,6 +531,10 @@ void LibretroDroid::setFrameSpeed(unsigned int speed) {
+ 
+ void LibretroDroid::setAudioEnabled(bool enabled) {
+     audioEnabled = enabled;
++    // ff-bgm1x: 소리를 끄면 1배속 소리도 섞지 않는다
++    if (audio && core) {
++        audio->setPostMix(enabled ? core->ff_bgm1x_mix : nullptr);
++    }
+ }
+ 
+ void LibretroDroid::setShaderConfig(ShaderManager::Config shaderConfig) {
+@@ -615,6 +636,8 @@ void LibretroDroid::afterGameLoad() {
+         preferLowLatencyAudio
+     );
+ 
++    audio->setPostMix(audioEnabled ? core->ff_bgm1x_mix : nullptr);
++    bgmSpeedHold = false;
+     updateAudioSampleRateMultiplier();
+ 
+     defaultAspectRatio = findDefaultAspectRatio(system_av_info);
+@@ -651,4 +674,12 @@ void LibretroDroid::setViewportAlignment(unsigned int viewportAlignment) {
+     }
+ }
+ 
++void LibretroDroid::setStretch(bool stretch) {
++    this->stretch = stretch;
++
++    if (video) {
++        this->video->updateStretch(stretch);
++    }
++}
++
+ } //namespace libretrodroid
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.h b/libretrodroid/src/main/cpp/libretrodroid.h
+index b507aee..86a8a8b 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.h
++++ b/libretrodroid/src/main/cpp/libretrodroid.h
+@@ -133,6 +133,8 @@ public:
+     void setShaderConfig(ShaderManager::Config shaderConfig);
+ 
+     void setViewportAlignment(unsigned int viewportAlignment);
++    // ff-bgm1x: 게임 화면을 비율 무시하고 영역에 늘이기
++    void setStretch(bool stretch);
+ 
+     void resetGlobalVariables();
+ 
+@@ -144,6 +146,8 @@ public:
+ 
+ private:
+     void updateAudioSampleRateMultiplier();
++    // ff-bgm1x: 연출 중(bgmSpeedHold)에는 배속하지 않는다
++    unsigned int effectiveFrameSpeed() const { return bgmSpeedHold ? 1 : frameSpeed; }
+     float findDefaultAspectRatio(const retro_system_av_info &system_av_info);
+     void afterGameLoad();
+ 
+@@ -157,6 +161,7 @@ protected:
+ 
+ private:
+     unsigned int frameSpeed = 1;
++    bool bgmSpeedHold = false;
+     bool audioEnabled = true;
+     bool preferLowLatencyAudio = false;
+     bool rumbleEnabled = false;
+@@ -167,6 +172,7 @@ private:
+ 
+     Rect viewportRect = Rect(0.0F, 0.0F, 1.0F, 1.0F);
+     unsigned int viewportAlignment = V_ALIGN_CENTER;
++    bool stretch = false;
+     float screenRefreshRate = 60.0;
+     int openglESVersion = 2;
+     bool skipDuplicateFrames = false;
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.cpp b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+index 2ec15cf..c385915 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+@@ -35,6 +35,7 @@
+ #include "fpssync.h"
+ #include "input.h"
+ #include "rumble.h"
++#include "sensors.h"
+ #include "shadermanager.h"
+ #include "utils/javautils.h"
+ #include "errorcodes.h"
+@@ -572,6 +573,15 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setAudioEn
+     LibretroDroid::getInstance().setAudioEnabled(enabled);
+ }
+ 
++// ff-bgm1x: 센서 축을 화면 기준으로 바꾸기 위한 화면 회전 (Surface.ROTATION_0..3)
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setScreenRotation(
++    JNIEnv* env,
++    jclass obj,
++    jint rotation
++) {
++    Sensors::getInstance().setScreenRotation(rotation);
++}
++
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setShaderConfig(
+     JNIEnv* env,
+     jclass obj,
+@@ -599,6 +609,21 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setViewpor
+     LibretroDroid::getInstance().setViewportAlignment(viewportAlignment);
+ }
+ 
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setStretch(
++    JNIEnv* env,
++    jclass obj,
++    jboolean stretch
++) {
++    LibretroDroid::getInstance().setStretch(stretch);
++}
++
++JNIEXPORT jfloat JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getAspectRatio(
++    JNIEnv* env,
++    jclass obj
++) {
++    return LibretroDroid::getInstance().getAspectRatio();
++}
++
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_refreshAspectRatio(
+     JNIEnv* env,
+     jclass obj
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.h b/libretrodroid/src/main/cpp/libretrodroidjni.h
+index 02ab0fc..aa38383 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.h
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.h
+@@ -50,6 +50,7 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_changeDisk
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setRumbleEnabled(JNIEnv* env, jclass obj, jboolean enabled);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setFrameSpeed(JNIEnv* env, jclass obj, jint speed);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setAudioEnabled(JNIEnv* env, jclass obj, jboolean enabled);
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setScreenRotation(JNIEnv* env, jclass obj, jint rotation);
+ 
+ }
+ 
+diff --git a/libretrodroid/src/main/cpp/video.cpp b/libretrodroid/src/main/cpp/video.cpp
+index a75dbaf..5b2e5a7 100644
+--- a/libretrodroid/src/main/cpp/video.cpp
++++ b/libretrodroid/src/main/cpp/video.cpp
+@@ -244,6 +244,10 @@ void Video::updateViewportAlignment(unsigned int viewportAlignment) {
+     videoLayout.updateViewportAlignment(viewportAlignment);
+ }
+ 
++void Video::updateStretch(bool stretch) {
++    videoLayout.updateStretch(stretch);
++}
++
+ void Video::updateRendererSize(unsigned int width, unsigned int height) {
+     LOGD("Updating renderer size: %d x %d", width, height);
+     renderer->updateRenderedResolution(width, height);
+diff --git a/libretrodroid/src/main/cpp/video.h b/libretrodroid/src/main/cpp/video.h
+index 05bd6b6..4967ec3 100644
+--- a/libretrodroid/src/main/cpp/video.h
++++ b/libretrodroid/src/main/cpp/video.h
+@@ -71,6 +71,7 @@ public:
+     void updateScreenSize(unsigned screenWidth, unsigned screenHeight);
+     void updateViewportSize(Rect viewportRect);
+     void updateViewportAlignment(unsigned int viewportAlignment);
++    void updateStretch(bool stretch);
+     void updateRendererSize(unsigned width, unsigned height);
+     void updateRotation(float rotation);
+     void updateShaderType(ShaderManager::Config shaderConfig);
+diff --git a/libretrodroid/src/main/cpp/videolayout.cpp b/libretrodroid/src/main/cpp/videolayout.cpp
+index 8b89326..07f33b9 100644
+--- a/libretrodroid/src/main/cpp/videolayout.cpp
++++ b/libretrodroid/src/main/cpp/videolayout.cpp
+@@ -50,7 +50,7 @@ void VideoLayout::updateForegroundVertices() {
+     float screenW = screenWidth * viewportRect.getWidth();
+     float screenH = screenHeight * viewportRect.getHeight();
+     float screenAspect = screenW / screenH;
+-    float contentAspect = aspectRatio;
++    float contentAspect = stretch ? screenAspect : aspectRatio;
+ 
+     float scaleX = viewportRect.getWidth();
+     float scaleY = viewportRect.getHeight();
+@@ -197,6 +197,11 @@ void VideoLayout::updateViewportAlignment(unsigned int viewportAlignment) {
+     updateBuffers();
+ }
+ 
++void VideoLayout::updateStretch(bool stretch) {
++    this->stretch = stretch;
++    updateBuffers();
++}
++
+ void VideoLayout::updateRotation(float rotation) {
+     LOGD("Updated rotation to : %f", rotation);
+ 
+diff --git a/libretrodroid/src/main/cpp/videolayout.h b/libretrodroid/src/main/cpp/videolayout.h
+index e567388..0aa4975 100644
+--- a/libretrodroid/src/main/cpp/videolayout.h
++++ b/libretrodroid/src/main/cpp/videolayout.h
+@@ -40,6 +40,9 @@ public:
+ 
+     void updateViewportAlignment(unsigned int viewportAlignment);
+ 
++    // ff-bgm1x: 게임 비율을 무시하고 영역 전체에 늘인다
++    void updateStretch(bool stretch);
++
+     void updateRotation(float rotation);
+ 
+     std::array<float, 12>& getForegroundVertices() { return foregroundVertices; }
+@@ -160,6 +163,7 @@ private:
+     unsigned screenHeight = 0;
+ 
+     unsigned viewportAlignment = V_ALIGN_CENTER;
++    bool stretch = false;
+ };
+ 
+ } // namespace libretrodroid
+diff --git a/libretrodroid/src/main/java/com/swordfish/libretrodroid/GLRetroView.kt b/libretrodroid/src/main/java/com/swordfish/libretrodroid/GLRetroView.kt
+index 7eb8602..f3be343 100644
+--- a/libretrodroid/src/main/java/com/swordfish/libretrodroid/GLRetroView.kt
++++ b/libretrodroid/src/main/java/com/swordfish/libretrodroid/GLRetroView.kt
+@@ -71,6 +71,16 @@ class GLRetroView(
+         LibretroDroid.setViewportAlignment(value.value)
+     }
+ 
++    // ff-bgm1x: true 면 게임 비율을 무시하고 viewport 전체에 늘인다
++    var stretch: Boolean by Delegates.observable(false) { _, _, value ->
++        runOnEmulationThread(true) {
++            LibretroDroid.setStretch(value)
++        }
++    }
++
++    // ff-bgm1x: 게임 화면 비율 (가로/세로). 게임을 불러오기 전에는 기본값
++    fun getContentAspectRatio(): Float = LibretroDroid.getAspectRatio()
++
+     private val openGLESVersion: Int
+ 
+     private var isGameLoaded = false
+@@ -174,6 +184,15 @@ class GLRetroView(
+         }
+     }
+ 
++    // ff-bgm1x: 치트를 모두 지우고 주어진 코드만 다시 건다.
++    // 한 작업 안에서 하므로 지우고 다시 거는 사이에 게임 프레임이 돌지 않는다.
++    fun applyCheats(codes: List<String>, useEmulationThread: Boolean = true) {
++        runOnEmulationThread(useEmulationThread) {
++            LibretroDroid.resetCheat()
++            codes.forEachIndexed { index, code -> LibretroDroid.setCheat(index, true, code) }
++        }
++    }
++
+     fun unserializeState(data: ByteArray, useEmulationThread: Boolean = true): Boolean {
+         return runOnEmulationThread(useEmulationThread) {
+             LibretroDroid.unserializeState(data)
+@@ -328,6 +347,10 @@ class GLRetroView(
+         override fun onSurfaceChanged(gl: GL10, width: Int, height: Int) = catchExceptions {
+             Thread.currentThread().priority = Thread.MAX_PRIORITY
+             LibretroDroid.onSurfaceChanged(width, height)
++            // ff-bgm1x: 화면이 회전하면 표면 크기가 바뀌므로 여기서 회전을 알려 준다 (센서 축 변환)
++            @Suppress("DEPRECATION")
++            val rotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
++            LibretroDroid.setScreenRotation(rotation)
+         }
+ 
+ 
+diff --git a/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java b/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
+index 50eafa1..530e97b 100644
+--- a/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
++++ b/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
+@@ -112,6 +112,8 @@ public class LibretroDroid {
+     public static native void setRumbleEnabled(boolean enabled);
+     public static native void setFrameSpeed(int speed);
+     public static native void setAudioEnabled(boolean enabled);
++    // ff-bgm1x: 센서 축 변환용 화면 회전 (Surface.ROTATION_0..3)
++    public static native void setScreenRotation(int rotation);
+     public static native void setShaderConfig(GLRetroShader shader);
+     public static native void setViewport(float x, float y, float width, float height);
+     public static native void setViewportAlignment(int viewportAlignment);
+@@ -138,6 +140,9 @@ public class LibretroDroid {
+     public static native void onKeyEvent(int port, int action, int keyCode);
+ 
+     public static native void refreshAspectRatio();
++    // ff-bgm1x: 게임 화면 늘이기, 게임 화면 비율 (가로/세로)
++    public static native void setStretch(boolean stretch);
++    public static native float getAspectRatio();
+ 
+     public static native Controller[][] getControllers();
+     public static native void setControllerType(int port, int type);
