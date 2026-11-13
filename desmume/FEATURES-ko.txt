@@ -1,4 +1,12 @@
-DeSmuME 0.9.13 수정판 (ff-bgm1x) 버전 1 - 배속 중에도 BGM 1배속 유지
+DeSmuME 0.9.13 수정판 (ff-bgm1x) 버전 2 - 배속 중에도 BGM 1배속 유지
+
+[v2 에서 바뀐 점]
+  - 공식 DeSmuME 0.9.13 배포판과 같은 빌드 설정(PUBLIC_RELEASE)으로 다시 빌드했습니다. 기능은 v1 과 같습니다.
+    v1 은 이 설정이 빠져 실행할 때 디버그 콘솔 창이 같이 떴고, 게임 중 콘솔에 메시지가 계속 찍혀
+    배속 속도가 떨어질 수 있었습니다. 이제 공식판처럼 콘솔이 뜨지 않습니다.
+    (v1 에서 콘솔을 끄려면 desmume.ini 의 [Console] 에 Show=0 을 넣으면 됩니다)
+  - 버전 표시가 공식판과 같아졌습니다 ("0.9.13 git#08b6fad x64-JIT" -> "0.9.13 x64").
+    JIT(Config -> Emulation Settings -> Dynamic Recompiler)는 그대로 쓸 수 있습니다.
 
 [실행]
   DeSmuME_0.9.13_x64.exe 를 실행하고 File -> Open ROM 으로 ROM 을 엽니다. (ROM 은 포함되어 있지 않습니다)
