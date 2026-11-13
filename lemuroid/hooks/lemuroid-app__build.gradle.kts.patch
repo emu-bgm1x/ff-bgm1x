@@ -1,5 +1,5 @@
 diff --git a/lemuroid-app/build.gradle.kts b/lemuroid-app/build.gradle.kts
-index 741cef46..ad6d8646 100644
+index 741cef46..973f84d7 100644
 --- a/lemuroid-app/build.gradle.kts
 +++ b/lemuroid-app/build.gradle.kts
 @@ -13,6 +13,11 @@ android {
@@ -13,4 +13,15 @@ index 741cef46..ad6d8646 100644
 +        }
      }
      flavorDimensions += listOf("opensource", "cores")
+ 
+@@ -101,7 +106,9 @@ android {
+         getByName("debug") {
+             applicationIdSuffix = ".debug"
+             versionNameSuffix = "-DEBUG"
+-            resValue("string", "lemuroid_name", "LemuroiDebug")
++            // ff-bgm1x: 64비트·32비트 APK 를 앱 이름으로 구분한다
++            val ffbgmBits = if (((project.findProperty("ffbgmAbi") as String?) ?: "arm64-v8a") == "armeabi-v7a") "32bit" else "64bit"
++            resValue("string", "lemuroid_name", "LemuroiDebug $ffbgmBits")
+         }
+     }
  
