@@ -15,16 +15,17 @@ index a478a8b2..c2e57f53 100644
  
      object plugins {
 diff --git a/lemuroid-app/build.gradle.kts b/lemuroid-app/build.gradle.kts
-index 741cef46..23961ecf 100644
+index 741cef46..ad6d8646 100644
 --- a/lemuroid-app/build.gradle.kts
 +++ b/lemuroid-app/build.gradle.kts
-@@ -13,6 +13,10 @@ android {
+@@ -13,6 +13,11 @@ android {
          versionCode = 252
          versionName = "1.17.0" // Always remember to update Cores Tag!
          applicationId = "com.swordfish.lemuroid"
-+        // ff-bgm1x: 실제 코어 파일을 묶으므로 크기를 줄이려고 arm64-v8a 만 넣는다
++        // ff-bgm1x: 실제 코어 파일을 묶으므로 크기를 줄이려고 ABI 하나만 넣는다.
++        // 기본 arm64-v8a, 32비트 기기용은 -PffbgmAbi=armeabi-v7a 로 따로 빌드한다
 +        ndk {
-+            abiFilters += listOf("arm64-v8a")
++            abiFilters += listOf((project.findProperty("ffbgmAbi") as String?) ?: "arm64-v8a")
 +        }
      }
      flavorDimensions += listOf("opensource", "cores")

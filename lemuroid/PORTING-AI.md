@@ -49,7 +49,7 @@ GBA·GB/GBC 를 안드로이드에서 돌리는 판입니다. 네 저장소가 �
 |---|---|
 | `buildSrc/.../deps.kt` | LibretroDroid 를 원격 대신 로컬(mavenLocal, `com.swordfish:libretrodroid:unspecified`)에서 받는다 |
 | `GameSystem.kt` | GBA 코어 옵션에 ff-bgm1x·색 보정·잔상 추가 (원래 있던 `mgba_frameskip` 항목은 값이 코어와 맞지 않아 뺐다). GB·GBC(Gambatte) 에 ff-bgm1x 옵션 2개 |
-| `lemuroid-app/build.gradle.kts` | `abiFilters` 를 `arm64-v8a` 하나로 (실제 코어 파일을 모두 묶으면 APK 가 너무 커서) |
+| `lemuroid-app/build.gradle.kts` | `abiFilters` 를 ABI 하나로 (실제 코어 파일을 모두 묶으면 APK 가 너무 커서). 기본 `arm64-v8a`, 32비트 기기용은 `-PffbgmAbi=armeabi-v7a` 로 따로 빌드 (이때 mGBA·Gambatte 코어도 armeabi-v7a 로 빌드해 넣는다) |
 | `BaseGameScreenViewModel.kt` | 배속 배수, 화면 버튼 입력 가로채기(빨리 감기·기능 버튼), 1배속 옵션 켜기/끄기, 배치 저장·불러오기 |
 | `BaseGameActivity.kt`, `GameMenu*` | 게임 메뉴: 배속 배수·화면 방향(이 게임), 치트 화면, 배치 편집기 열기 |
 | `GameViewModelTouchControls.kt` | 메뉴 버튼 한 번 누르면 바로 메뉴 |
