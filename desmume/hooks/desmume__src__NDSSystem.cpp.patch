@@ -1,13 +1,13 @@
 diff --git a/desmume/src/NDSSystem.cpp b/desmume/src/NDSSystem.cpp
-index c5c7b42..23d483c 100755
+index bdfc970..6aa783a 100644
 --- a/desmume/src/NDSSystem.cpp
 +++ b/desmume/src/NDSSystem.cpp
 @@ -1,3 +1,4 @@
 +#include "ffbgm/ffbgm.h"
  /*
  	Copyright (C) 2006 yopyop
- 	Copyright (C) 2008-2025 DeSmuME team
-@@ -832,6 +833,7 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
+ 	Copyright (C) 2008-2021 DeSmuME team
+@@ -804,6 +805,7 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
  	}
  
  	//UnloadMovieEmulationSettings(); called in NDS_Reset()
@@ -15,7 +15,7 @@ index c5c7b42..23d483c 100755
  	NDS_Reset();
  
  	return ret;
-@@ -2691,6 +2693,7 @@ void NDS_Reset()
+@@ -2640,6 +2642,7 @@ void NDS_Reset()
  	if(lastRom.filename.size()==0)
  		return;
  

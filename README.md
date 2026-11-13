@@ -18,7 +18,7 @@
 |---|---|---|---|
 | `mgba/` | mGBA | 0.10.5 | GBA, GB/GBC |
 | `melonds/` | melonDS | 1.1 | NDS |
-| `desmume/` | DeSmuME | Git `3c4b95a` (0.9.14 개발판) | NDS (Windows) |
+| `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, 안드로이드) |
 | `lemuroid/`, `libretrodroid/` | Lemuroid, LibretroDroid | `3625bc12`, `8835c30` | 안드로이드 GBA (코어는 `mgba/` 의 libretro) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | 안드로이드 NDS |
@@ -88,7 +88,7 @@ release** of each emulator. Prebuilt Windows binaries of the last version are in
 |---|---|---|---|
 | `mgba/` | mGBA | 0.10.5 | GBA, GB/GBC |
 | `melonds/` | melonDS | 1.1 | NDS |
-| `desmume/` | DeSmuME | Git `3c4b95a` (0.9.14 dev) | NDS (Windows) |
+| `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, Android) |
 | `lemuroid/`, `libretrodroid/` | Lemuroid, LibretroDroid | `3625bc12`, `8835c30` | Android GBA (core: libretro part of `mgba/`) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | Android NDS |

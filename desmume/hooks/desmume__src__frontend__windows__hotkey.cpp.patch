@@ -1,16 +1,16 @@
 diff --git a/desmume/src/frontend/windows/hotkey.cpp b/desmume/src/frontend/windows/hotkey.cpp
-index 7e1fe34..0c4733a 100644
+index 4bdab10..f51dcba 100644
 --- a/desmume/src/frontend/windows/hotkey.cpp
 +++ b/desmume/src/frontend/windows/hotkey.cpp
 @@ -25,6 +25,7 @@
- #include <shellapi.h>
+ #include <Shellapi.h>
  
  #include "hotkey.h"
 +#include "../../ffbgm/ffbgm.h"
  
  #include "NDSSystem.h"
  #include "saves.h"
-@@ -543,6 +544,15 @@ void HK_FrameLimitToggle(int, bool justPressed) {
+@@ -528,6 +529,15 @@ void HK_FrameLimitToggle(int, bool justPressed) {
  	WritePrivateProfileInt("FrameLimit", "FrameLimit", FrameLimit, IniName);
  }
  
@@ -26,7 +26,7 @@ index 7e1fe34..0c4733a 100644
  void HK_FrameAdvanceKeyDown(int, bool justPressed) { FrameAdvance(true); }
  void HK_FrameAdvanceKeyUp(int) { FrameAdvance(false); }
  
-@@ -711,6 +721,18 @@ void InitCustomKeys (SCustomKeys *keys)
+@@ -696,6 +706,18 @@ void InitCustomKeys (SCustomKeys *keys)
  	keys->FrameLimitToggle.page = HOTKEY_PAGE_MAIN;
  	keys->FrameLimitToggle.key = NULL;
  

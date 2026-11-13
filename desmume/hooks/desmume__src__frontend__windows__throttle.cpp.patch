@@ -1,5 +1,5 @@
 diff --git a/desmume/src/frontend/windows/throttle.cpp b/desmume/src/frontend/windows/throttle.cpp
-index 7cad183..061999f 100644
+index ff7bf56..8cc37d8 100644
 --- a/desmume/src/frontend/windows/throttle.cpp
 +++ b/desmume/src/frontend/windows/throttle.cpp
 @@ -19,6 +19,7 @@
