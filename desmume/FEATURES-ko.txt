@@ -80,3 +80,4 @@ DeSmuME 0.9.13 수정판 (ff-bgm1x) 버전 2 - 배속 중에도 BGM 1배속 유�
   - source\ff-bgm1x-DeSmuME-source.tar.gz     : 이 프로그램의 소스 (수정한 DeSmuME 전체)
   - source\DeSmuME-0.9.13-changes.diff        : DeSmuME 0.9.13 (커밋 08b6fad) 대비 수정 내용
   빌드 방법은 공식 DeSmuME 의 Windows 빌드와 같습니다 (Visual Studio, DeSmuME.vcxproj, Release x64).
+  공식 배포판처럼 PUBLIC_RELEASE 를 정의합니다 (예: 명령 프롬프트에서 set CL=/DPUBLIC_RELEASE 뒤 전체 다시 빌드).

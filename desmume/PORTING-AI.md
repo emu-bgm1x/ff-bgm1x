@@ -47,6 +47,9 @@
 5. 빌드: 공식 CI(`.github/workflows/build_win.yml`)는 VS 2019 MSBuild + clang-cl 로 `DeSmuME.sln` 을 `Release`/`x64` 로 빌드한다.
    이 수정판은 VS 2022 Build Tools(MSVC, 도구 v143)로 `MSBuild desmume/src/frontend/windows/DeSmuME.vcxproj /p:Configuration=Release /p:Platform=x64`
    로 빌드해 확인했다. 프로젝트의 7z 풀기 단계가 `un7z_and_touch.bat` 를 부르므로 그 폴더(`frontend/windows`)를 PATH 에 넣고 실행한다.
+   **배포용은 `PUBLIC_RELEASE` 를 정의할 것** (`set CL=/DPUBLIC_RELEASE` 뒤 `/t:Rebuild`). 공식 0.9.13 배포판은 이 정의로 빌드됐다
+   (버전 문자열 `0.9.13 x64 SSE2`, 디버그 콘솔 기본 꺼짐). 빠뜨리면 버전에 `git#…-JIT` 가 붙고 콘솔 창이 같이 떠서, 게임 중 찍히는
+   메시지 때문에 배속이 느려질 수 있다. 프로젝트 파일에는 이 정의가 없다.
    결과: `frontend/windows/__bins/DeSmuME-VS2022-x64-Release.exe`.
 6. 배포할 때는 공식 배포본처럼 `desmume.ddb`(게임 DB, 저장 방식 자동 판별에 쓰임)를 실행 파일 옆에 둔다.
 7. 아래 확인 방법.
