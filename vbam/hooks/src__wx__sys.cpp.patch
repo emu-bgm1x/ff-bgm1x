@@ -1,0 +1,51 @@
+diff --git a/src/wx/sys.cpp b/src/wx/sys.cpp
+index cbeff0b..1272b3c 100644
+--- a/src/wx/sys.cpp
++++ b/src/wx/sys.cpp
+@@ -1,6 +1,9 @@
+ #include <algorithm>
++#include <vector>
+ 
+ #include <wx/ffile.h>
++
++#include "wx/ffbgm/vbam_bgm.h"
+ #include <wx/generic/prntdlgg.h>
+ #include <wx/print.h>
+ #include <wx/printdlg.h>
+@@ -392,6 +395,10 @@ uint32_t systemReadJoypad(int joy)
+     ret &= ~((ret & (KEYM_LEFT | KEYM_DOWN | KEYM_MOTION_DOWN | KEYM_MOTION_RIGHT)) >> 1);
+     ret &= REALKEY_MASK;
+ 
++    // ff-bgm1x: ignore the speed button while a cutscene song plays ("fast forward during cutscenes" off)
++    if (ffbgm::SpeedHold())
++        ret &= ~KEYM_SPEED;
++
+     if (game_recording) {
+         uint32_t rret = ret & ~(KEYM_SPEED | KEYM_CAPTURE);
+ 
+@@ -549,6 +556,8 @@ void system10Frames() {
+ 
+ void systemFrame()
+ {
++    ffbgm::OnFrame();
++
+     if (game_recording || game_playback)
+         game_frame++;
+ }
+@@ -1248,8 +1257,14 @@ void systemOnWriteDataToSoundBuffer(const uint16_t* finalWave, int length)
+ #ifndef NO_FFMPEG
+     GameArea* panel = wxGetApp().frame->GetPanel();
+ 
+-    if (panel)
+-        panel->AddFrame(finalWave, length);
++    if (panel && panel->IsRecording()) {
++        // ff-bgm1x: add the 1x-speed sound to the recording (the sound sent to the driver is unchanged)
++        static std::vector<uint16_t> mixed;
++        const int frames = length / 4;
++        mixed.assign(finalWave, finalWave + frames * 2);
++        ffbgm::MixRecording(reinterpret_cast<int16_t*>(mixed.data()), frames);
++        panel->AddFrame(mixed.data(), length);
++    }
+ 
+ #endif
+ }

@@ -1,0 +1,16 @@
+diff --git a/libgambatte/include/gambatte.h b/libgambatte/include/gambatte.h
+index 5f67921..56e957d 100644
+--- a/libgambatte/include/gambatte.h
++++ b/libgambatte/include/gambatte.h
+@@ -136,6 +136,11 @@ public:
+ #ifdef __LIBRETRO__
+    void *vram_ptr() const;
+    void *rambank0_ptr() const;
++   // ff-bgm1x: 부작용 없이 읽기 (C000~DFFF 와 FF00~FFFF 만). Bank1 은 D000~DFFF 를 WRAM 뱅크 1 에서 읽는다
++   unsigned char ffbgmRead(unsigned short addr) const;
++   unsigned char ffbgmReadBank1(unsigned short addr) const;
++   // ff-bgm1x: 비트 i = 채널 i+1 을 출력에서 끈다
++   void ffbgmSetMuteMask(unsigned mask);
+    void *rambank1_ptr() const;
+    void *rambank2_ptr() const;
+    void *bankedram_ptr() const;

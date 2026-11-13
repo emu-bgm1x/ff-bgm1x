@@ -10,6 +10,8 @@ license of the emulator it modifies; the full license texts are in [`LICENSES/`]
 |---|---|---|---|
 | `mgba/` | mGBA | Mozilla Public License 2.0 (`LICENSES/mGBA-MPL-2.0.txt`) | https://github.com/mgba-emu/mgba |
 | `melonds/` | melonDS | GNU General Public License v3.0 (`LICENSES/melonDS-GPL-3.0.txt`) | https://github.com/melonDS-emu/melonDS |
+| `vbam/` | VisualBoyAdvance-M | GNU General Public License v2.0 or later (`LICENSES/VBA-M-GPL-2.0.txt`) | https://github.com/visualboyadvance-m/visualboyadvance-m |
+| `gambatte/` | Gambatte (libretro) | GNU General Public License v2.0 (`LICENSES/Gambatte-GPL-2.0.txt`) | https://github.com/libretro/gambatte-libretro |
 | `desmume/` | DeSmuME | GNU General Public License v2.0 or later (`LICENSES/DeSmuME-GPL-2.0.txt`) | https://github.com/TASEmulators/desmume |
 | `azahar/` | Azahar | GNU General Public License v2.0 or later (`LICENSES/Azahar-GPL-2.0.txt`) | https://github.com/azahar-emu/azahar |
 | `lemuroid/` | Lemuroid | GNU General Public License v3.0 (`LICENSES/Lemuroid-GPL-3.0.txt`) | https://github.com/Swordfish90/Lemuroid |

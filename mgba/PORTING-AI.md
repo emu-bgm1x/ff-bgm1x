@@ -63,6 +63,14 @@ GB/GBC (포켓몬 금·은·크리스탈):
 - **libmgba DLL 빌드**: 동적 libmgba 로 빌드하면 pseudo relocation 크래시가 났다. 정적으로 링크할 것.
 - **정적 exe 빌드**(선택): 공식판처럼 exe 하나로 만들려면 Qt 정적판, `.a` 만 찾도록 하는 CMake 설정, `USE_LIBZIP=OFF`, libepoxy DllMain 대신 `EpoxyStaticInit.cpp` 의 TLS 콜백이 필요했다.
 - GB 엔진 프로필은 하나뿐이다. 다른 GB 게임은 프로필을 추가해야 한다 (`detectGbDriver`).
+- **잠금**: `BgmMultiMirror` 의 `onFrame` 등은 내부 잠금이 없고 `render` 만 잠근다. 에뮬레이션 스레드의 `BgmReplacer::onFrame` 도
+  오디오 쪽(`mixActive`)과 같은 잠금(`s_activeMutex`)을 잡아야 한다. 빠뜨리면 롬을 다시 열 때 힙이 깨질 수 있다.
+- **GB 숨겨진 코어 소리 꺼내기**: mGBA GB 오디오는 출력 버퍼에 일정량 이상 쌓이면 새 표본을 버린다(`gb/audio.c` `_sample`).
+  `GbShadowPlayer::mixInto` 는 쌓인 것을 먼저 꺼내고 모자랄 때만 한 프레임씩 돌린다.
+- **GB 게임 설정 바이트(스테레오)**: 숨겨진 코어는 게임 초기화를 거치지 않아 설정 바이트(wOptions)에 아무 값이나 있다.
+  한글판 금에서는 드라이버가 스테레오로 판단해 매 프레임 원본(모노)과 다른 NR51 을 쓰고, 그 직후 원본 값으로 덮어쓰는 사이
+  채널이 잠깐 꺼져 초당 약 60번 지직거렸다. 롬에서 `Music_StereoPanning` 패턴으로 주소를 찾아(`optionsAddr`) 매 프레임 원본 값을
+  복사한다. CGB 는 D000~DFFF 가 WRAM 뱅크라 뱅크 1 에서 읽는다(`rawRead8(addr, 1)`).
 - 줄바꿈: 이 자료는 LF.
 
 ## 6. libretro 코어 (안드로이드 Lemuroid 용)

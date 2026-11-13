@@ -1,0 +1,24 @@
+diff --git a/src/wx/xrc/MainMenu.xrc b/src/wx/xrc/MainMenu.xrc
+index 54525af..fa26e0d 100644
+--- a/src/wx/xrc/MainMenu.xrc
++++ b/src/wx/xrc/MainMenu.xrc
+@@ -410,6 +410,19 @@
+           <label>_Game Boy sound declicking</label>
+           <checkable>1</checkable>
+         </object>
++        <object class="separator"/>
++        <object class="wxMenuItem" name="FfbgmBgm1x">
++          <label translate="0">Keep _BGM at 1x speed (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmSfx1x">
++          <label translate="0">Keep sound _effects at 1x speed (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmFfCutscenes">
++          <label translate="0">Fast forward during _cutscenes (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
+       </object>
+       <object class="wxMenu">
+         <label>_Input</label>

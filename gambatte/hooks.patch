@@ -1,0 +1,271 @@
+diff --git a/libgambatte/include/gambatte.h b/libgambatte/include/gambatte.h
+index 5f67921..56e957d 100644
+--- a/libgambatte/include/gambatte.h
++++ b/libgambatte/include/gambatte.h
+@@ -136,6 +136,11 @@ public:
+ #ifdef __LIBRETRO__
+    void *vram_ptr() const;
+    void *rambank0_ptr() const;
++   // ff-bgm1x: 부작용 없이 읽기 (C000~DFFF 와 FF00~FFFF 만). Bank1 은 D000~DFFF 를 WRAM 뱅크 1 에서 읽는다
++   unsigned char ffbgmRead(unsigned short addr) const;
++   unsigned char ffbgmReadBank1(unsigned short addr) const;
++   // ff-bgm1x: 비트 i = 채널 i+1 을 출력에서 끈다
++   void ffbgmSetMuteMask(unsigned mask);
+    void *rambank1_ptr() const;
+    void *rambank2_ptr() const;
+    void *bankedram_ptr() const;
+diff --git a/libgambatte/libretro/jni/Android.mk b/libgambatte/libretro/jni/Android.mk
+index fa935a6..3a9af31 100644
+--- a/libgambatte/libretro/jni/Android.mk
++++ b/libgambatte/libretro/jni/Android.mk
+@@ -19,10 +19,28 @@ ifneq ($(GIT_VERSION)," unknown")
+   COREFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
+ endif
+ 
++# ff-bgm1x: 숨겨진 GB 코어 (공식 mGBA 0.10.5, GB 만. work/android/build_mgba_gbcore_android.sh 로 만든다)
++FFBGM_MGBA_SRC   ?= $(ROOT_DIR)/../../mgba-0.10.5-upstream
++FFBGM_MGBA_BUILD ?= $(ROOT_DIR)/../mgba-gbcore-android/build-$(TARGET_ARCH_ABI)
++
++include $(CLEAR_VARS)
++LOCAL_MODULE    := ffbgm_mgba_gbcore
++LOCAL_SRC_FILES := $(FFBGM_MGBA_BUILD)/libmgba.a
++include $(PREBUILT_STATIC_LIBRARY)
++
++# ff-bgm1x: 연결 코드 (C++17, 본체와 따로 빌드)
++include $(CLEAR_VARS)
++LOCAL_MODULE    := ffbgm
++LOCAL_SRC_FILES := $(LIBRETRO_DIR)/ff_bgm1x_gb.cpp $(LIBRETRO_DIR)/ffbgm/gb_driver_bgm.cpp
++LOCAL_CPPFLAGS  := $(COREFLAGS) $(INCFLAGS) -std=c++17 -DM_CORE_GB -DBUILD_STATIC -Dcrc32=mgba_crc32
++LOCAL_C_INCLUDES := $(ROOT_DIR)/libgambatte/include $(LIBRETRO_DIR)/ffbgm $(FFBGM_MGBA_SRC)/include $(FFBGM_MGBA_BUILD)/include
++include $(BUILD_STATIC_LIBRARY)
++
+ include $(CLEAR_VARS)
+ LOCAL_MODULE    := retro
+ LOCAL_SRC_FILES := $(SOURCES_CXX) $(SOURCES_C)
+ LOCAL_CXXFLAGS  := $(COREFLAGS) $(INCFLAGS)
+ LOCAL_CFLAGS    := $(INCFLAGS)
+ LOCAL_LDFLAGS   := -Wl,-version-script=$(LIBRETRO_DIR)/link.T
++LOCAL_STATIC_LIBRARIES := ffbgm ffbgm_mgba_gbcore
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/libgambatte/libretro/libretro.cpp b/libgambatte/libretro/libretro.cpp
+index 1c4471c..8d8b165 100644
+--- a/libgambatte/libretro/libretro.cpp
++++ b/libgambatte/libretro/libretro.cpp
+@@ -52,6 +52,7 @@ static retro_audio_sample_batch_t audio_batch_cb;
+ static retro_environment_t environ_cb;
+ static gambatte::video_pixel_t* video_buf;
+ static gambatte::GB gb;
++#include "ff_bgm1x_gb.h"  /* ff-bgm1x */
+ 
+ static bool libretro_supports_option_categories = false;
+ static bool libretro_supports_bitmasks          = false;
+@@ -1737,6 +1738,7 @@ void retro_reset()
+ #ifdef DUAL_MODE
+    gb2.reset();
+ #endif
++   ffbgm_gb_reset();  /* ff-bgm1x */
+ 
+    if (sram)
+    {
+@@ -1775,6 +1777,7 @@ bool retro_unserialize(const void *data, size_t size)
+       return false;
+ 
+    gb.loadState(data);
++   ffbgm_gb_reset();  /* ff-bgm1x: 상태를 불러오면 숨겨진 코어를 새로 맞춘다 */
+    return true;
+ }
+ 
+@@ -2112,8 +2115,26 @@ static void find_internal_palette(const unsigned short **palette, bool *is_gbc)
+    internal_palette_active = true;
+ }
+ 
++static void check_ffbgm_variables(void)
++{
++   /* ff-bgm1x: 프론트엔드가 ff_bgm1x_mix 를 불러 줄 때만 동작한다 */
++   struct retro_variable var;
++   bool enabled = true;
++   bool sfx1x = true;
++   var.key = "gambatte_ff_bgm1x";
++   var.value = 0;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++      enabled = strcmp(var.value, "disabled") != 0;
++   var.key = "gambatte_ff_bgm1x_sfx";
++   var.value = 0;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++      sfx1x = strcmp(var.value, "disabled") != 0;
++   ffbgm_gb_set_options(enabled, sfx1x);
++}
++
+ static void check_variables(bool startup)
+ {
++   check_ffbgm_variables();
+    unsigned i, j;
+ 
+    unsigned colorCorrection = 0;
+@@ -2580,6 +2601,7 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+    if (gb.load(info->data, info->size, flags) != 0)
+       return false;
++   ffbgm_gb_load(&gb, info->data, info->size);  /* ff-bgm1x */
+ #ifdef DUAL_MODE
+    if (gb2.load(info->data, info->size, flags) != 0)
+       return false;
+@@ -2649,6 +2671,7 @@ bool retro_load_game_special(unsigned, const struct retro_game_info*, size_t) {
+ 
+ void retro_unload_game()
+ {
++   ffbgm_gb_unload();  /* ff-bgm1x */
+    rom_loaded = false;
+ }
+ 
+@@ -2738,6 +2761,8 @@ void retro_run()
+    while (gb2.runFor(video_buf + GB_SCREEN_WIDTH, VIDEO_PITCH, sound_buf.u32, samples) == -1) {}
+ #endif
+ 
++   ffbgm_gb_frame();  /* ff-bgm1x: 원본 곡·효과음 상태 읽기, 원본 채널 끄기 */
++
+    /* Perform interframe blending, if required */
+    if (blend_frames)
+       blend_frames();
+diff --git a/libgambatte/libretro/libretro_core_options.h b/libgambatte/libretro/libretro_core_options.h
+index 7cbeea0..847539d 100644
+--- a/libgambatte/libretro/libretro_core_options.h
++++ b/libgambatte/libretro/libretro_core_options.h
+@@ -604,6 +604,35 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+       },
+       "0"
+    },
++   /* ff-bgm1x: 프론트엔드가 ff_bgm1x_mix 를 불러 줄 때만 동작한다 */
++   {
++      "gambatte_ff_bgm1x",
++      "BGM at 1x Speed (Fast Forward)",
++      NULL,
++      "Keeps background music at normal speed while fast forwarding (Pokemon Gold/Silver/Crystal sound engine). Requires a frontend that calls ff_bgm1x_mix.",
++      NULL,
++      NULL,
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
++   {
++      "gambatte_ff_bgm1x_sfx",
++      "Sound Effects at 1x Speed",
++      NULL,
++      "Also plays sound effects at normal speed while fast forwarding.",
++      NULL,
++      NULL,
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
+    {
+       "gambatte_mix_frames",
+       "Interframe Blending",
+diff --git a/libgambatte/libretro/link.T b/libgambatte/libretro/link.T
+index b0c262d..8fb509d 100644
+--- a/libgambatte/libretro/link.T
++++ b/libgambatte/libretro/link.T
+@@ -1,5 +1,5 @@
+ {
+-   global: retro_*;
++   global: retro_*; ff_bgm1x_*;
+    local: *;
+ };
+ 
+diff --git a/libgambatte/src/gambatte-memory.h b/libgambatte/src/gambatte-memory.h
+index b925718..e0ae3c9 100644
+--- a/libgambatte/src/gambatte-memory.h
++++ b/libgambatte/src/gambatte-memory.h
+@@ -58,6 +58,9 @@ public:
+    void *rambank1_ptr() const { return cart_.wramdata(0) + 0x1000; }
+    void *rambank2_ptr() const { return cart_.wramdata(0) + 0x2000; }
+    void *bankedram_ptr() const { return cart_.wramdata(1); }
++   // ff-bgm1x
++   unsigned char ffbgmIo(unsigned addr) const { return ioamhram_[addr - 0xFE00]; }
++   void ffbgmSetMuteMask(unsigned mask) { psg_.setFfbgmMuteMask(mask); }
+    void *rombank0_ptr() const { return cart_.romdata(0); }
+    void *rombank1_ptr() const { return cart_.romdata(0) + 0x4000; }
+    void *zeropage_ptr() const { return (void*)(ioamhram_ + 0x0180); }
+diff --git a/libgambatte/src/gambatte.cpp b/libgambatte/src/gambatte.cpp
+index bef0bf2..374e946 100644
+--- a/libgambatte/src/gambatte.cpp
++++ b/libgambatte/src/gambatte.cpp
+@@ -188,6 +188,26 @@ void *GB::vram_ptr() const {
+  return p_->cpu.vram_ptr();
+ }
+ 
++unsigned char GB::ffbgmRead(unsigned short addr) const {
++ if (addr >= 0xC000 && addr < 0xD000)
++  return static_cast<unsigned char *>(p_->cpu.rambank0_ptr())[addr - 0xC000];
++ if (addr >= 0xD000 && addr < 0xE000)
++  return static_cast<unsigned char *>(p_->cpu.bankedram_ptr())[addr - 0xD000];
++ if (addr >= 0xFF00)
++  return p_->cpu.mem_.ffbgmIo(addr);
++ return 0xFF;
++}
++
++unsigned char GB::ffbgmReadBank1(unsigned short addr) const {
++ if (addr >= 0xD000 && addr < 0xE000)
++  return static_cast<unsigned char *>(p_->cpu.rambank1_ptr())[addr - 0xD000];
++ return ffbgmRead(addr);
++}
++
++void GB::ffbgmSetMuteMask(unsigned mask) {
++ p_->cpu.mem_.ffbgmSetMuteMask(mask);
++}
++
+ void *GB::rambank0_ptr() const {
+  return p_->cpu.rambank0_ptr();
+ }
+diff --git a/libgambatte/src/sound.cpp b/libgambatte/src/sound.cpp
+index ecd6832..425467f 100644
+--- a/libgambatte/src/sound.cpp
++++ b/libgambatte/src/sound.cpp
+@@ -185,8 +185,18 @@ namespace gambatte
+             +  ((nr50 >> 4 & 0x7) + 1) * so2Mul) * 64;
+    }
+ 
+-   void PSG::mapSo(const unsigned nr51)
++   void PSG::setFfbgmMuteMask(const unsigned mask)
+    {
++      if (mask == ffbgmMute_)
++         return;
++      ffbgmMute_ = mask;
++      mapSo(lastNr51_);
++   }
++
++   void PSG::mapSo(const unsigned nr51raw)
++   {
++      lastNr51_ = nr51raw;
++      const unsigned nr51 = nr51raw & ~(ffbgmMute_ * 0x11u);
+       const unsigned long tmp = nr51 * so1Mul + (nr51 >> 4) * so2Mul;
+ 
+       ch1_.setSo((tmp      & 0x00010001) * 0xFFFF);
+diff --git a/libgambatte/src/sound.h b/libgambatte/src/sound.h
+index 1046011..e30609c 100644
+--- a/libgambatte/src/sound.h
++++ b/libgambatte/src/sound.h
+@@ -72,6 +72,8 @@ public:
+ 
+ 	void setSoVolume(unsigned nr50);
+ 	void mapSo(unsigned nr51);
++	// ff-bgm1x: 비트 i = 채널 i+1 을 출력에서 끈다 (채널 진행은 그대로)
++	void setFfbgmMuteMask(unsigned mask);
+ 	unsigned getStatus() const;
+ 
+ private:
+@@ -86,6 +88,8 @@ private:
+ 	unsigned long soVol_;
+ 	uint_least32_t rsum_;
+ 	bool enabled_;
++	unsigned ffbgmMute_ = 0;  // ff-bgm1x
++	unsigned lastNr51_ = 0;   // ff-bgm1x: 마지막으로 쓴 NR51
+ 
+ 	void accumulateChannels(unsigned long cycles);
+ };

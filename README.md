@@ -19,8 +19,9 @@
 | `mgba/` | mGBA | 0.10.5 | GBA, GB/GBC |
 | `melonds/` | melonDS | 1.1 | NDS |
 | `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
+| `vbam/` | VisualBoyAdvance-M | 2.2.3 | GBA, GB/GBC (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, 안드로이드) |
-| `lemuroid/`, `libretrodroid/` | Lemuroid, LibretroDroid | `3625bc12`, `8835c30` | 안드로이드 GBA (코어는 `mgba/` 의 libretro) |
+| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | 안드로이드 GBA, GB/GBC (GBA 코어는 `mgba/` 의 libretro) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | 안드로이드 NDS |
 
 안드로이드판은 Play 스토어가 아닌 APK 로 배포하므로, 설치할 때 "출처를 알 수 없는 앱" 허용이 필요합니다.
@@ -89,8 +90,9 @@ release** of each emulator. Prebuilt Windows binaries of the last version are in
 | `mgba/` | mGBA | 0.10.5 | GBA, GB/GBC |
 | `melonds/` | melonDS | 1.1 | NDS |
 | `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
+| `vbam/` | VisualBoyAdvance-M | 2.2.3 | GBA, GB/GBC (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, Android) |
-| `lemuroid/`, `libretrodroid/` | Lemuroid, LibretroDroid | `3625bc12`, `8835c30` | Android GBA (core: libretro part of `mgba/`) |
+| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | Android GBA, GB/GBC (GBA core: libretro part of `mgba/`) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | Android NDS |
 
 The Android builds are distributed as APKs (not on the Play Store), so installing them requires allowing

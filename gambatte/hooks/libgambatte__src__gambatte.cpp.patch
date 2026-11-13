@@ -1,0 +1,31 @@
+diff --git a/libgambatte/src/gambatte.cpp b/libgambatte/src/gambatte.cpp
+index bef0bf2..374e946 100644
+--- a/libgambatte/src/gambatte.cpp
++++ b/libgambatte/src/gambatte.cpp
+@@ -188,6 +188,26 @@ void *GB::vram_ptr() const {
+  return p_->cpu.vram_ptr();
+ }
+ 
++unsigned char GB::ffbgmRead(unsigned short addr) const {
++ if (addr >= 0xC000 && addr < 0xD000)
++  return static_cast<unsigned char *>(p_->cpu.rambank0_ptr())[addr - 0xC000];
++ if (addr >= 0xD000 && addr < 0xE000)
++  return static_cast<unsigned char *>(p_->cpu.bankedram_ptr())[addr - 0xD000];
++ if (addr >= 0xFF00)
++  return p_->cpu.mem_.ffbgmIo(addr);
++ return 0xFF;
++}
++
++unsigned char GB::ffbgmReadBank1(unsigned short addr) const {
++ if (addr >= 0xD000 && addr < 0xE000)
++  return static_cast<unsigned char *>(p_->cpu.rambank1_ptr())[addr - 0xD000];
++ return ffbgmRead(addr);
++}
++
++void GB::ffbgmSetMuteMask(unsigned mask) {
++ p_->cpu.mem_.ffbgmSetMuteMask(mask);
++}
++
+ void *GB::rambank0_ptr() const {
+  return p_->cpu.rambank0_ptr();
+ }

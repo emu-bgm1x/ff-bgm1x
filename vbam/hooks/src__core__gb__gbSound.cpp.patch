@@ -1,0 +1,50 @@
+diff --git a/src/core/gb/gbSound.cpp b/src/core/gb/gbSound.cpp
+index b546e74..a47fd0f 100644
+--- a/src/core/gb/gbSound.cpp
++++ b/src/core/gb/gbSound.cpp
+@@ -21,6 +21,8 @@ static Gb_Apu* gb_apu;
+ 
+ static float soundVolume_ = -1;
+ static int prevSoundEnable = -1;
++static int ffbgmMuteMask = 0;      // ff-bgm1x
++static int prevFfbgmMuteMask = -1; // ff-bgm1x
+ static bool declicking = false;
+ 
+ int const chan_count = 4;
+@@ -51,6 +53,7 @@ static void end_frame(blip_time_t time)
+ static void apply_effects()
+ {
+     prevSoundEnable = soundGetEnable();
++    prevFfbgmMuteMask = ffbgmMuteMask;
+     gb_effects_config_current = gb_effects_config;
+ 
+     stereo_buffer->config().enabled = gb_effects_config_current.enabled;
+@@ -61,12 +64,17 @@ static void apply_effects()
+ 
+     for (int i = 0; i < chan_count; i++) {
+         Multi_Buffer::channel_t ch = { 0, 0, 0 };
+-        if (prevSoundEnable >> i & 1)
++        if ((prevSoundEnable & ~ffbgmMuteMask) >> i & 1)
+             ch = stereo_buffer->channel(i);
+         gb_apu->set_output(ch.center, ch.left, ch.right, i);
+     }
+ }
+ 
++void gbSoundSetFfbgmMuteMask(int mask)
++{
++    ffbgmMuteMask = mask & 0x0f;
++}
++
+ void gbSoundConfigEffects(gb_effects_config_t const& c)
+ {
+     gb_effects_config = c;
+@@ -91,7 +99,8 @@ void gbSoundTick(int st)
+         // Update effects config if it was changed
+         if (memcmp(&gb_effects_config_current, &gb_effects_config,
+                 sizeof gb_effects_config)
+-            || soundGetEnable() != prevSoundEnable)
++            || soundGetEnable() != prevSoundEnable
++            || ffbgmMuteMask != prevFfbgmMuteMask)
+             apply_effects();
+ 
+         if (soundVolume_ != soundGetVolume())

@@ -1,8 +1,56 @@
 diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
-index 831ed794..2d1bfa34 100644
+index 831ed794..75c5b690 100644
 --- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
 +++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
-@@ -579,6 +579,35 @@ data class GameSystem(
+@@ -483,6 +483,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: 포켓몬 금·은·크리스탈 엔진. 숨겨진 GB 코어가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -547,6 +564,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: 포켓몬 금·은·크리스탈 엔진. 숨겨진 GB 코어가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -579,6 +613,35 @@ data class GameSystem(
                                          "mgba_solar_sensor_level",
                                          R.string.setting_mgba_solar_sensor_level,
                                      ),
@@ -38,7 +86,7 @@ index 831ed794..2d1bfa34 100644
                                      ExposedSetting(
                                          "mgba_interframe_blending",
                                          R.string.setting_mgba_interframe_blending,
-@@ -601,17 +630,7 @@ data class GameSystem(
+@@ -601,17 +664,7 @@ data class GameSystem(
                                              ),
                                          ),
                                      ),

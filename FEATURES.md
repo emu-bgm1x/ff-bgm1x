@@ -9,15 +9,15 @@
 
 ## 공통 기능
 
-| 기능 | 설명 | mGBA | melonDS | DeSmuME | Azahar |
-|---|---|---|---|---|---|
-| BGM 1배속 유지 | 게임의 음악은 소리만 끄고, 같은 곡을 실제 시간 기준으로 따로 재생 | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
-| 팡파레 끝까지 | 반복 없는 짧은 곡(아이템 획득 등)은 1배속으로 끝까지, 그 뒤 곡은 이어서 | ✓ (GBA) | ✓ | ✓ | ✓ |
-| 연출 중 배속 멈춤 | 반복 없는 긴 곡(연출 곡)이 나오는 동안은 배속을 걸어도 1배속 진행. 메뉴 "연출 중에도 배속" 으로 끌 수 있음 | ✓ (GBA) | ✓ | ✓ | ✓ (동영상 재생 중도) |
-| 효과음 1배속 | 효과음도 1배속으로 끝까지 | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (울음소리 포함) |
-| 효과음 볼륨 | 오디오 설정의 볼륨 아래 슬라이더 한 줄 | ✓ (무음 체크 포함, GBA 만) | ✓ | ✓ (사운드 설정 창 아래) | ✓ |
-| 메뉴 켜고 끄기 | 기능마다 메뉴 항목, 설정 저장 | ✓ | ✓ | ✓ | ✓ |
-| 단축키 | 메뉴 항목 켜고 끄기 (기본 키 없음) | — | ✓ | ✓ | ✓ |
+| 기능 | 설명 | mGBA | VBA-M | melonDS | DeSmuME | Azahar |
+|---|---|---|---|---|---|---|
+| BGM 1배속 유지 | 게임의 음악은 소리만 끄고, 같은 곡을 실제 시간 기준으로 따로 재생 | ✓ (GBA, GB/GBC) | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
+| 팡파레 끝까지 | 반복 없는 짧은 곡(아이템 획득 등)은 1배속으로 끝까지, 그 뒤 곡은 이어서 | ✓ (GBA) | ✓ (GBA) | ✓ | ✓ | ✓ |
+| 연출 중 배속 멈춤 | 반복 없는 긴 곡(연출 곡)이 나오는 동안은 배속을 걸어도 1배속 진행. 메뉴 "연출 중에도 배속" 으로 끌 수 있음 | ✓ (GBA) | ✓ (GBA) | ✓ | ✓ | ✓ (동영상 재생 중도) |
+| 효과음 1배속 | 효과음도 1배속으로 끝까지 | ✓ (GBA, GB/GBC) | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (울음소리 포함) |
+| 효과음 볼륨 | 오디오 설정의 볼륨 아래 슬라이더 한 줄 | ✓ (무음 체크 포함, GBA 만) | ✓ (사운드 설정 창, GBA 만) | ✓ | ✓ (사운드 설정 창 아래) | ✓ |
+| 메뉴 켜고 끄기 | 기능마다 메뉴 항목, 설정 저장 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 단축키 | 메뉴 항목 켜고 끄기 (기본 키 없음) | — | — | ✓ | ✓ | ✓ |
 
 ## 에뮬레이터별 방식
 
@@ -25,6 +25,11 @@
 - GBA (MP2K 엔진 게임): 매 프레임 게임 메모리의 MP2K 플레이어 상태를 읽어 음악 트랙을 끄고, 같은 곡을 내장 MP2K 재생기로 낸다. 곡 표는 게임별 주소가 아니라 롬 패턴으로 찾는다.
 - GB/GBC: 숨겨진 두 번째 GB 코어에서 게임 자신의 사운드 드라이버만 실시간으로 돌린다 (지원 엔진: 포켓몬 금·은·크리스탈).
 - 배속 중에 "BGM 1배속 유지" 를 끄면 원본 BGM 이 바로 나온다. 영상 녹화에도 1배속 BGM 이 들어간다.
+
+**VisualBoyAdvance-M 2.2.3 (Windows)**
+- mGBA 판과 같은 재생기(같은 코드)를 VBA-M 의 프레임·롬 불러오기·사운드 채널 끄기·녹화에 연결했다.
+- VBA-M 은 배속 중 소리를 빠르게 하거나 버리므로, 1배속 소리는 따로 연 SDL3 출력 스트림으로 낸다 (오디오 설정에서 고른 장치).
+- GB/GBC: VBA-M 의 GB 코어는 하나만 띄울 수 있어서, 숨겨진 코어로 mGBA 0.10.5 의 GB 코어를 함께 넣었다.
 
 **melonDS 1.1**
 - 게임이 사운드 CPU 에 보내는 명령(IPC FIFO)을 지켜보다가, 닌텐도 표준 사운드 데이터(SDAT)의 같은 시퀀스를 내장 재생기로 연주한다. 원본은 페이더로 끈다.
@@ -42,7 +47,7 @@
 
 | 앱 | 바탕 | 1배속 소리 | 더한 것 |
 |---|---|---|---|
-| GBA | Lemuroid + LibretroDroid + mGBA libretro 코어 | PC mGBA 와 같은 재생기를 코어에 넣음 (GBA) | 배속 최대 16배(기본·게임별), 화면 빨리 감기 버튼(켜고 끄기), 센서(기울기·자이로·조도), 치트(직접 입력·.cht 불러오기), 화면 방향(자동·가로·세로, 게임별), 색 보정·잔상(프레임 섞기), 메뉴 버튼 한 번에 열기 |
+| GBA·GB/GBC | Lemuroid + LibretroDroid + mGBA libretro 코어(GBA) + Gambatte libretro 코어(GB/GBC) | PC mGBA 와 같은 재생기를 코어에 넣음 (GBA). GB/GBC 는 Gambatte 안에 숨겨진 mGBA GB 코어 | 배속 최대 16배(기본·게임별), 화면 빨리 감기 버튼(켜고 끄기), 센서(기울기·자이로·조도), 치트(직접 입력·.cht 불러오기), 화면 방향(자동·가로·세로, 게임별), 색 보정·잔상(프레임 섞기), 메뉴 버튼 한 번에 열기 |
 | NDS | melonDS Android | PC melonDS 와 같은 재생기 | 기본 배치에 메뉴(일시정지) 버튼 |
 | 3DS | Azahar 안드로이드 | PC Azahar 와 같은 코드 | 설정 화면에 1배속 항목, 화면 메뉴 버튼(한 번에 메뉴) |
 
@@ -81,15 +86,15 @@ music and sound effects play at 1x speed and original pitch.
 
 ## Common features
 
-| Feature | Description | mGBA | melonDS | DeSmuME | Azahar |
-|---|---|---|---|---|---|
-| Keep BGM at 1x | The game's music is muted and the same song is played separately in real time | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
-| Fanfares to the end | Short non-looping songs (item jingles etc.) play to the end at 1x, then the music resumes | ✓ (GBA) | ✓ | ✓ | ✓ |
-| Hold fast-forward in cutscenes | While a long non-looping (cutscene) song plays, the game runs at 1x even with fast-forward on; can be turned off | ✓ (GBA) | ✓ | ✓ | ✓ (also during videos) |
-| Sound effects at 1x | Sound effects also play at 1x to the end | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (cries included) |
-| Sound effect volume | One extra slider below the volume slider in audio settings | ✓ (with mute, GBA only) | ✓ | ✓ (bottom of Sound Settings) | ✓ |
-| Menu toggles | A menu item per feature; settings are saved | ✓ | ✓ | ✓ | ✓ |
-| Hotkeys | Toggle the menu items (no default keys) | — | ✓ | ✓ | ✓ |
+| Feature | Description | mGBA | VBA-M | melonDS | DeSmuME | Azahar |
+|---|---|---|---|---|---|---|
+| Keep BGM at 1x | The game's music is muted and the same song is played separately in real time | ✓ (GBA, GB/GBC) | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ |
+| Fanfares to the end | Short non-looping songs (item jingles etc.) play to the end at 1x, then the music resumes | ✓ (GBA) | ✓ (GBA) | ✓ | ✓ | ✓ |
+| Hold fast-forward in cutscenes | While a long non-looping (cutscene) song plays, the game runs at 1x even with fast-forward on; can be turned off | ✓ (GBA) | ✓ (GBA) | ✓ | ✓ | ✓ (also during videos) |
+| Sound effects at 1x | Sound effects also play at 1x to the end | ✓ (GBA, GB/GBC) | ✓ (GBA, GB/GBC) | ✓ | ✓ | ✓ (cries included) |
+| Sound effect volume | One extra slider below the volume slider in audio settings | ✓ (with mute, GBA only) | ✓ (Sound settings, GBA only) | ✓ | ✓ (bottom of Sound Settings) | ✓ |
+| Menu toggles | A menu item per feature; settings are saved | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hotkeys | Toggle the menu items (no default keys) | — | — | ✓ | ✓ | ✓ |
 
 ## How each one works
 
@@ -97,6 +102,11 @@ music and sound effects play at 1x speed and original pitch.
 - GBA (MP2K engine games): every frame, reads the game's MP2K player state from RAM, mutes the music tracks, and plays the same song with a built-in MP2K player. Song tables are found by ROM pattern, not per-game addresses.
 - GB/GBC: a hidden second GB core runs only the game's own sound driver in real time (supported engine: Pokémon Gold/Silver/Crystal).
 - Turning "Keep BGM at 1x" off during fast-forward brings the original BGM back immediately. Video recording also gets the 1x BGM.
+
+**VisualBoyAdvance-M 2.2.3 (Windows)**
+- The same player as the mGBA version (same code), hooked into VBA-M's frame, ROM loading, sound channel muting and recording.
+- VBA-M speeds up or drops sound while fast-forwarding, so the 1x sound goes out through a separate SDL3 output stream (the device chosen in the audio settings).
+- GB/GBC: VBA-M's GB core can only run once, so mGBA 0.10.5's GB core is included as the hidden core.
 
 **melonDS 1.1**
 - Watches the sound commands the game sends to the sound CPU (IPC FIFO) and plays the same sequences from the cartridge's standard sound data (SDAT) with a built-in player; the originals are muted via the fader.
@@ -114,7 +124,7 @@ music and sound effects play at 1x speed and original pitch.
 
 | App | Based on | 1x sound | Additions |
 |---|---|---|---|
-| GBA | Lemuroid + LibretroDroid + mGBA libretro core | same player as PC mGBA, inside the core (GBA) | fast-forward up to 16x (default and per game), on-screen fast-forward toggle, sensors (tilt, gyro, light), cheats (manual and .cht import), screen orientation (auto/landscape/portrait, per game), color correction and frame blending, one-tap menu button |
+| GBA, GB/GBC | Lemuroid + LibretroDroid + mGBA libretro core (GBA) + Gambatte libretro core (GB/GBC) | same player as PC mGBA, inside the core (GBA); GB/GBC uses a hidden mGBA GB core inside Gambatte | fast-forward up to 16x (default and per game), on-screen fast-forward toggle, sensors (tilt, gyro, light), cheats (manual and .cht import), screen orientation (auto/landscape/portrait, per game), color correction and frame blending, one-tap menu button |
 | NDS | melonDS Android | same player as PC melonDS | menu (pause) button in the default layouts |
 | 3DS | Azahar Android | same code as PC Azahar | 1x options in the settings screen, one-tap on-screen menu button |
 

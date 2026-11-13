@@ -1,0 +1,37 @@
+diff --git a/src/wx/CMakeLists.txt b/src/wx/CMakeLists.txt
+index 69c05bb..e4d2b05 100644
+--- a/src/wx/CMakeLists.txt
++++ b/src/wx/CMakeLists.txt
+@@ -416,6 +416,32 @@ endif()
+ 
+ target_sources(visualboyadvance-m PRIVATE ${VBAM_WX_COMMON} ${VBAM_ICON_PATH})
+ 
++# ff-bgm1x: keep GBA BGM and sound effects at 1x speed while fast forwarding
++target_sources(visualboyadvance-m PRIVATE
++    ffbgm/bgm_mirror.cpp
++    ffbgm/mp2k_engine.cpp
++    ffbgm/rom.cpp
++    ffbgm/gb_driver_bgm.cpp
++    ffbgm/vbam_bgm.cpp
++)
++# ff-bgm1x GB/GBC: a hidden mGBA Game Boy core runs the game's own sound driver at 1x.
++# Build mGBA (same version as the mGBA port) as a static GB-only library first:
++#   cmake <mgba> -G Ninja -DCMAKE_BUILD_TYPE=Release -DLIBMGBA_ONLY=ON -DM_CORE_GBA=OFF -DM_CORE_GB=ON
++#         -DCMAKE_C_FLAGS=/utf-8 "-DCMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG"
++set(FFBGM_MGBA_SOURCE_DIR "" CACHE PATH "ff-bgm1x: mGBA source folder (for the hidden GB core)")
++set(FFBGM_MGBA_BUILD_DIR "" CACHE PATH "ff-bgm1x: folder where mGBA was built as a static GB-only library")
++if(NOT FFBGM_MGBA_SOURCE_DIR OR NOT FFBGM_MGBA_BUILD_DIR)
++    message(FATAL_ERROR "ff-bgm1x: set FFBGM_MGBA_SOURCE_DIR and FFBGM_MGBA_BUILD_DIR")
++endif()
++set_source_files_properties(ffbgm/gb_driver_bgm.cpp ffbgm/vbam_bgm.cpp PROPERTIES
++    INCLUDE_DIRECTORIES "${FFBGM_MGBA_SOURCE_DIR}/include;${FFBGM_MGBA_BUILD_DIR}/include"
++    COMPILE_DEFINITIONS "BUILD_STATIC;M_CORE_GB")
++if(MSVC)
++    target_link_libraries(visualboyadvance-m "${FFBGM_MGBA_BUILD_DIR}/mgba.lib" shlwapi ws2_32)
++else()
++    target_link_libraries(visualboyadvance-m "${FFBGM_MGBA_BUILD_DIR}/libmgba.a" shlwapi ws2_32)
++endif()
++
+ if(ENABLE_SDL3)
+     target_include_directories(visualboyadvance-m PRIVATE ${SDL3_INCLUDE_DIRS})
+ else()

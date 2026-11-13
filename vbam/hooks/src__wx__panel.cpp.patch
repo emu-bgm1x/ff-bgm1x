@@ -1,0 +1,53 @@
+diff --git a/src/wx/panel.cpp b/src/wx/panel.cpp
+index c3be387..d136c43 100644
+--- a/src/wx/panel.cpp
++++ b/src/wx/panel.cpp
+@@ -3,6 +3,7 @@
+ #endif
+ 
+ #include "wx/wxvbam.h"
++#include "wx/ffbgm/vbam_bgm.h"
+ 
+ #include <cmath>
+ #include <cstdlib>
+@@ -307,6 +308,7 @@ void GameArea::LoadGame(const wxString& name)
+         if (loadpatch) {
+             gbApplyPatch(UTF8(pfn.GetFullPath()));
+         }
++        ffbgm::OnGbLoaded(gbRom, g_gbCartData.rom_size());  // ff-bgm1x
+ 
+         // Apply overrides.
+         wxFileConfig* cfg = wxGetApp().gb_overrides_.get();
+@@ -378,6 +380,7 @@ void GameArea::LoadGame(const wxString& name)
+         }
+ 
+         rom_crc32 = crc32(0L, g_rom, rom_size);
++        int ffbgm_rom_size = rom_size;  // ff-bgm1x: size after patching
+ 
+         if (loadpatch) {
+             // don't use real rom size or it might try to resize rom[]
+@@ -387,6 +390,7 @@ void GameArea::LoadGame(const wxString& name)
+             // that means we no longer really know rom_size either <sigh>
+ 
+             gbaUpdateRomSize(size);
++            ffbgm_rom_size = size;
+         }
+ 
+         wxFileConfig* cfg = wxGetApp().overrides_.get();
+@@ -456,6 +460,7 @@ void GameArea::LoadGame(const wxString& name)
+         basic_width = GBAWidth;
+         basic_height = GBAHeight;
+         emusys = &GBASystem;
++        ffbgm::OnGbaLoaded(g_rom, static_cast<size_t>(ffbgm_rom_size));
+     }
+ 
+     // Set sound volume.
+@@ -657,6 +662,8 @@ void GameArea::UnloadGame(bool destruct)
+     if (!emulating)
+         return;
+ 
++    ffbgm::OnUnload();
++
+     // last opportunity to autosave cheats
+     if (OPTION(kPrefAutoSaveLoadCheatList) && cheats_dirty) {
+         wxFileName cfn = loaded_game;

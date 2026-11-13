@@ -1,0 +1,27 @@
+diff --git a/src/wx/xrc/SoundConfig.xrc b/src/wx/xrc/SoundConfig.xrc
+index f4cabf4..a0c921f 100644
+--- a/src/wx/xrc/SoundConfig.xrc
++++ b/src/wx/xrc/SoundConfig.xrc
+@@ -66,6 +66,22 @@
+             </object>
+             <flag>wxEXPAND</flag>
+           </object>
++          <object class="sizeritem">
++            <flag>wxALL|wxALIGN_RIGHT|wxALIGN_CENTRE_VERTICAL</flag>
++            <border>5</border>
++            <object class="wxStaticText">
++              <label translate="0">SFX volume (1x):</label>
++            </object>
++          </object>
++          <object class="sizeritem">
++            <object class="wxSlider" name="FfbgmSfxVolume">
++              <value>256</value>
++              <min>0</min>
++              <max>256</max>
++            </object>
++            <flag>wxALL|wxEXPAND</flag>
++            <border>5</border>
++          </object>
+           <object class="sizeritem">
+             <flag>wxALL|wxALIGN_RIGHT|wxALIGN_CENTRE_VERTICAL</flag>
+             <border>5</border>

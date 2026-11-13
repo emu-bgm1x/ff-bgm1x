@@ -1,0 +1,22 @@
+diff --git a/libgambatte/src/sound.h b/libgambatte/src/sound.h
+index 1046011..e30609c 100644
+--- a/libgambatte/src/sound.h
++++ b/libgambatte/src/sound.h
+@@ -72,6 +72,8 @@ public:
+ 
+ 	void setSoVolume(unsigned nr50);
+ 	void mapSo(unsigned nr51);
++	// ff-bgm1x: 비트 i = 채널 i+1 을 출력에서 끈다 (채널 진행은 그대로)
++	void setFfbgmMuteMask(unsigned mask);
+ 	unsigned getStatus() const;
+ 
+ private:
+@@ -86,6 +88,8 @@ private:
+ 	unsigned long soVol_;
+ 	uint_least32_t rsum_;
+ 	bool enabled_;
++	unsigned ffbgmMute_ = 0;  // ff-bgm1x
++	unsigned lastNr51_ = 0;   // ff-bgm1x: 마지막으로 쓴 NR51
+ 
+ 	void accumulateChannels(unsigned long cycles);
+ };

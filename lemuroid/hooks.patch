@@ -14,6 +14,21 @@ index a478a8b2..c2e57f53 100644
      }
  
      object plugins {
+diff --git a/lemuroid-app/build.gradle.kts b/lemuroid-app/build.gradle.kts
+index 741cef46..23961ecf 100644
+--- a/lemuroid-app/build.gradle.kts
++++ b/lemuroid-app/build.gradle.kts
+@@ -13,6 +13,10 @@ android {
+         versionCode = 252
+         versionName = "1.17.0" // Always remember to update Cores Tag!
+         applicationId = "com.swordfish.lemuroid"
++        // ff-bgm1x: 실제 코어 파일을 묶으므로 크기를 줄이려고 arm64-v8a 만 넣는다
++        ndk {
++            abiFilters += listOf("arm64-v8a")
++        }
+     }
+     flavorDimensions += listOf("opensource", "cores")
+ 
 diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
 index e81c42c8..8159cb8e 100644
 --- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/game/MobileGameScreen.kt
@@ -564,7 +579,7 @@ index 6d064206..918d4a88 100644
              if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
                  baseGameScreenViewModel.showEditControls(true)
 diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
-index 8f91e6c1..4f365522 100644
+index 8f91e6c1..f8a7159a 100644
 --- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
 +++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/BaseGameScreenViewModel.kt
 @@ -13,6 +13,9 @@ import androidx.lifecycle.ViewModelProvider
@@ -577,7 +592,15 @@ index 8f91e6c1..4f365522 100644
  import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelInput
  import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelRetroGameView
  import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSaves
-@@ -36,7 +39,10 @@ import com.swordfish.lemuroid.lib.saves.StatesPreviewManager
+@@ -26,6 +29,7 @@ import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
+ import com.swordfish.lemuroid.common.longAnimationDuration
+ import com.swordfish.lemuroid.lib.controller.ControllerConfig
+ import com.swordfish.lemuroid.lib.core.CoreVariablesManager
++import com.swordfish.lemuroid.lib.library.CoreID
+ import com.swordfish.lemuroid.lib.game.GameLoader
+ import com.swordfish.lemuroid.lib.library.GameSystem
+ import com.swordfish.lemuroid.lib.library.SystemCoreConfig
+@@ -36,7 +40,10 @@ import com.swordfish.lemuroid.lib.saves.StatesPreviewManager
  import com.swordfish.libretrodroid.GLRetroView
  import com.swordfish.touchinput.radial.sensors.TiltConfiguration
  import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
@@ -588,7 +611,7 @@ index 8f91e6c1..4f365522 100644
  import gg.padkit.inputstate.InputState
  import kotlinx.coroutines.delay
  import kotlinx.coroutines.flow.Flow
-@@ -46,13 +52,13 @@ import timber.log.Timber
+@@ -46,13 +53,13 @@ import timber.log.Timber
  
  class BaseGameScreenViewModel(
      private val appContext: Context,
@@ -599,13 +622,14 @@ index 8f91e6c1..4f365522 100644
      inputDeviceManager: InputDeviceManager,
      controllerConfigsManager: ControllerConfigsManager,
      system: GameSystem,
-     systemCoreConfig: SystemCoreConfig,
+-    systemCoreConfig: SystemCoreConfig,
 -    sharedPreferences: SharedPreferences,
++    private val systemCoreConfig: SystemCoreConfig,
 +    private val sharedPreferences: SharedPreferences,
      savesManager: SavesManager,
      statesManager: StatesManager,
      statesPreviewManager: StatesPreviewManager,
-@@ -267,10 +273,64 @@ class BaseGameScreenViewModel(
+@@ -267,10 +274,64 @@ class BaseGameScreenViewModel(
          }
      }
  
@@ -672,10 +696,16 @@ index 8f91e6c1..4f365522 100644
          }
      }
  
-@@ -303,8 +363,74 @@ class BaseGameScreenViewModel(
+@@ -303,8 +364,80 @@ class BaseGameScreenViewModel(
          }
      }
  
++    // ff-bgm1x: 1배속 옵션 이름은 코어마다 앞부분이 다르다 (GB/GBC 는 Gambatte)
++    private fun ffBgm1xKey(suffix: String = ""): String {
++        val prefix = if (systemCoreConfig.coreID == CoreID.GAMBATTE) "gambatte" else "mgba"
++        return "${prefix}_ff_bgm1x$suffix"
++    }
++
 +    // ff-bgm1x: 코어 옵션(enabled/disabled)을 바꿔 설정에 저장하고 바로 코어에 알린다
 +    private fun toggleCoreOption(
 +        key: String,
@@ -711,10 +741,10 @@ index 8f91e6c1..4f365522 100644
 +                CustomButtonFunction.FAST_FORWARD -> if (event.pressed) toggleFastForward()
 +                CustomButtonFunction.QUICK_SAVE -> if (event.pressed) sideEffects.saveQuickSave()
 +                CustomButtonFunction.QUICK_LOAD -> if (event.pressed) sideEffects.loadQuickSave()
-+                CustomButtonFunction.BGM_1X -> if (event.pressed) toggleCoreOption("mgba_ff_bgm1x", true, R.string.custom_func_bgm_1x)
-+                CustomButtonFunction.SFX_1X -> if (event.pressed) toggleCoreOption("mgba_ff_bgm1x_sfx", true, R.string.custom_func_sfx_1x)
++                CustomButtonFunction.BGM_1X -> if (event.pressed) toggleCoreOption(ffBgm1xKey(), true, R.string.custom_func_bgm_1x)
++                CustomButtonFunction.SFX_1X -> if (event.pressed) toggleCoreOption(ffBgm1xKey("_sfx"), true, R.string.custom_func_sfx_1x)
 +                CustomButtonFunction.FF_CUTSCENES ->
-+                    if (event.pressed) toggleCoreOption("mgba_ff_bgm1x_cutscenes", false, R.string.custom_func_ff_cutscenes)
++                    if (event.pressed) toggleCoreOption(ffBgm1xKey("_cutscenes"), false, R.string.custom_func_ff_cutscenes)
 +                CustomButtonFunction.NONE, null -> {}
 +            }
 +        }
@@ -748,7 +778,7 @@ index 8f91e6c1..4f365522 100644
      }
  
      override fun onCreate(owner: LifecycleOwner) {
-@@ -326,4 +452,9 @@ class BaseGameScreenViewModel(
+@@ -326,4 +459,9 @@ class BaseGameScreenViewModel(
      fun sendMotionEvent(event: MotionEvent): Boolean {
          return inputs.sendMotionEvent(event)
      }
@@ -1112,10 +1142,58 @@ index 734e6bcf..930540ae 100644
          compositeAnchors = persistentListOf(),
          trackPointers = trackPointers,
 diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
-index 831ed794..2d1bfa34 100644
+index 831ed794..75c5b690 100644
 --- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
 +++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
-@@ -579,6 +579,35 @@ data class GameSystem(
+@@ -483,6 +483,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: 포켓몬 금·은·크리스탈 엔진. 숨겨진 GB 코어가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -547,6 +564,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: 포켓몬 금·은·크리스탈 엔진. 숨겨진 GB 코어가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -579,6 +613,35 @@ data class GameSystem(
                                          "mgba_solar_sensor_level",
                                          R.string.setting_mgba_solar_sensor_level,
                                      ),
@@ -1151,7 +1229,7 @@ index 831ed794..2d1bfa34 100644
                                      ExposedSetting(
                                          "mgba_interframe_blending",
                                          R.string.setting_mgba_interframe_blending,
-@@ -601,17 +630,7 @@ data class GameSystem(
+@@ -601,17 +664,7 @@ data class GameSystem(
                                              ),
                                          ),
                                      ),

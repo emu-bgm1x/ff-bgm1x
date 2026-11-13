@@ -37,6 +37,7 @@ struct GbDriverProfile {
 	uint16_t curSfx = 0;         // 현재 효과음 번호 RAM (우선순위 판단용, 시작 루틴 전에 써 둔다)
 	uint8_t cryFlag = 0;         // 채널 플래그: 울음소리 (대체하지 않는다)
 	uint8_t addressOffset = 0;   // 채널 구조체 안의 현재 읽는 위치 (16비트)
+	uint16_t optionsAddr = 0;    // 게임 설정 바이트(wOptions). 드라이버가 여기서 스테레오 비트를 읽는다 (0 이면 없음)
 };
 
 // 알려진 엔진 프로필들을 차례로 시도한다. 찾으면 true.
@@ -57,6 +58,8 @@ public:
 	void setMutedChannels(uint8_t mask); // 원본에서 효과음이 쓰는 하드웨어 채널은 음악을 끈다
 	// 원본 코어의 NR50(마스터 볼륨)/NR51(좌우 출력)을 따라간다. 스테레오 설정, 페이드, 울음소리 중 볼륨 감소가 반영된다
 	void setOutputRegs(uint8_t nr50, uint8_t nr51);
+	// 원본의 게임 설정 바이트(스테레오 등)를 따라간다. 다르면 드라이버가 원본과 다른 NR51 을 써서 지직거린다
+	void setOptions(uint8_t value);
 	void runFrame();
 
 	// 실시간용: sampleRate 로 frames 개를 만들어 stereo 에 더한다
@@ -82,6 +85,7 @@ private:
 	std::atomic<int> m_pendingSfx{-1};
 	std::atomic<uint8_t> m_mutedMask{0};
 	std::atomic<int> m_outRegs{-1};  // (nr50 << 8) | nr51, -1 이면 아직 없음
+	std::atomic<int> m_options{-1};  // 게임 설정 바이트, -1 이면 아직 없음
 	int m_rate = 0;
 	Capture m_capture;
 	std::deque<int16_t> m_streamFifo;
@@ -114,6 +118,7 @@ private:
 	std::atomic<int> m_liveSong{-1};
 	std::atomic<uint8_t> m_sfxMask{0};
 	std::atomic<int> m_outRegs{-1};
+	std::atomic<int> m_options{-1};  // 원본의 게임 설정 바이트
 	std::atomic<bool> m_resetLive{false};
 	int m_liveRequested = -1;  // 오디오 스레드 전용
 

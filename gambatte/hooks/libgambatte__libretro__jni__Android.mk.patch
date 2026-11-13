@@ -1,0 +1,33 @@
+diff --git a/libgambatte/libretro/jni/Android.mk b/libgambatte/libretro/jni/Android.mk
+index fa935a6..3a9af31 100644
+--- a/libgambatte/libretro/jni/Android.mk
++++ b/libgambatte/libretro/jni/Android.mk
+@@ -19,10 +19,28 @@ ifneq ($(GIT_VERSION)," unknown")
+   COREFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
+ endif
+ 
++# ff-bgm1x: 숨겨진 GB 코어 (공식 mGBA 0.10.5, GB 만. work/android/build_mgba_gbcore_android.sh 로 만든다)
++FFBGM_MGBA_SRC   ?= $(ROOT_DIR)/../../mgba-0.10.5-upstream
++FFBGM_MGBA_BUILD ?= $(ROOT_DIR)/../mgba-gbcore-android/build-$(TARGET_ARCH_ABI)
++
++include $(CLEAR_VARS)
++LOCAL_MODULE    := ffbgm_mgba_gbcore
++LOCAL_SRC_FILES := $(FFBGM_MGBA_BUILD)/libmgba.a
++include $(PREBUILT_STATIC_LIBRARY)
++
++# ff-bgm1x: 연결 코드 (C++17, 본체와 따로 빌드)
++include $(CLEAR_VARS)
++LOCAL_MODULE    := ffbgm
++LOCAL_SRC_FILES := $(LIBRETRO_DIR)/ff_bgm1x_gb.cpp $(LIBRETRO_DIR)/ffbgm/gb_driver_bgm.cpp
++LOCAL_CPPFLAGS  := $(COREFLAGS) $(INCFLAGS) -std=c++17 -DM_CORE_GB -DBUILD_STATIC -Dcrc32=mgba_crc32
++LOCAL_C_INCLUDES := $(ROOT_DIR)/libgambatte/include $(LIBRETRO_DIR)/ffbgm $(FFBGM_MGBA_SRC)/include $(FFBGM_MGBA_BUILD)/include
++include $(BUILD_STATIC_LIBRARY)
++
+ include $(CLEAR_VARS)
+ LOCAL_MODULE    := retro
+ LOCAL_SRC_FILES := $(SOURCES_CXX) $(SOURCES_C)
+ LOCAL_CXXFLAGS  := $(COREFLAGS) $(INCFLAGS)
+ LOCAL_CFLAGS    := $(INCFLAGS)
+ LOCAL_LDFLAGS   := -Wl,-version-script=$(LIBRETRO_DIR)/link.T
++LOCAL_STATIC_LIBRARIES := ffbgm ffbgm_mgba_gbcore
+ include $(BUILD_SHARED_LIBRARY)

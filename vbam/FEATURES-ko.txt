@@ -1,0 +1,52 @@
+VisualBoyAdvance-M 2.2.3 수정판 (ff-bgm1x) 버전 1 - 배속 중에도 BGM 1배속 유지
+
+[실행]
+  visualboyadvance-m.exe 를 실행하고 File -> Open 으로 ROM 을 엽니다. (ROM 은 포함되어 있지 않습니다)
+  공식 VBA-M 2.2.3 과 같은 소스에 이 기능만 더했습니다. 설정은 공식판과 같은 자리(vbam.ini)에 저장됩니다.
+  배속(Speed/터보) 버튼과 배속 설정은 공식 VBA-M 과 같습니다.
+  배속 설정 창(Speedup / Turbo...)의 "Mute Sound" 가 켜져 있으면 배속 중에 1배속 BGM 은 나오지만
+  울음소리처럼 게임 속도로 나는 소리는 들리지 않습니다. 모두 들으려면 "Mute Sound" 를 끄세요.
+
+[추가된 메뉴] Options -> Audio 아래쪽
+  Keep BGM at 1x speed (ff-bgm1x)            BGM 1배속 유지 (기본값 켜짐)
+  Keep sound effects at 1x speed (ff-bgm1x)  효과음 1배속 (기본값 켜짐)
+  Fast forward during cutscenes (ff-bgm1x)   연출 중에도 배속 (기본값 꺼짐, GBA 만)
+
+[추가된 설정] Options -> Audio -> Configure... (사운드 설정 창)
+  SFX volume (1x)                            1배속으로 내는 GBA 효과음의 볼륨 (0~256, 기본값 256 = 원래 크기)
+
+  설정은 vbam.ini 의 [Sound] 에 저장됩니다 (FfbgmBgm1x, FfbgmSfx1x, FfbgmFfCutscenes, FfbgmSfxVolume).
+
+[동작 방식]
+  mGBA 수정판과 같은 재생기(같은 코드)를 씁니다.
+  GBA 게임: MP2K(Sappy) 사운드 엔진을 쓰는 게임에서 원본 BGM 을 무음 처리하고,
+            같은 곡을 ROM 에서 읽어 내장 재생기로 항상 1배속으로 재생합니다.
+            팡파레(반복 없는 12초 이하 곡)는 1배속으로 끝까지, 연출 곡(반복 없는 12초 넘는 곡)이 나오는 동안은
+            "연출 중에도 배속" 이 꺼져 있으면 배속하지 않습니다. 반복 없는 효과음도 1배속으로 끝까지 냅니다.
+  GB/GBC 게임: 지원하는 사운드 엔진(포켓몬 금·은·크리스탈 엔진, 한글판 포함)이면
+            숨겨진 두 번째 GB 코어(mGBA 0.10.5 의 GB 코어)에서 게임 자신의 음악 코드를 1배속으로 돌려 BGM 을 만들고,
+            원본의 음악 채널만 끕니다. 효과음(대화음, 메뉴음, 아이템 받는 소리 등)도 1배속, 울음소리는 게임 속도입니다.
+  지원하지 않는 엔진의 게임은 아무것도 바꾸지 않습니다 (원래 VBA-M 과 동일).
+  - 1배속 소리는 VBA-M 의 오디오 출력과 따로 연 출력 스트림으로 나옵니다 (오디오 설정에서 고른 장치와 같은 장치).
+    그래서 배속 배율과 관계없이 실제 시간으로 납니다.
+  - 녹화(Tools -> Record)에도 1배속 소리가 섞입니다. 방송용 화면 녹화 프로그램(OBS 등)도 그대로 녹음됩니다.
+
+[알려진 제약]
+  - GB/GBC 의 1배속 BGM 은 mGBA 의 GB 사운드로 나오므로, VBA-M 원래 GB 소리와 음색이 조금 다릅니다.
+  - GB/GBC 게임에는 팡파레 처리, "연출 중에도 배속", 효과음 볼륨이 적용되지 않습니다.
+  - GBA: 페이드아웃, 울음소리 중 볼륨 감소 같은 연출은 반영되지 않습니다.
+  - 곡이 시작되는 첫 프레임에 원본 BGM 이 짧게 들릴 수 있습니다.
+  - 서명되지 않은 실행 파일이라 Windows 가 실행을 막거나 경고할 수 있습니다.
+
+[공식 VBA-M 2.2.3 과 다른 점 (BGM 기능 외)]
+  - 빌드 옵션 UPSTREAM_RELEASE 를 껐습니다 (공식 개발자의 코드 서명 인증서가 없으면 빌드 설정이 실패하기 때문).
+
+[라이선스와 소스]
+  이 프로그램은 VisualBoyAdvance-M 2.2.3 (GNU General Public License v2 또는 그 이후 버전) 을 수정한 것이며, 같은 라이선스로 배포합니다.
+  GB 숨겨진 코어로 mGBA 0.10.5 (Mozilla Public License 2.0) 를 수정 없이 함께 넣었습니다.
+  - licenses\VBA-M-GPL-2.0.txt              : VBA-M 라이선스
+  - licenses\mGBA-MPL-2.0.txt               : mGBA 라이선스
+  - licenses\vcpkg\                         : 정적으로 묶인 라이브러리(wxWidgets, SDL3 등)의 라이선스
+  - source\porting-kit\                     : 공식 2.2.3 대비 수정 내용 (새 파일 module/, 원본 연결부 hooks.patch, 이식 안내서)
+  - source\VBA-M-2.2.3-changes.diff         : 공식 2.2.3 (커밋 48ed03b) 대비 수정 내용
+  mGBA 원본 소스: https://github.com/mgba-emu/mgba (태그 0.10.5)

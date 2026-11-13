@@ -1,0 +1,24 @@
+diff --git a/libgambatte/src/sound.cpp b/libgambatte/src/sound.cpp
+index ecd6832..425467f 100644
+--- a/libgambatte/src/sound.cpp
++++ b/libgambatte/src/sound.cpp
+@@ -185,8 +185,18 @@ namespace gambatte
+             +  ((nr50 >> 4 & 0x7) + 1) * so2Mul) * 64;
+    }
+ 
+-   void PSG::mapSo(const unsigned nr51)
++   void PSG::setFfbgmMuteMask(const unsigned mask)
+    {
++      if (mask == ffbgmMute_)
++         return;
++      ffbgmMute_ = mask;
++      mapSo(lastNr51_);
++   }
++
++   void PSG::mapSo(const unsigned nr51raw)
++   {
++      lastNr51_ = nr51raw;
++      const unsigned nr51 = nr51raw & ~(ffbgmMute_ * 0x11u);
+       const unsigned long tmp = nr51 * so1Mul + (nr51 >> 4) * so2Mul;
+ 
+       ch1_.setSo((tmp      & 0x00010001) * 0xFFFF);

@@ -1,0 +1,34 @@
+diff --git a/src/core/gba/gbaSound.cpp b/src/core/gba/gbaSound.cpp
+index 8eca8ea..e0de407 100644
+--- a/src/core/gba/gbaSound.cpp
++++ b/src/core/gba/gbaSound.cpp
+@@ -50,6 +50,7 @@ int soundTicks = SOUND_CLOCK_TICKS_;
+ 
+ static float soundVolume = 1.0f;
+ static int soundEnableFlag = 0x3ff; // emulator channels enabled
++static int ffbgmMuteMask = 0; // ff-bgm1x: PSG channels replaced at 1x speed
+ static float soundFiltering_ = -1.0f;
+ static float soundVolume_ = -1.0f;
+ 
+@@ -415,7 +416,7 @@ static void apply_muting()
+     if (gb_apu) {
+         // APU
+         for (int i = 0; i < 4; i++) {
+-            if (soundEnableFlag >> i & 1)
++            if ((soundEnableFlag & ~ffbgmMuteMask) >> i & 1)
+                 gb_apu->set_output(stereo_buffer->center(),
+                     stereo_buffer->left(), stereo_buffer->right(), i);
+             else
+@@ -482,6 +483,12 @@ int soundGetEnable()
+     return (soundEnableFlag & 0x30f);
+ }
+ 
++void soundSetFfbgmMuteMask(int mask)
++{
++    ffbgmMuteMask = mask & 0x0f;
++    apply_muting();
++}
++
+ void soundReset()
+ {
+     if (!soundDriver)

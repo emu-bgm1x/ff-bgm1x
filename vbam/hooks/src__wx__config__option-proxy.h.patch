@@ -1,0 +1,15 @@
+diff --git a/src/wx/config/option-proxy.h b/src/wx/config/option-proxy.h
+index b370e03..f04586d 100644
+--- a/src/wx/config/option-proxy.h
++++ b/src/wx/config/option-proxy.h
+@@ -145,6 +145,10 @@ static constexpr std::array<Option::Type, kNbOptions> kOptionsTypes = {
+     /*kSoundDSoundHWAccel*/ Option::Type::kBool,
+     /*kSoundUpmix*/ Option::Type::kBool,
+     /*kSoundVolume*/ Option::Type::kInt,
++    /*kSoundFfbgmBgm1x*/ Option::Type::kBool,
++    /*kSoundFfbgmFfCutscenes*/ Option::Type::kBool,
++    /*kSoundFfbgmSfx1x*/ Option::Type::kBool,
++    /*kSoundFfbgmSfxVolume*/ Option::Type::kInt,
+     /*kLocale*/ Option::Type::kInt,
+     /*kExternalTranslations*/ Option::Type::kBool,
+ };

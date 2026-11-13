@@ -1,0 +1,13 @@
+diff --git a/src/core/gba/gbaSound.h b/src/core/gba/gbaSound.h
+index 8575409..bf69c2a 100644
+--- a/src/core/gba/gbaSound.h
++++ b/src/core/gba/gbaSound.h
+@@ -31,6 +31,8 @@ float soundGetVolume();
+ // 0x200 PCM 2
+ void soundSetEnable(int mask);
+ int soundGetEnable();
++// ff-bgm1x: mute PSG channels (bits 0-3 = channels 1-4) whose sound is replayed at 1x speed (separate from the user setting)
++void soundSetFfbgmMuteMask(int mask);
+ 
+ // Pauses/resumes system sound output
+ void soundPause();

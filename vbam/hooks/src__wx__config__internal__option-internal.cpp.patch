@@ -1,0 +1,37 @@
+diff --git a/src/wx/config/internal/option-internal.cpp b/src/wx/config/internal/option-internal.cpp
+index 8ea3831..fbef850 100644
+--- a/src/wx/config/internal/option-internal.cpp
++++ b/src/wx/config/internal/option-internal.cpp
+@@ -265,6 +265,10 @@ std::array<Option, kNbOptions>& Option::All() {
+         bool dsound_hw_accel = false;
+         bool upmix = false;
+         int32_t volume = 100;
++        bool ffbgm_bgm1x = true;
++        bool ffbgm_ff_cutscenes = false;
++        bool ffbgm_sfx1x = true;
++        int32_t ffbgm_sfx_volume = 256;
+         uint32_t bitdepth = 3;
+         wxString sdlrenderer = wxString("default");
+         int locale = wxLANGUAGE_DEFAULT;
+@@ -414,6 +418,10 @@ std::array<Option, kNbOptions>& Option::All() {
+         Option(OptionID::kSoundDSoundHWAccel, &g_owned_opts.dsound_hw_accel),
+         Option(OptionID::kSoundUpmix, &g_owned_opts.upmix),
+         Option(OptionID::kSoundVolume, &g_owned_opts.volume, 0, 200),
++        Option(OptionID::kSoundFfbgmBgm1x, &g_owned_opts.ffbgm_bgm1x),
++        Option(OptionID::kSoundFfbgmFfCutscenes, &g_owned_opts.ffbgm_ff_cutscenes),
++        Option(OptionID::kSoundFfbgmSfx1x, &g_owned_opts.ffbgm_sfx1x),
++        Option(OptionID::kSoundFfbgmSfxVolume, &g_owned_opts.ffbgm_sfx_volume, 0, 256),
+         Option(OptionID::kLocale, &g_owned_opts.locale, 0, 911),
+         Option(OptionID::kExternalTranslations, &g_owned_opts.exttrans)
+     };
+@@ -629,6 +637,10 @@ const std::array<OptionData, kNbOptions + 1> kAllOptionsData = {
+     OptionData{"Sound/DSoundHWAccel", "DSoundHWAccel", _("Use DirectSound hardware acceleration")},
+     OptionData{"Sound/Upmix", "Upmix", _("Upmix stereo to surround")},
+     OptionData{"Sound/Volume", "", _("Sound volume (%)")},
++    OptionData{"Sound/FfbgmBgm1x", "FfbgmBgm1x", _("Keep BGM at 1x speed while fast forwarding (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmFfCutscenes", "FfbgmFfCutscenes", _("Fast forward during cutscenes (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmSfx1x", "FfbgmSfx1x", _("Keep sound effects at 1x speed (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmSfxVolume", "", _("Volume of sound effects played at 1x speed (0-256)")},
+     OptionData{"Language/Locale", _("Language")},
+     OptionData{"Language/ExternalTranslations", _("External translations")},
+ 

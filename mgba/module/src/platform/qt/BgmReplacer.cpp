@@ -127,10 +127,17 @@ void BgmReplacer::onReset(mCore* core) {
 }
 
 void BgmReplacer::onFrame(mCore* core) {
-	updateFrame(core);
-	// 대체 중인 소리가 쓰는 PSG 채널은 에뮬레이터 출력에서 끈다 (게임 메모리·진행은 그대로).
-	// 트랙 볼륨만 0 으로 바꾸면 이미 시작된 PSG 소리가 몇 프레임 더 울려, 배속 중 원본 효과음이 같이 들렸다
-	const uint8_t mask = (!m_gb && m_enabled && m_liveMulti.located()) ? m_liveMulti.replacedPsgMask() : 0;
+	uint8_t mask;
+	{
+		// 실시간 출력 스레드(mixActive -> render)와 재생기 상태를 동시에 고치지 않게 같은 잠금을 잡는다.
+		// BgmMultiMirror::onFrame/stopAll/setRuntimeParams 는 내부 잠금 없이 재생기(엔진)를 고치므로,
+		// render 와 겹치면 메모리가 깨질 수 있다 (VBA-M 판에서 힙 손상 종료로 드러남)
+		std::lock_guard<std::mutex> lock(s_activeMutex);
+		updateFrame(core);
+		// 대체 중인 소리가 쓰는 PSG 채널은 에뮬레이터 출력에서 끈다 (게임 메모리·진행은 그대로).
+		// 트랙 볼륨만 0 으로 바꾸면 이미 시작된 PSG 소리가 몇 프레임 더 울려, 배속 중 원본 효과음이 같이 들렸다
+		mask = (!m_gb && m_enabled && m_liveMulti.located()) ? m_liveMulti.replacedPsgMask() : 0;
+	}
 	applyPsgMute(core, mask);
 }
 

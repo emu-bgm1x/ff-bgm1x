@@ -131,6 +131,19 @@ bool detectGameFreakGsc(const std::vector<uint8_t>& rom, GbDriverProfile& out) {
 			break;
 		}
 	}
+
+	// 게임 설정 바이트(wOptions): Music_StereoPanning 의
+	//   ld a,[wOptions] / bit STEREO,a / jr nz,ForceStereoPanning / call GetMusicByte / ret
+	const std::vector<int> stereoPanning = {0xFA, ANY, ANY, 0xCB, 0x6F, 0x20, ANY, 0xCD, ANY, ANY, 0xC9};
+	for (size_t a = 0; a + stereoPanning.size() <= rom.size(); ++a) {
+		if (matchAt(rom, a, stereoPanning)) {
+			const uint16_t addr = word(rom, a + 1);
+			if (addr >= 0xC000 && addr < 0xE000) {
+				out.optionsAddr = addr;
+				break;
+			}
+		}
+	}
 	return true;
 }
 
@@ -282,12 +295,21 @@ void GbShadowPlayer::setOutputRegs(uint8_t nr50, uint8_t nr51) {
 	m_outRegs = (nr50 << 8) | nr51;
 }
 
+void GbShadowPlayer::setOptions(uint8_t value) {
+	m_options = value;
+}
+
 void GbShadowPlayer::applyRequest() {
 	const uint16_t cmd = m_profile.driverRam + 0x80;
 	int regs = m_outRegs;
 	if (regs >= 0) {
 		m_core->busWrite8(m_core, cmd + 3, static_cast<uint8_t>(regs >> 8));
 		m_core->busWrite8(m_core, cmd + 4, static_cast<uint8_t>(regs & 0xFF));
+	}
+	// 게임 설정 바이트를 원본과 같게 (숨겨진 코어는 게임 초기화를 거치지 않아 이 자리에 아무 값이나 있다)
+	const int options = m_options;
+	if (options >= 0 && m_profile.optionsAddr) {
+		m_core->busWrite8(m_core, m_profile.optionsAddr, static_cast<uint8_t>(options));
 	}
 	int id = m_pending.exchange(-1);
 	if (id >= 0) {
@@ -330,16 +352,30 @@ void GbShadowPlayer::mixInto(int16_t* stereo, int frames, int sampleRate, int vo
 		blip_set_rates(right, m_core->frequency(m_core), sampleRate);
 		m_rate = sampleRate;
 	}
+	// 쌓인 만큼 먼저 꺼내고, 모자랄 때만 한 프레임씩 돌린다. 한 번에 여러 프레임을 돌려 쌓아 두면
+	// mGBA GB 오디오가 출력 버퍼에 일정량(audio->samples) 이상 쌓였을 때 새 표본을 버려(gb/audio.c _sample)
+	// 출력 장치가 큰 덩어리로 가져갈 때 지지직거렸다
+	std::vector<int16_t> buf;
+	int done = 0;
 	int guard = 0;
-	while (blip_samples_avail(left) < frames && guard++ < 16) {
-		runFrame();
-	}
-	int avail = std::min(frames, blip_samples_avail(left));
-	std::vector<int16_t> buf(static_cast<size_t>(avail) * 2);
-	blip_read_samples(left, buf.data(), avail, true);
-	blip_read_samples(right, buf.data() + 1, avail, true);
-	for (int i = 0; i < avail * 2; ++i) {
-		stereo[i] = clamp16(stereo[i] + buf[i] * volume / 0x100);
+	while (done < frames) {
+		const int avail = blip_samples_avail(left);
+		if (avail <= 0) {
+			if (guard++ >= 64) {
+				break;
+			}
+			runFrame();
+			continue;
+		}
+		const int n = std::min(frames - done, avail);
+		buf.resize(static_cast<size_t>(n) * 2);
+		blip_read_samples(left, buf.data(), n, true);
+		blip_read_samples(right, buf.data() + 1, n, true);
+		int16_t* out = stereo + static_cast<size_t>(done) * 2;
+		for (int i = 0; i < n * 2; ++i) {
+			out[i] = clamp16(out[i] + buf[i] * volume / 0x100);
+		}
+		done += n;
 	}
 }
 
@@ -452,6 +488,9 @@ void GbDriverBgm::onFrame(mCore* core, bool enabled, bool sfx1x) {
 	m_sfxMask = sfx;
 	const int regs = (core->busRead8(core, 0xFF24) << 8) | core->busRead8(core, 0xFF25);
 	m_outRegs = regs;
+	if (p.optionsAddr) {
+		m_options = core->rawRead8(core, p.optionsAddr, 1);
+	}
 
 	if (m_recording) {
 		if (!m_rec) {
@@ -467,6 +506,9 @@ void GbDriverBgm::onFrame(mCore* core, bool enabled, bool sfx1x) {
 		}
 		m_rec->setMutedChannels(sfx);
 		m_rec->setOutputRegs(static_cast<uint8_t>(regs >> 8), static_cast<uint8_t>(regs & 0xFF));
+		if (m_options >= 0) {
+			m_rec->setOptions(static_cast<uint8_t>(m_options.load()));
+		}
 		m_rec->runFrame();
 	}
 }
@@ -501,6 +543,10 @@ void GbDriverBgm::mixRealtime(int16_t* stereo, int frames, int sampleRate, int v
 	int regs = m_outRegs;
 	if (regs >= 0) {
 		m_live->setOutputRegs(static_cast<uint8_t>(regs >> 8), static_cast<uint8_t>(regs & 0xFF));
+	}
+	const int options = m_options;
+	if (options >= 0) {
+		m_live->setOptions(static_cast<uint8_t>(options));
 	}
 	m_live->mixInto(stereo, frames, sampleRate, volume);
 }

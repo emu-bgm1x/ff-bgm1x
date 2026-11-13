@@ -1,0 +1,11 @@
+diff --git a/libgambatte/libretro/link.T b/libgambatte/libretro/link.T
+index b0c262d..8fb509d 100644
+--- a/libgambatte/libretro/link.T
++++ b/libgambatte/libretro/link.T
+@@ -1,5 +1,5 @@
+ {
+-   global: retro_*;
++   global: retro_*; ff_bgm1x_*;
+    local: *;
+ };
+ 
