@@ -47,7 +47,7 @@
 
 | 앱 | 바탕 | 1배속 소리 | 더한 것 |
 |---|---|---|---|
-| GBA·GB/GBC | Lemuroid + LibretroDroid + mGBA libretro 코어(GBA) + Gambatte libretro 코어(GB/GBC) | PC mGBA 와 같은 재생기를 코어에 넣음 (GBA). GB/GBC 는 Gambatte 안에 숨겨진 mGBA GB 코어 | 배속 최대 16배(기본·게임별), 화면 빨리 감기 버튼(켜고 끄기), 센서(기울기·자이로·조도), 치트(직접 입력·.cht 불러오기), 화면 방향(자동·가로·세로, 게임별), 색 보정·잔상(프레임 섞기), 메뉴 버튼 한 번에 열기 |
+| GBA·GB/GBC | Lemuroid + LibretroDroid + mGBA libretro 코어(GBA, 기본) 또는 VBA-M libretro 코어(GBA, 코어 선택에서) + Gambatte libretro 코어(GB/GBC) | PC mGBA 와 같은 재생기를 코어에 넣음 (GBA). GB/GBC 는 Gambatte 안에 숨겨진 mGBA GB 코어 | 배속 최대 16배(기본·게임별), 화면 빨리 감기 버튼(켜고 끄기), 센서(기울기·자이로·조도), 치트(직접 입력·.cht 불러오기), 화면 방향(자동·가로·세로, 게임별), 색 보정·잔상(프레임 섞기), 메뉴 버튼 한 번에 열기 |
 | NDS | melonDS Android | PC melonDS 와 같은 재생기 | 기본 배치에 메뉴(일시정지) 버튼 |
 | 3DS | Azahar 안드로이드 | PC Azahar 와 같은 코드 | 설정 화면에 1배속 항목, 화면 메뉴 버튼(한 번에 메뉴) |
 
@@ -124,7 +124,7 @@ music and sound effects play at 1x speed and original pitch.
 
 | App | Based on | 1x sound | Additions |
 |---|---|---|---|
-| GBA, GB/GBC | Lemuroid + LibretroDroid + mGBA libretro core (GBA) + Gambatte libretro core (GB/GBC) | same player as PC mGBA, inside the core (GBA); GB/GBC uses a hidden mGBA GB core inside Gambatte | fast-forward up to 16x (default and per game), on-screen fast-forward toggle, sensors (tilt, gyro, light), cheats (manual and .cht import), screen orientation (auto/landscape/portrait, per game), color correction and frame blending, one-tap menu button |
+| GBA, GB/GBC | Lemuroid + LibretroDroid + mGBA libretro core (GBA, default) or VBA-M libretro core (GBA, selectable) + Gambatte libretro core (GB/GBC) | same player as PC mGBA, inside the core (GBA); GB/GBC uses a hidden mGBA GB core inside Gambatte | fast-forward up to 16x (default and per game), on-screen fast-forward toggle, sensors (tilt, gyro, light), cheats (manual and .cht import), screen orientation (auto/landscape/portrait, per game), color correction and frame blending, one-tap menu button |
 | NDS | melonDS Android | same player as PC melonDS | menu (pause) button in the default layouts |
 | 3DS | Azahar Android | same code as PC Azahar | 1x options in the settings screen, one-tap on-screen menu button |
 

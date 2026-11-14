@@ -73,3 +73,22 @@ GB 숨겨진 코어: VBA-M 의 GB 코어는 전역 상태라 하나 더 띄울 �
   채널이 잠깐 꺼져 **초당 약 60번 지직거렸다**. 롬에서 `Music_StereoPanning` 패턴으로 설정 바이트 주소를 찾아
   매 프레임 원본 값을 복사한다(`optionsAddr`, `setOptions`). CGB 는 D000~DFFF 가 WRAM 뱅크라 뱅크 1 에서 읽는다(`r8Bank1`).
 - MSVC: UTF-8 한글 주석은 BOM 이 있거나 `/utf-8` 이어야 한다.
+
+## 6. libretro 코어 (안드로이드 Lemuroid 용, GBA 만)
+
+`src/libretro/` 에 같은 GBA 재생기(`src/wx/ffbgm/` 의 `bgm_mirror`, `mp2k_engine`, `rom`)를 붙였습니다.
+Lemuroid 에서 GBA 코어를 mGBA 와 VBA-M 중에 고를 수 있게 하는 데 씁니다 (앱 쪽은 `lemuroid/PORTING-AI.md`).
+GB/GBC 는 Lemuroid 에서 Gambatte 코어가 맡으므로 libretro 판에는 넣지 않았습니다.
+
+| 파일 | 역할 |
+|---|---|
+| `module/src/libretro/ff_bgm1x.cpp/.h` (새 파일) | 재생기 연결. `ff_bgm1x_mix(int16_t*, int frames, int rate)` 와 `ff_bgm1x_speed_hold()` 를 내보낸다 (mGBA libretro 와 같은 이름). 1배속 소리는 SDL 스트림 대신 프론트엔드가 이 함수로 출력 직전에 섞는다. 이 함수를 부르지 않는 프론트엔드에서는 원본 BGM 을 무음 처리하지 않는다 |
+| `hooks/src__libretro__libretro.cpp.patch` | 게임 불러오기(GBA)·내리기·`retro_run` 끝에서 재생기 호출, 코어 옵션 읽기. 그리고 `retropad_device` 기본값을 조이패드로 (아래 함정) |
+| `hooks/src__libretro__libretro_core_options.h.patch` | 옵션 4개: `vbam_ff_bgm1x`, `vbam_ff_bgm1x_cutscenes`, `vbam_ff_bgm1x_sfx`, `vbam_ff_bgm1x_sfx_volume` |
+| `hooks/src__libretro__Makefile.common.patch` | 소스 4개 추가 |
+| `hooks/src__libretro__link.T.patch` | `ff_bgm1x_*` 내보내기 |
+
+빌드: `android/build_vbam_libretro.sh` (Android NDK `ndk-build`, `VBAM_SRC` 에 소스 폴더). 결과 `libvbam_libretro_android.so`.
+
+함정: 원본 libretro 코어는 프론트엔드가 `retro_set_controller_port_device` 로 포트를 조이패드로 정해 줄 때만 버튼을 읽는다
+(기본값 0 = 없음). Lemuroid 는 GBA 에서 이것을 부르지 않아 **버튼이 하나도 안 먹었다**. libretro 규칙대로 기본값을 조이패드로 바꿨다.

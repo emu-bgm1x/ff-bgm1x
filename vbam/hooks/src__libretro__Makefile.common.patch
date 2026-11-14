@@ -1,0 +1,13 @@
+diff --git a/src/libretro/Makefile.common b/src/libretro/Makefile.common
+index 32306b3..cd5f3d6 100644
+--- a/src/libretro/Makefile.common
++++ b/src/libretro/Makefile.common
+@@ -23,7 +23,7 @@ SOURCES_CXX :=
+ 
+ SOURCES_CXX += \
+ 	$(CORE_DIR)/libretro/libretro.cpp \
+-	$(CORE_DIR)/libretro/SoundRetro.cpp
++	$(CORE_DIR)/libretro/SoundRetro.cpp 	$(CORE_DIR)/libretro/ff_bgm1x.cpp 	$(CORE_DIR)/wx/ffbgm/bgm_mirror.cpp 	$(CORE_DIR)/wx/ffbgm/mp2k_engine.cpp 	$(CORE_DIR)/wx/ffbgm/rom.cpp
+ 
+ SOURCES_CXX += \
+ 	$(CORE_DIR)/core/base/internal/file_util_internal.cpp \

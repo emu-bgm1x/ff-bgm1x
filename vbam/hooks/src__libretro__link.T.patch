@@ -1,0 +1,11 @@
+diff --git a/src/libretro/link.T b/src/libretro/link.T
+index 78f657b..03edef2 100644
+--- a/src/libretro/link.T
++++ b/src/libretro/link.T
+@@ -1,5 +1,5 @@
+ {
+-	global: retro_*;
++	global: retro_*; ff_bgm1x_*;
+ 	local: *;
+ };
+ 

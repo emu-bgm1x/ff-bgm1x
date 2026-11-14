@@ -22,7 +22,7 @@
 | `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
 | `vbam/` | VisualBoyAdvance-M | 2.2.3 | GBA, GB/GBC (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, 안드로이드) |
-| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | 안드로이드 GBA, GB/GBC (GBA 코어는 `mgba/` 의 libretro) |
+| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | 안드로이드 GBA, GB/GBC (GBA 코어는 `mgba/` 의 libretro, 선택하면 `vbam/` 의 libretro) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | 안드로이드 NDS |
 
 안드로이드판은 Play 스토어가 아닌 APK 로 배포하므로, 설치할 때 "출처를 알 수 없는 앱" 허용이 필요합니다.
@@ -94,7 +94,7 @@ A tool that copies settings and saves from the official emulators to the ff-bgm1
 | `desmume/` | DeSmuME | 0.9.13 | NDS (Windows) |
 | `vbam/` | VisualBoyAdvance-M | 2.2.3 | GBA, GB/GBC (Windows) |
 | `azahar/` | Azahar | 2126.2 | 3DS (PC, Android) |
-| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | Android GBA, GB/GBC (GBA core: libretro part of `mgba/`) |
+| `lemuroid/`, `libretrodroid/`, `gambatte/` | Lemuroid, LibretroDroid, Gambatte libretro | `3625bc12`, `8835c30`, `b752252` | Android GBA, GB/GBC (GBA core: libretro part of `mgba/`, or optionally of `vbam/`) |
 | `melonds-android/`, `melonds-android-lib/` | melonDS Android | `c42995ca`, `431ab4b` | Android NDS |
 
 The Android builds are distributed as APKs (not on the Play Store), so installing them requires allowing
