@@ -13,6 +13,7 @@
 **무엇을 바꿨는지는 [FEATURES.md](FEATURES.md) 에 정리되어 있습니다** (기능, 에뮬레이터별 방식, 새 버전에 대한 생각).
 
 완성된 실행 파일(Windows)은 [Releases](../../releases) 에 있습니다.
+공식판의 설정·세이브를 수정판으로 옮기는 프로그램은 [tools/settings-mover](tools/settings-mover/README.md) 에 있습니다 (실행 파일은 Releases).
 
 | 폴더 | 에뮬레이터 | 기준 버전 | 대상 기기 |
 |---|---|---|---|
@@ -82,6 +83,7 @@ ff-bgm1x is a set of emulator modifications that keep **BGM and sound effects pl
 fast-forwarding**, so the game runs fast but sounds normal. This repository is a *porting kit*: it contains
 everything an AI coding assistant needs to re-apply the feature to a **newer official
 release** of each emulator. Prebuilt Windows binaries of the last version are in [Releases](../../releases).
+A tool that copies settings and saves from the official emulators to the ff-bgm1x builds is in [tools/settings-mover](tools/settings-mover/README.md).
 
 **What was changed is summarized in [FEATURES.md](FEATURES.md)** (features, how each emulator works, notes on new versions).
 
