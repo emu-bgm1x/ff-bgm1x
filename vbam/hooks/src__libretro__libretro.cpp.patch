@@ -1,0 +1,78 @@
+diff --git a/src/libretro/libretro.cpp b/src/libretro/libretro.cpp
+index 6dcfd84..69f3bfb 100644
+--- a/src/libretro/libretro.cpp
++++ b/src/libretro/libretro.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "SoundRetro.h"
+ #include "libretro_core_options.h"
++#include "ff_bgm1x.h"  // ff-bgm1x
+ #include "scrc32.h"
+ 
+ #include "components/filters_agb/filters_agb.h"
+@@ -66,7 +67,9 @@ static bool option_lcdfilter = false;
+ typedef void (*IFBFilterFunc)(uint8_t*, uint32_t, int, int);
+ static IFBFilterFunc ifb_filter_func = NULL;
+ 
+-static unsigned retropad_device[4] = {0};
++// ff-bgm1x: libretro 규칙대로 포트 기본값은 조이패드 (Lemuroid 는 GBA 에서 retro_set_controller_port_device 를 부르지 않아,
++// 원래 값 0(없음)이면 버튼 입력을 모두 버렸다)
++static unsigned retropad_device[4] = {RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD};
+ static unsigned systemWidth = gbaWidth;
+ static unsigned systemHeight = gbaHeight;
+ static EmulatedSystem* core = NULL;
+@@ -1151,6 +1154,29 @@ static void update_variables(bool startup)
+         option_colorizerHack = (!strcmp(var.value, "enabled")) ? true : false;
+     }
+ 
++    // ff-bgm1x
++    {
++        bool ffEnabled = true, ffCutscenes = false, ffSfx = true;
++        int ffSfxVolume = 0x100;
++        var.key = "vbam_ff_bgm1x";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffEnabled = strcmp(var.value, "disabled") != 0;
++        var.key = "vbam_ff_bgm1x_cutscenes";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffCutscenes = strcmp(var.value, "enabled") == 0;
++        var.key = "vbam_ff_bgm1x_sfx";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffSfx = strcmp(var.value, "disabled") != 0;
++        var.key = "vbam_ff_bgm1x_sfx_volume";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffSfxVolume = (atoi(var.value) * 0x100) / 100;
++        ffBgm1xSetOptions(ffEnabled, ffCutscenes, ffSfx, ffSfxVolume);
++    }
++
+     var.key = "vbam_turboenable";
+ 
+     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+@@ -1526,6 +1552,8 @@ void retro_run(void)
+ 
+     while (!has_frame)
+         core->emuMain(core->emuCount);
++
++    ffBgm1xFrame();  // ff-bgm1x
+ }
+ 
+ static unsigned serialize_size = 0;
+@@ -1673,6 +1701,7 @@ bool retro_load_game(const struct retro_game_info *game)
+       core = &GBASystem;
+ 
+       gba_init();
++      ffBgm1xGbaLoaded(g_rom, romSize);  // ff-bgm1x
+ 
+       struct retro_memory_descriptor desc[11];
+       memset(desc, 0, sizeof(desc));
+@@ -1811,6 +1840,7 @@ bool retro_load_game_special(unsigned,  const struct retro_game_info *, size_t)
+ 
+ void retro_unload_game(void)
+ {
++    ffBgm1xUnload();  // ff-bgm1x
+ }
+ 
+ unsigned retro_get_region(void)

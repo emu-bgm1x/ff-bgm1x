@@ -1,0 +1,19 @@
+diff --git a/src/audio_core/hle/source.h b/src/audio_core/hle/source.h
+index 1223f68..cb35b13 100755
+--- a/src/audio_core/hle/source.h
++++ b/src/audio_core/hle/source.h
+@@ -69,6 +69,14 @@ public:
+ 
+ private:
+     const std::size_t source_id;
++    bool bgm_replaced = false;  // ff-bgm1x: 이 음성을 1배속 대체 재생 중
++    bool mirror_new = false;    // ff-bgm1x: 새 소리 시작 (켜짐, 리셋, 새 임베디드 버퍼)
++    int mirror_mode = 0;        // ff-bgm1x: 효과음 미러 0 = 원본, 1 = 녹음(배속), 2 = 앞당겨 해독(느린 속도)
++    // ff-bgm1x 소리 분류: 새 소리의 첫 버퍼를 아직 보지 않음, 1배속 볼륨 배율, 연출로 지정한 소리
++    bool sfx_first = false;
++    float sfx_gain = 1.0f;
++    bool sfx_cutscene = false;
++    float stream_gain = 1.0f;  // 원본 그대로 내는 스트림 곡의 사용자 볼륨
+     Memory::MemorySystem* memory_system{};
+     StereoFrame16 current_frame;
+     StereoFrame16 backup_frame; // TODO(PabloMK7): Check if we actually need this

@@ -1,0 +1,729 @@
+diff --git a/src/core/apu/Gb_Apu.cpp b/src/core/apu/Gb_Apu.cpp
+index 7fbcee5..4ffa3e7 100644
+--- a/src/core/apu/Gb_Apu.cpp
++++ b/src/core/apu/Gb_Apu.cpp
+@@ -24,8 +24,11 @@ int const power_mask = 0x80;
+ 
+ void Gb_Apu::treble_eq( blip_eq_t const& eq )
+ {
+-	good_synth.treble_eq( eq );
+-	med_synth .treble_eq( eq );
++	for ( int i = 0; i < osc_count; i++ )
++	{
++		good_synth [i].treble_eq( eq );
++		med_synth  [i].treble_eq( eq );
++	}
+ }
+ 
+ inline int Gb_Apu::calc_output( int osc ) const
+@@ -60,9 +63,21 @@ void Gb_Apu::set_output( Blip_Buffer* center, Blip_Buffer* left, Blip_Buffer* ri
+ 
+ void Gb_Apu::synth_volume( int iv )
+ {
++	synth_iv_ = iv;
+ 	double v = volume_ * 0.60 / osc_count / 15 /*steps*/ / 8 /*master vol range*/ * iv;
+-	good_synth.volume( v );
+-	med_synth .volume( v );
++	for ( int i = 0; i < osc_count; i++ )
++	{
++		good_synth [i].volume( v * osc_gain_ [i] );
++		med_synth  [i].volume( v * osc_gain_ [i] );
++	}
++}
++
++void Gb_Apu::osc_gain( int osc, double gain )
++{
++	if ( osc < 0 || osc >= osc_count || osc_gain_ [osc] == gain )
++		return;
++	osc_gain_ [osc] = gain;
++	synth_volume( synth_iv_ );
+ }
+ 
+ void Gb_Apu::apply_volume()
+@@ -182,9 +197,11 @@ Gb_Apu::Gb_Apu()
+ 		o.outputs [1] = 0;
+ 		o.outputs [2] = 0;
+ 		o.outputs [3] = 0;
+-		o.good_synth  = &good_synth;
+-		o.med_synth   = &med_synth;
++		o.good_synth  = &good_synth [i];
++		o.med_synth   = &med_synth [i];
++		osc_gain_ [i] = 1.0;
+ 	}
++	synth_iv_ = 8;
+ 
+ 	reduce_clicks_ = false;
+ 	set_tempo( 1.0 );
+@@ -266,7 +283,7 @@ void Gb_Apu::silence_osc( Gb_Osc& o )
+ 		if ( o.output )
+ 		{
+ 			o.output->set_modified();
+-			med_synth.offset( last_time, delta, o.output );
++			o.med_synth->offset( last_time, delta, o.output );
+ 		}
+ 	}
+ }
+diff --git a/src/core/apu/Gb_Apu.h b/src/core/apu/Gb_Apu.h
+index 8fe53e6..b89ff05 100644
+--- a/src/core/apu/Gb_Apu.h
++++ b/src/core/apu/Gb_Apu.h
+@@ -59,6 +59,9 @@ class Gb_Apu
+         // Sets overall volume, where 1.0 is normal.
+         void volume(double);
+ 
++        // ff-bgm1x: per-oscillator volume multiplier (1.0 = unchanged)
++        void osc_gain(int osc, double gain);
++
+         // If true, reduces clicking by disabling DAC biasing. Note that this reduces
+         // emulation accuracy, since the clicks are authentic.
+         void reduce_clicks(bool reduce = true);
+@@ -132,8 +135,11 @@ class Gb_Apu
+         uint8_t regs[regs_size]; // last values written to registers
+ 
+         // large objects after everything else
+-        Gb_Osc::Good_Synth good_synth;
+-        Gb_Osc::Med_Synth med_synth;
++        // ff-bgm1x: one synth pair per oscillator so each channel can have its own volume
++        Gb_Osc::Good_Synth good_synth[osc_count];
++        Gb_Osc::Med_Synth med_synth[osc_count];
++        double osc_gain_[osc_count];
++        int synth_iv_;
+ 
+         void reset_lengths();
+         void reset_regs();
+diff --git a/src/core/gb/gbSound.cpp b/src/core/gb/gbSound.cpp
+index b546e74..d7f0390 100644
+--- a/src/core/gb/gbSound.cpp
++++ b/src/core/gb/gbSound.cpp
+@@ -21,6 +21,9 @@ static Gb_Apu* gb_apu;
+ 
+ static float soundVolume_ = -1;
+ static int prevSoundEnable = -1;
++static int ffbgmMuteMask = 0;      // ff-bgm1x
++static int prevFfbgmMuteMask = -1; // ff-bgm1x
++static int ffbgmGain[4] = { 256, 256, 256, 256 }; // ff-bgm1x: per-channel volume (256 = unchanged)
+ static bool declicking = false;
+ 
+ int const chan_count = 4;
+@@ -51,6 +54,7 @@ static void end_frame(blip_time_t time)
+ static void apply_effects()
+ {
+     prevSoundEnable = soundGetEnable();
++    prevFfbgmMuteMask = ffbgmMuteMask;
+     gb_effects_config_current = gb_effects_config;
+ 
+     stereo_buffer->config().enabled = gb_effects_config_current.enabled;
+@@ -61,12 +65,28 @@ static void apply_effects()
+ 
+     for (int i = 0; i < chan_count; i++) {
+         Multi_Buffer::channel_t ch = { 0, 0, 0 };
+-        if (prevSoundEnable >> i & 1)
++        if ((prevSoundEnable & ~ffbgmMuteMask) >> i & 1)
+             ch = stereo_buffer->channel(i);
+         gb_apu->set_output(ch.center, ch.left, ch.right, i);
+     }
+ }
+ 
++void gbSoundSetFfbgmMuteMask(int mask)
++{
++    ffbgmMuteMask = mask & 0x0f;
++}
++
++// ff-bgm1x: per-channel volume multiplier for sounds left at game speed (sound classification window)
++void gbSoundSetFfbgmGain(int channel, int q8)
++{
++    channel &= 3;
++    if (ffbgmGain[channel] == q8)
++        return;
++    ffbgmGain[channel] = q8;
++    if (gb_apu)
++        gb_apu->osc_gain(channel, q8 / 256.0);
++}
++
+ void gbSoundConfigEffects(gb_effects_config_t const& c)
+ {
+     gb_effects_config = c;
+@@ -91,7 +111,8 @@ void gbSoundTick(int st)
+         // Update effects config if it was changed
+         if (memcmp(&gb_effects_config_current, &gb_effects_config,
+                 sizeof gb_effects_config)
+-            || soundGetEnable() != prevSoundEnable)
++            || soundGetEnable() != prevSoundEnable
++            || ffbgmMuteMask != prevFfbgmMuteMask)
+             apply_effects();
+ 
+         if (soundVolume_ != soundGetVolume())
+@@ -122,6 +143,8 @@ static void gb_remake_stereo_buffer()
+     // APU
+     if (!gb_apu) {
+         gb_apu = new Gb_Apu; // TODO: handle errors
++        for (int i = 0; i < 4; i++) // ff-bgm1x
++            gb_apu->osc_gain(i, ffbgmGain[i] / 256.0);
+         reset_apu();
+     }
+ 
+diff --git a/src/core/gb/gbSound.h b/src/core/gb/gbSound.h
+index 7a39ca1..e1b3531 100644
+--- a/src/core/gb/gbSound.h
++++ b/src/core/gb/gbSound.h
+@@ -70,6 +70,10 @@ uint8_t gbSoundRead(int st, uint16_t address);
+ 
+ // Notifies emulator that SOUND_CLOCK_TICKS clocks have passed
+ void gbSoundTick(int st);
++// ff-bgm1x: mute GB channels (bits 0-3 = channels 1-4) whose sound is replayed at 1x speed (applied on the next tick)
++void gbSoundSetFfbgmMuteMask(int mask);
++// ff-bgm1x: per-channel volume multiplier (256 = unchanged)
++void gbSoundSetFfbgmGain(int channel, int q8);
+ extern int SOUND_CLOCK_TICKS; // Number of 16.8 MHz clocks between calls to gbSoundTick()
+ extern int soundTicks; // Number of 16.8 MHz clocks until gbSoundTick() will be called
+ 
+diff --git a/src/core/gba/gbaSound.cpp b/src/core/gba/gbaSound.cpp
+index 8eca8ea..e0de407 100644
+--- a/src/core/gba/gbaSound.cpp
++++ b/src/core/gba/gbaSound.cpp
+@@ -50,6 +50,7 @@ int soundTicks = SOUND_CLOCK_TICKS_;
+ 
+ static float soundVolume = 1.0f;
+ static int soundEnableFlag = 0x3ff; // emulator channels enabled
++static int ffbgmMuteMask = 0; // ff-bgm1x: PSG channels replaced at 1x speed
+ static float soundFiltering_ = -1.0f;
+ static float soundVolume_ = -1.0f;
+ 
+@@ -415,7 +416,7 @@ static void apply_muting()
+     if (gb_apu) {
+         // APU
+         for (int i = 0; i < 4; i++) {
+-            if (soundEnableFlag >> i & 1)
++            if ((soundEnableFlag & ~ffbgmMuteMask) >> i & 1)
+                 gb_apu->set_output(stereo_buffer->center(),
+                     stereo_buffer->left(), stereo_buffer->right(), i);
+             else
+@@ -482,6 +483,12 @@ int soundGetEnable()
+     return (soundEnableFlag & 0x30f);
+ }
+ 
++void soundSetFfbgmMuteMask(int mask)
++{
++    ffbgmMuteMask = mask & 0x0f;
++    apply_muting();
++}
++
+ void soundReset()
+ {
+     if (!soundDriver)
+diff --git a/src/core/gba/gbaSound.h b/src/core/gba/gbaSound.h
+index 8575409..bf69c2a 100644
+--- a/src/core/gba/gbaSound.h
++++ b/src/core/gba/gbaSound.h
+@@ -31,6 +31,8 @@ float soundGetVolume();
+ // 0x200 PCM 2
+ void soundSetEnable(int mask);
+ int soundGetEnable();
++// ff-bgm1x: mute PSG channels (bits 0-3 = channels 1-4) whose sound is replayed at 1x speed (separate from the user setting)
++void soundSetFfbgmMuteMask(int mask);
+ 
+ // Pauses/resumes system sound output
+ void soundPause();
+diff --git a/src/libretro/Makefile.common b/src/libretro/Makefile.common
+index 32306b3..eea597d 100644
+--- a/src/libretro/Makefile.common
++++ b/src/libretro/Makefile.common
+@@ -23,7 +23,7 @@ SOURCES_CXX :=
+ 
+ SOURCES_CXX += \
+ 	$(CORE_DIR)/libretro/libretro.cpp \
+-	$(CORE_DIR)/libretro/SoundRetro.cpp
++	$(CORE_DIR)/libretro/SoundRetro.cpp 	$(CORE_DIR)/libretro/ff_bgm1x.cpp 	$(CORE_DIR)/wx/ffbgm/bgm_mirror.cpp 	$(CORE_DIR)/wx/ffbgm/mp2k_engine.cpp 	$(CORE_DIR)/wx/ffbgm/rom.cpp 	$(CORE_DIR)/wx/ffbgm/sound_catalog.cpp
+ 
+ SOURCES_CXX += \
+ 	$(CORE_DIR)/core/base/internal/file_util_internal.cpp \
+diff --git a/src/libretro/libretro.cpp b/src/libretro/libretro.cpp
+index 6dcfd84..69f3bfb 100644
+--- a/src/libretro/libretro.cpp
++++ b/src/libretro/libretro.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "SoundRetro.h"
+ #include "libretro_core_options.h"
++#include "ff_bgm1x.h"  // ff-bgm1x
+ #include "scrc32.h"
+ 
+ #include "components/filters_agb/filters_agb.h"
+@@ -66,7 +67,9 @@ static bool option_lcdfilter = false;
+ typedef void (*IFBFilterFunc)(uint8_t*, uint32_t, int, int);
+ static IFBFilterFunc ifb_filter_func = NULL;
+ 
+-static unsigned retropad_device[4] = {0};
++// ff-bgm1x: libretro 규칙대로 포트 기본값은 조이패드 (Lemuroid 는 GBA 에서 retro_set_controller_port_device 를 부르지 않아,
++// 원래 값 0(없음)이면 버튼 입력을 모두 버렸다)
++static unsigned retropad_device[4] = {RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD, RETRO_DEVICE_JOYPAD};
+ static unsigned systemWidth = gbaWidth;
+ static unsigned systemHeight = gbaHeight;
+ static EmulatedSystem* core = NULL;
+@@ -1151,6 +1154,29 @@ static void update_variables(bool startup)
+         option_colorizerHack = (!strcmp(var.value, "enabled")) ? true : false;
+     }
+ 
++    // ff-bgm1x
++    {
++        bool ffEnabled = true, ffCutscenes = false, ffSfx = true;
++        int ffSfxVolume = 0x100;
++        var.key = "vbam_ff_bgm1x";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffEnabled = strcmp(var.value, "disabled") != 0;
++        var.key = "vbam_ff_bgm1x_cutscenes";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffCutscenes = strcmp(var.value, "enabled") == 0;
++        var.key = "vbam_ff_bgm1x_sfx";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffSfx = strcmp(var.value, "disabled") != 0;
++        var.key = "vbam_ff_bgm1x_sfx_volume";
++        var.value = NULL;
++        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++            ffSfxVolume = (atoi(var.value) * 0x100) / 100;
++        ffBgm1xSetOptions(ffEnabled, ffCutscenes, ffSfx, ffSfxVolume);
++    }
++
+     var.key = "vbam_turboenable";
+ 
+     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+@@ -1526,6 +1552,8 @@ void retro_run(void)
+ 
+     while (!has_frame)
+         core->emuMain(core->emuCount);
++
++    ffBgm1xFrame();  // ff-bgm1x
+ }
+ 
+ static unsigned serialize_size = 0;
+@@ -1673,6 +1701,7 @@ bool retro_load_game(const struct retro_game_info *game)
+       core = &GBASystem;
+ 
+       gba_init();
++      ffBgm1xGbaLoaded(g_rom, romSize);  // ff-bgm1x
+ 
+       struct retro_memory_descriptor desc[11];
+       memset(desc, 0, sizeof(desc));
+@@ -1811,6 +1840,7 @@ bool retro_load_game_special(unsigned,  const struct retro_game_info *, size_t)
+ 
+ void retro_unload_game(void)
+ {
++    ffBgm1xUnload();  // ff-bgm1x
+ }
+ 
+ unsigned retro_get_region(void)
+diff --git a/src/libretro/libretro_core_options.h b/src/libretro/libretro_core_options.h
+index 99c0d4d..d3d26e4 100644
+--- a/src/libretro/libretro_core_options.h
++++ b/src/libretro/libretro_core_options.h
+@@ -303,6 +303,72 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+         },
+         "5"
+     },
++    /* ff-bgm1x: works only when the frontend calls ff_bgm1x_mix (GBA games) */
++    {
++        "vbam_ff_bgm1x",
++        "BGM at 1x Speed (Fast Forward)",
++        NULL,
++        "Keeps background music at normal speed while fast forwarding. Requires a frontend that calls ff_bgm1x_mix.",
++        NULL,
++        "audio",
++        {
++            { "enabled", NULL },
++            { "disabled", NULL },
++            { NULL, NULL },
++        },
++        "enabled"
++    },
++    {
++        "vbam_ff_bgm1x_cutscenes",
++        "Fast Forward During Cutscenes",
++        NULL,
++        "When disabled, fast forward pauses while cutscene music is playing.",
++        NULL,
++        "audio",
++        {
++            { "disabled", NULL },
++            { "enabled", NULL },
++            { NULL, NULL },
++        },
++        "disabled"
++    },
++    {
++        "vbam_ff_bgm1x_sfx",
++        "Sound Effects at 1x Speed",
++        NULL,
++        "Also plays sound effects at normal speed while fast forwarding.",
++        NULL,
++        "audio",
++        {
++            { "enabled", NULL },
++            { "disabled", NULL },
++            { NULL, NULL },
++        },
++        "enabled"
++    },
++    {
++        "vbam_ff_bgm1x_sfx_volume",
++        "1x Sound Effect Volume",
++        NULL,
++        "Volume of the sound effects played at normal speed (percent).",
++        NULL,
++        "audio",
++        {
++            { "100", NULL },
++            { "0", NULL },
++            { "10", NULL },
++            { "20", NULL },
++            { "30", NULL },
++            { "40", NULL },
++            { "50", NULL },
++            { "60", NULL },
++            { "70", NULL },
++            { "80", NULL },
++            { "90", NULL },
++            { NULL, NULL },
++        },
++        "100"
++    },
+     {
+         "vbam_turboenable",
+         "Enable Turbo Buttons",
+diff --git a/src/libretro/link.T b/src/libretro/link.T
+index 78f657b..03edef2 100644
+--- a/src/libretro/link.T
++++ b/src/libretro/link.T
+@@ -1,5 +1,5 @@
+ {
+-	global: retro_*;
++	global: retro_*; ff_bgm1x_*;
+ 	local: *;
+ };
+ 
+diff --git a/src/wx/CMakeLists.txt b/src/wx/CMakeLists.txt
+index 69c05bb..3fc92ba 100644
+--- a/src/wx/CMakeLists.txt
++++ b/src/wx/CMakeLists.txt
+@@ -416,6 +416,26 @@ endif()
+ 
+ target_sources(visualboyadvance-m PRIVATE ${VBAM_WX_COMMON} ${VBAM_ICON_PATH})
+ 
++# ff-bgm1x: keep BGM and sound effects at 1x speed while fast forwarding
++# (GBA: MP2K player, GB/GBC: own player of a 2nd-generation GB sound engine)
++target_sources(visualboyadvance-m PRIVATE
++    ffbgm/bgm_mirror.cpp
++    ffbgm/mp2k_engine.cpp
++    ffbgm/rom.cpp
++    ffbgm/gb_driver_bgm.cpp
++    ffbgm/gsc_player.cpp
++    ffbgm/vbam_bgm.cpp
++    ffbgm/sound_catalog.cpp
++    ffbgm/sound_dialog.cpp
++)
++# ff-bgm1x 파일의 한글 문자열을 UTF-8 그대로 쓰게 한다 (소리 분류 창의 글자)
++if(MSVC)
++    set_source_files_properties(
++        ffbgm/bgm_mirror.cpp ffbgm/gb_driver_bgm.cpp ffbgm/vbam_bgm.cpp
++        ffbgm/sound_catalog.cpp ffbgm/sound_dialog.cpp
++        PROPERTIES COMPILE_OPTIONS "/utf-8")
++endif()
++
+ if(ENABLE_SDL3)
+     target_include_directories(visualboyadvance-m PRIVATE ${SDL3_INCLUDE_DIRS})
+ else()
+diff --git a/src/wx/cmdevents.cpp b/src/wx/cmdevents.cpp
+index 4778292..0a5b683 100644
+--- a/src/wx/cmdevents.cpp
++++ b/src/wx/cmdevents.cpp
+@@ -1,3 +1,4 @@
++#include "wx/ffbgm/sound_dialog.h"
+ #include "wx/wxvbam.h"
+ 
+ #include <wx/aboutdlg.h>
+@@ -2479,6 +2480,31 @@ EVT_HANDLER(AGBPrinter, "Enable AGB printer")
+     GetMenuOptionConfig("AGBPrinter", config::OptionID::kPrefAgbPrint);
+ }
+ 
++EVT_HANDLER(FfbgmBgm1x, "Keep BGM at 1x speed (toggle)")
++{
++    GetMenuOptionConfig("FfbgmBgm1x", config::OptionID::kSoundFfbgmBgm1x);
++}
++
++EVT_HANDLER(FfbgmFfCutscenes, "Fast forward during cutscenes (toggle)")
++{
++    GetMenuOptionConfig("FfbgmFfCutscenes", config::OptionID::kSoundFfbgmFfCutscenes);
++}
++
++EVT_HANDLER(FfbgmSfx1x, "Keep sound effects at 1x speed (toggle)")
++{
++    GetMenuOptionConfig("FfbgmSfx1x", config::OptionID::kSoundFfbgmSfx1x);
++}
++
++EVT_HANDLER(FfbgmRamSongs, "Read songs built in RAM (toggle)")
++{
++    GetMenuOptionConfig("FfbgmRamSongs", config::OptionID::kSoundFfbgmRamSongs);
++}
++
++EVT_HANDLER(FfbgmSoundCatalog, "Sound classification window (ff-bgm1x)")
++{
++    ffbgm::OpenSoundDialog(this);
++}
++
+ EVT_HANDLER_MASK(GBALcdFilter, "Enable LCD filter", CMDEN_GBA)
+ {
+     GetMenuOptionConfig("GBALcdFilter", config::OptionID::kGBALCDFilter);
+diff --git a/src/wx/config/internal/option-internal.cpp b/src/wx/config/internal/option-internal.cpp
+index 8ea3831..0159ff4 100644
+--- a/src/wx/config/internal/option-internal.cpp
++++ b/src/wx/config/internal/option-internal.cpp
+@@ -265,6 +265,11 @@ std::array<Option, kNbOptions>& Option::All() {
+         bool dsound_hw_accel = false;
+         bool upmix = false;
+         int32_t volume = 100;
++        bool ffbgm_bgm1x = true;
++        bool ffbgm_ff_cutscenes = false;
++        bool ffbgm_sfx1x = true;
++        int32_t ffbgm_sfx_volume = 256;
++        bool ffbgm_ram_songs = false;
+         uint32_t bitdepth = 3;
+         wxString sdlrenderer = wxString("default");
+         int locale = wxLANGUAGE_DEFAULT;
+@@ -414,6 +419,11 @@ std::array<Option, kNbOptions>& Option::All() {
+         Option(OptionID::kSoundDSoundHWAccel, &g_owned_opts.dsound_hw_accel),
+         Option(OptionID::kSoundUpmix, &g_owned_opts.upmix),
+         Option(OptionID::kSoundVolume, &g_owned_opts.volume, 0, 200),
++        Option(OptionID::kSoundFfbgmBgm1x, &g_owned_opts.ffbgm_bgm1x),
++        Option(OptionID::kSoundFfbgmFfCutscenes, &g_owned_opts.ffbgm_ff_cutscenes),
++        Option(OptionID::kSoundFfbgmSfx1x, &g_owned_opts.ffbgm_sfx1x),
++        Option(OptionID::kSoundFfbgmSfxVolume, &g_owned_opts.ffbgm_sfx_volume, 0, 256),
++        Option(OptionID::kSoundFfbgmRamSongs, &g_owned_opts.ffbgm_ram_songs),
+         Option(OptionID::kLocale, &g_owned_opts.locale, 0, 911),
+         Option(OptionID::kExternalTranslations, &g_owned_opts.exttrans)
+     };
+@@ -629,6 +639,11 @@ const std::array<OptionData, kNbOptions + 1> kAllOptionsData = {
+     OptionData{"Sound/DSoundHWAccel", "DSoundHWAccel", _("Use DirectSound hardware acceleration")},
+     OptionData{"Sound/Upmix", "Upmix", _("Upmix stereo to surround")},
+     OptionData{"Sound/Volume", "", _("Sound volume (%)")},
++    OptionData{"Sound/FfbgmBgm1x", "FfbgmBgm1x", _("Keep BGM at 1x speed while fast forwarding (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmFfCutscenes", "FfbgmFfCutscenes", _("Fast forward during cutscenes (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmSfx1x", "FfbgmSfx1x", _("Keep sound effects at 1x speed (ff-bgm1x)")},
++    OptionData{"Sound/FfbgmSfxVolume", "", _("Volume of sound effects played at 1x speed (0-256)")},
++    OptionData{"Sound/FfbgmRamSongs", "FfbgmRamSongs", _("Read songs built in RAM (ff-bgm1x)")},
+     OptionData{"Language/Locale", _("Language")},
+     OptionData{"Language/ExternalTranslations", _("External translations")},
+ 
+diff --git a/src/wx/config/option-id.h b/src/wx/config/option-id.h
+index d73f662..fa87b8b 100644
+--- a/src/wx/config/option-id.h
++++ b/src/wx/config/option-id.h
+@@ -141,6 +141,11 @@ enum class OptionID {
+     kSoundDSoundHWAccel,
+     kSoundUpmix,
+     kSoundVolume,
++    kSoundFfbgmBgm1x,
++    kSoundFfbgmFfCutscenes,
++    kSoundFfbgmSfx1x,
++    kSoundFfbgmSfxVolume,
++    kSoundFfbgmRamSongs,
+     kLocale,
+     kExternalTranslations,
+ 
+diff --git a/src/wx/config/option-proxy.h b/src/wx/config/option-proxy.h
+index b370e03..97eaa00 100644
+--- a/src/wx/config/option-proxy.h
++++ b/src/wx/config/option-proxy.h
+@@ -145,6 +145,11 @@ static constexpr std::array<Option::Type, kNbOptions> kOptionsTypes = {
+     /*kSoundDSoundHWAccel*/ Option::Type::kBool,
+     /*kSoundUpmix*/ Option::Type::kBool,
+     /*kSoundVolume*/ Option::Type::kInt,
++    /*kSoundFfbgmBgm1x*/ Option::Type::kBool,
++    /*kSoundFfbgmFfCutscenes*/ Option::Type::kBool,
++    /*kSoundFfbgmSfx1x*/ Option::Type::kBool,
++    /*kSoundFfbgmSfxVolume*/ Option::Type::kInt,
++    /*kSoundFfbgmRamSongs*/ Option::Type::kBool,
+     /*kLocale*/ Option::Type::kInt,
+     /*kExternalTranslations*/ Option::Type::kBool,
+ };
+diff --git a/src/wx/dialogs/sound-config.cpp b/src/wx/dialogs/sound-config.cpp
+index c4d58b6..ae5e7cf 100644
+--- a/src/wx/dialogs/sound-config.cpp
++++ b/src/wx/dialogs/sound-config.cpp
+@@ -167,6 +167,13 @@ SoundConfig::SoundConfig(wxWindow* parent) : BaseDialog(parent, "SoundConfig") {
+     GetValidatedChild("Volume100")
+         ->Bind(wxEVT_BUTTON, std::bind(&wxSlider::SetValue, volume_slider, 100));
+ 
++    // ff-bgm1x: volume of sound effects played at 1x speed (0-256, 256 = original)
++    wxSlider* ffbgm_sfx_slider = GetValidatedChild<wxSlider>("FfbgmSfxVolume");
++    ffbgm_sfx_slider->SetValidator(widgets::OptionIntValidator(config::OptionID::kSoundFfbgmSfxVolume));
++    ffbgm_sfx_slider->SetToolTip(wxString::Format("%d", ffbgm_sfx_slider->GetValue()));
++    ffbgm_sfx_slider->Bind(wxEVT_SLIDER, std::bind(UpdateSliderTooltip, ffbgm_sfx_slider, std::placeholders::_1));
++    ffbgm_sfx_slider->Bind(wxEVT_ENTER_WINDOW, std::bind(UpdateSliderTooltipOnHover, ffbgm_sfx_slider, std::placeholders::_1));
++
+     // Sound quality.
+     GetValidatedChild("Rate")->SetValidator(SoundRateValidator());
+ 
+diff --git a/src/wx/panel.cpp b/src/wx/panel.cpp
+index c3be387..d136c43 100644
+--- a/src/wx/panel.cpp
++++ b/src/wx/panel.cpp
+@@ -3,6 +3,7 @@
+ #endif
+ 
+ #include "wx/wxvbam.h"
++#include "wx/ffbgm/vbam_bgm.h"
+ 
+ #include <cmath>
+ #include <cstdlib>
+@@ -307,6 +308,7 @@ void GameArea::LoadGame(const wxString& name)
+         if (loadpatch) {
+             gbApplyPatch(UTF8(pfn.GetFullPath()));
+         }
++        ffbgm::OnGbLoaded(gbRom, g_gbCartData.rom_size());  // ff-bgm1x
+ 
+         // Apply overrides.
+         wxFileConfig* cfg = wxGetApp().gb_overrides_.get();
+@@ -378,6 +380,7 @@ void GameArea::LoadGame(const wxString& name)
+         }
+ 
+         rom_crc32 = crc32(0L, g_rom, rom_size);
++        int ffbgm_rom_size = rom_size;  // ff-bgm1x: size after patching
+ 
+         if (loadpatch) {
+             // don't use real rom size or it might try to resize rom[]
+@@ -387,6 +390,7 @@ void GameArea::LoadGame(const wxString& name)
+             // that means we no longer really know rom_size either <sigh>
+ 
+             gbaUpdateRomSize(size);
++            ffbgm_rom_size = size;
+         }
+ 
+         wxFileConfig* cfg = wxGetApp().overrides_.get();
+@@ -456,6 +460,7 @@ void GameArea::LoadGame(const wxString& name)
+         basic_width = GBAWidth;
+         basic_height = GBAHeight;
+         emusys = &GBASystem;
++        ffbgm::OnGbaLoaded(g_rom, static_cast<size_t>(ffbgm_rom_size));
+     }
+ 
+     // Set sound volume.
+@@ -657,6 +662,8 @@ void GameArea::UnloadGame(bool destruct)
+     if (!emulating)
+         return;
+ 
++    ffbgm::OnUnload();
++
+     // last opportunity to autosave cheats
+     if (OPTION(kPrefAutoSaveLoadCheatList) && cheats_dirty) {
+         wxFileName cfn = loaded_game;
+diff --git a/src/wx/sys.cpp b/src/wx/sys.cpp
+index cbeff0b..1272b3c 100644
+--- a/src/wx/sys.cpp
++++ b/src/wx/sys.cpp
+@@ -1,6 +1,9 @@
+ #include <algorithm>
++#include <vector>
+ 
+ #include <wx/ffile.h>
++
++#include "wx/ffbgm/vbam_bgm.h"
+ #include <wx/generic/prntdlgg.h>
+ #include <wx/print.h>
+ #include <wx/printdlg.h>
+@@ -392,6 +395,10 @@ uint32_t systemReadJoypad(int joy)
+     ret &= ~((ret & (KEYM_LEFT | KEYM_DOWN | KEYM_MOTION_DOWN | KEYM_MOTION_RIGHT)) >> 1);
+     ret &= REALKEY_MASK;
+ 
++    // ff-bgm1x: ignore the speed button while a cutscene song plays ("fast forward during cutscenes" off)
++    if (ffbgm::SpeedHold())
++        ret &= ~KEYM_SPEED;
++
+     if (game_recording) {
+         uint32_t rret = ret & ~(KEYM_SPEED | KEYM_CAPTURE);
+ 
+@@ -549,6 +556,8 @@ void system10Frames() {
+ 
+ void systemFrame()
+ {
++    ffbgm::OnFrame();
++
+     if (game_recording || game_playback)
+         game_frame++;
+ }
+@@ -1248,8 +1257,14 @@ void systemOnWriteDataToSoundBuffer(const uint16_t* finalWave, int length)
+ #ifndef NO_FFMPEG
+     GameArea* panel = wxGetApp().frame->GetPanel();
+ 
+-    if (panel)
+-        panel->AddFrame(finalWave, length);
++    if (panel && panel->IsRecording()) {
++        // ff-bgm1x: add the 1x-speed sound to the recording (the sound sent to the driver is unchanged)
++        static std::vector<uint16_t> mixed;
++        const int frames = length / 4;
++        mixed.assign(finalWave, finalWave + frames * 2);
++        ffbgm::MixRecording(reinterpret_cast<int16_t*>(mixed.data()), frames);
++        panel->AddFrame(mixed.data(), length);
++    }
+ 
+ #endif
+ }
+diff --git a/src/wx/xrc/MainMenu.xrc b/src/wx/xrc/MainMenu.xrc
+index 54525af..27f8d5f 100644
+--- a/src/wx/xrc/MainMenu.xrc
++++ b/src/wx/xrc/MainMenu.xrc
+@@ -410,6 +410,26 @@
+           <label>_Game Boy sound declicking</label>
+           <checkable>1</checkable>
+         </object>
++        <object class="separator"/>
++        <object class="wxMenuItem" name="FfbgmBgm1x">
++          <label translate="0">Keep _BGM at 1x speed (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmSfx1x">
++          <label translate="0">Keep sound _effects at 1x speed (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmFfCutscenes">
++          <label translate="0">Fast forward during _cutscenes (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmRamSongs">
++          <label translate="0">Read songs from _RAM (ff-bgm1x)</label>
++          <checkable>1</checkable>
++        </object>
++        <object class="wxMenuItem" name="FfbgmSoundCatalog">
++          <label translate="0">Sound c_lassification... (ff-bgm1x)</label>
++        </object>
+       </object>
+       <object class="wxMenu">
+         <label>_Input</label>
+diff --git a/src/wx/xrc/SoundConfig.xrc b/src/wx/xrc/SoundConfig.xrc
+index f4cabf4..a0c921f 100644
+--- a/src/wx/xrc/SoundConfig.xrc
++++ b/src/wx/xrc/SoundConfig.xrc
+@@ -66,6 +66,22 @@
+             </object>
+             <flag>wxEXPAND</flag>
+           </object>
++          <object class="sizeritem">
++            <flag>wxALL|wxALIGN_RIGHT|wxALIGN_CENTRE_VERTICAL</flag>
++            <border>5</border>
++            <object class="wxStaticText">
++              <label translate="0">SFX volume (1x):</label>
++            </object>
++          </object>
++          <object class="sizeritem">
++            <object class="wxSlider" name="FfbgmSfxVolume">
++              <value>256</value>
++              <min>0</min>
++              <max>256</max>
++            </object>
++            <flag>wxALL|wxEXPAND</flag>
++            <border>5</border>
++          </object>
+           <object class="sizeritem">
+             <flag>wxALL|wxALIGN_RIGHT|wxALIGN_CENTRE_VERTICAL</flag>
+             <border>5</border>

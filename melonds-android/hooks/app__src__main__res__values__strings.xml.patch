@@ -1,0 +1,58 @@
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 4a7e1ddd..154114a5 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -243,6 +243,53 @@
+     <string name="interpolation">Interpolation</string>
+     <string name="bitrate">Bitrate</string>
+     <string name="volume">Volume</string>
++    <!-- ff-bgm1x -->
++    <string name="ff_bgm1x_bgm_1x">Keep BGM at 1x speed</string>
++    <string name="ff_bgm1x_bgm_1x_summary">Plays background music at normal speed while fast forwarding</string>
++    <string name="ff_bgm1x_ff_cutscenes">Fast forward during cutscenes</string>
++    <string name="ff_bgm1x_ff_cutscenes_summary">When off, fast forward pauses while cutscene music is playing</string>
++    <string name="ff_bgm1x_sfx_1x">Keep sound effects at 1x speed</string>
++    <string name="ff_bgm1x_sfx_1x_summary">Plays sound effects at normal speed while fast forwarding</string>
++    <string name="ff_bgm1x_sfx_volume">Sound effect volume</string>
++    <string name="ff_layout_x">X px</string>
++    <string name="ff_layout_y">Y px</string>
++    <string name="ff_layout_edge_left">◀ Left</string>
++    <string name="ff_layout_edge_right">Right ▶</string>
++    <string name="ff_layout_edge_top">▲ Top</string>
++    <string name="ff_layout_edge_bottom">▼ Bottom</string>
++    <string name="ff_layout_fill">Fill screen</string>
++    <string name="ff_layout_same_size">Same size for selected buttons</string>
++    <string name="ff_layout_mirror">Mirror left buttons to right</string>
++    <string name="ff_layout_margin">Margin %1$d px</string>
++    <string name="ff_layout_grid">Grid %1$d px</string>
++    <string name="ff_layout_margin_title">Margin (px)</string>
++    <string name="ff_layout_grid_title">Grid (px, 0 = off)</string>
++    <string name="ff_layout_new_panel">New panel</string>
++    <string name="ff_layout_use_original">Original panel</string>
++    <string name="ff_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="ff_layout_panel_collapse">Collapse</string>
++    <string name="ff_layout_panel_expand">Expand</string>
++    <string name="ff_layout_hint">Tap to select one (whole group if grouped), long-press to select several</string>
++    <string name="ff_layout_selected_many">%1$s and %2$d more selected (yellow = reference)</string>
++    <string name="ff_layout_w">W px</string>
++    <string name="ff_layout_h">H px</string>
++    <string name="ff_layout_choose_function">Choose button</string>
++    <string name="ff_layout_add_button">Add button</string>
++    <string name="ff_layout_change_function">Change function</string>
++    <string name="ff_layout_delete_button">Delete</string>
++    <string name="ff_layout_group">Group</string>
++    <string name="ff_layout_ungroup">Ungroup</string>
++    <string name="ff_layout_section_each">Align to each other (inside the group if one group is selected)</string>
++    <string name="ff_layout_section_screen">Relative to screen</string>
++    <string name="ff_layout_align_left">Left edges</string>
++    <string name="ff_layout_align_hcenter">Center (vertical line)</string>
++    <string name="ff_layout_align_right">Right edges</string>
++    <string name="ff_layout_align_top">Top edges</string>
++    <string name="ff_layout_align_vcenter">Same height</string>
++    <string name="ff_layout_align_bottom">Bottom edges</string>
++    <string name="ff_layout_dist_h">Space horizontally</string>
++    <string name="ff_layout_dist_v">Space vertically</string>
++    <string name="ff_layout_gap">Gap px (empty = even)</string>
+     <string name="volume_percentage">%1$d%%</string>
+     <string name="audio_latency">Audio latency</string>
+     <string name="microphone_source">Microphone source</string>

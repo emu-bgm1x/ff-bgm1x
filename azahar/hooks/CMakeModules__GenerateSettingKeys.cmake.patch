@@ -1,0 +1,16 @@
+diff --git a/CMakeModules/GenerateSettingKeys.cmake b/CMakeModules/GenerateSettingKeys.cmake
+index f75bfe5..75d17e2 100644
+--- a/CMakeModules/GenerateSettingKeys.cmake
++++ b/CMakeModules/GenerateSettingKeys.cmake
+@@ -276,6 +276,11 @@ if (ANDROID)
+         "performance_overlay_position"
+         "enable_secondary_display"
+         "combo_button_buttons"
++        # ff-bgm1x: PC 판은 레지스트리에 저장하므로 Android 에만 둔다
++        "ff_bgm1x_bgm_1x"
++        "ff_bgm1x_ff_cutscenes"
++        "ff_bgm1x_voices_1x"
++        "ff_bgm1x_sfx_volume"
+     )
+         string(REPLACE "_" "_1" KEY_JNI_ESCAPED ${KEY})
+         set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ff-bgm1x: 소리 분류 (1x Lab 앱) -->
+<resources>
+    <string name="ff_sound_catalog">Sound classification</string>
+    <string name="ff_skin_apply">Apply skin (zip)</string>
+    <string name="sounds_collect">Collect sounds</string>
+    <string name="sounds_collect_hint">While on, sounds that play in the game are added to the list. Turn it off when you are done.</string>
+    <string name="sounds_play">Play</string>
+    <string name="sounds_pause">Pause</string>
+    <string name="sounds_stop">Stop</string>
+    <string name="sounds_kind">Classification</string>
+    <string name="sounds_volume">Volume</string>
+    <string name="sounds_reset">Default</string>
+    <string name="sounds_import">Import</string>
+    <string name="sounds_export">Export</string>
+    <string name="sounds_clear">Clear list</string>
+    <string name="sounds_empty">No sounds yet. Turn on "Collect sounds" and play.</string>
+    <string name="sounds_unsupported">No game is running.</string>
+    <string name="sounds_auto">Auto</string>
+    <string name="sounds_count">%1$d times</string>
+    <string name="sounds_kind_auto">Auto (default)</string>
+    <string name="sounds_kind_bgm">BGM</string>
+    <string name="sounds_kind_jingle">Fanfare / voice</string>
+    <string name="sounds_kind_cutscene">Cutscene</string>
+    <string name="sounds_kind_sfx">Sound effect</string>
+    <string name="sounds_kind_none">Nothing</string>
+    <string name="sounds_kind_unknown">Not heard yet</string>
+</resources>

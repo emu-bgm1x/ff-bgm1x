@@ -1,0 +1,77 @@
+diff --git a/src/libretro/libretro_core_options.h b/src/libretro/libretro_core_options.h
+index 99c0d4d..d3d26e4 100644
+--- a/src/libretro/libretro_core_options.h
++++ b/src/libretro/libretro_core_options.h
+@@ -303,6 +303,72 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+         },
+         "5"
+     },
++    /* ff-bgm1x: works only when the frontend calls ff_bgm1x_mix (GBA games) */
++    {
++        "vbam_ff_bgm1x",
++        "BGM at 1x Speed (Fast Forward)",
++        NULL,
++        "Keeps background music at normal speed while fast forwarding. Requires a frontend that calls ff_bgm1x_mix.",
++        NULL,
++        "audio",
++        {
++            { "enabled", NULL },
++            { "disabled", NULL },
++            { NULL, NULL },
++        },
++        "enabled"
++    },
++    {
++        "vbam_ff_bgm1x_cutscenes",
++        "Fast Forward During Cutscenes",
++        NULL,
++        "When disabled, fast forward pauses while cutscene music is playing.",
++        NULL,
++        "audio",
++        {
++            { "disabled", NULL },
++            { "enabled", NULL },
++            { NULL, NULL },
++        },
++        "disabled"
++    },
++    {
++        "vbam_ff_bgm1x_sfx",
++        "Sound Effects at 1x Speed",
++        NULL,
++        "Also plays sound effects at normal speed while fast forwarding.",
++        NULL,
++        "audio",
++        {
++            { "enabled", NULL },
++            { "disabled", NULL },
++            { NULL, NULL },
++        },
++        "enabled"
++    },
++    {
++        "vbam_ff_bgm1x_sfx_volume",
++        "1x Sound Effect Volume",
++        NULL,
++        "Volume of the sound effects played at normal speed (percent).",
++        NULL,
++        "audio",
++        {
++            { "100", NULL },
++            { "0", NULL },
++            { "10", NULL },
++            { "20", NULL },
++            { "30", NULL },
++            { "40", NULL },
++            { "50", NULL },
++            { "60", NULL },
++            { "70", NULL },
++            { "80", NULL },
++            { "90", NULL },
++            { NULL, NULL },
++        },
++        "100"
++    },
+     {
+         "vbam_turboenable",
+         "Enable Turbo Buttons",

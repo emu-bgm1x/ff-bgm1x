@@ -1,0 +1,50 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
+index 80609be6..7078211c 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/shared/game/viewmodel/GameViewModelTouchControls.kt
+@@ -23,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.ExperimentalCoroutinesApi
+ import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.combine
+@@ -105,6 +104,15 @@ class GameViewModelTouchControls(
+         screenOrientation.value = orientation
+     }
+ 
++    // ff-bgm1x: 자유 배치 저장 위치를 정하는 데 쓴다
++    fun touchControllerIdFlow(): Flow<TouchControllerID> = touchControlId
++
++    fun screenOrientationFlow(): Flow<TouchControllerSettingsManager.Orientation> = screenOrientation
++
++    fun currentTouchControllerId(): TouchControllerID = touchControlId.value
++
++    fun currentScreenOrientation(): TouchControllerSettingsManager.Orientation = screenOrientation.value
++
+     fun isTouchControllerVisible(): Flow<Boolean> {
+         return inputs.getEnabledInputDevices()
+             .map { it.isEmpty() }
+@@ -140,19 +148,16 @@ class GameViewModelTouchControls(
+         }
+     }
+ 
++    // ff-bgm1x: 길게 누를 필요 없이 한 번 누르면 바로 메뉴를 연다
+     private fun onMenuPressed(pressed: Boolean) {
+-        menuPressed.value = pressed
++        menuPressed.value = false
+ 
+         if (pressed) {
+             loadingMenuJob?.cancel()
+             loadingMenuJob =
+                 scope.launch {
+-                    delay(MENU_LOADING_ANIMATION_MILLIS.toLong())
+                     sideEffects.showMenu(tilt, inputs)
+                 }
+-        } else {
+-            loadingMenuJob?.cancel()
+-            loadingMenuJob = null
+         }
+     }
+ 

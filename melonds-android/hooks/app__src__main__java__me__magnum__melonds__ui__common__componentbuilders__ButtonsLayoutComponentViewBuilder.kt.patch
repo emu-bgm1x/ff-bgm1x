@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/ButtonsLayoutComponentViewBuilder.kt b/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/ButtonsLayoutComponentViewBuilder.kt
+index 271e0f46..49953d54 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/ButtonsLayoutComponentViewBuilder.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/ButtonsLayoutComponentViewBuilder.kt
+@@ -9,7 +9,9 @@ import me.magnum.melonds.ui.common.LayoutComponentViewBuilder
+ class ButtonsLayoutComponentViewBuilder : LayoutComponentViewBuilder() {
+     override fun build(context: Context): View {
+         return ImageView(context).apply {
+-            setImageResource(R.drawable.buttons)
++            // ff-bgm1x: 스킨 그림이 있으면 그것
++            val skin = me.magnum.melonds.ui.layouteditor.skin.FfSkinButtons.current?.faceButtons
++            if (skin != null) setImageBitmap(skin) else setImageResource(R.drawable.buttons)
+         }
+     }
+ 

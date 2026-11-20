@@ -1,0 +1,24 @@
+diff --git a/src/android/app/src/main/res/values/integers.xml b/src/android/app/src/main/res/values/integers.xml
+index 5843e67..e7c6cdf 100644
+--- a/src/android/app/src/main/res/values/integers.xml
++++ b/src/android/app/src/main/res/values/integers.xml
+@@ -35,6 +35,9 @@
+     <integer name="N3DS_BUTTON_SWAP_Y">850</integer>
+     <integer name="N3DS_BUTTON_TURBO_X">630</integer>
+     <integer name="N3DS_BUTTON_TURBO_Y">850</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_X">630</integer>
++    <integer name="N3DS_BUTTON_MENU_Y">850</integer>
+     <integer name="N3DS_BUTTON_COMBO_X">740</integer>
+     <integer name="N3DS_BUTTON_COMBO_Y">480</integer>
+ 
+@@ -71,6 +74,9 @@
+     <integer name="N3DS_BUTTON_SWAP_PORTRAIT_Y">675</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_X">453</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_Y">720</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_X">280</integer>
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_Y">794</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_X">450</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_Y">925</integer>
+ 

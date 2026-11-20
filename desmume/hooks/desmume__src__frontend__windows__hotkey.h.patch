@@ -1,0 +1,13 @@
+diff --git a/desmume/src/frontend/windows/hotkey.h b/desmume/src/frontend/windows/hotkey.h
+index 6a79c58..4424275 100644
+--- a/desmume/src/frontend/windows/hotkey.h
++++ b/desmume/src/frontend/windows/hotkey.h
+@@ -78,7 +78,7 @@ struct SCustomKeys
+ #ifdef HAVE_JIT
+ 	SCustomKey CpuMode, JitBlockSizeDec, JitBlockSizeInc;
+ #endif
+-	SCustomKey FrameAdvance, FastForward, FastForwardToggle, IncreaseSpeed, DecreaseSpeed, FrameLimitToggle, Microphone, PrevSample, NextSample, IncreasePressure, DecreasePressure;
++	SCustomKey FrameAdvance, FastForward, FastForwardToggle, IncreaseSpeed, DecreaseSpeed, FrameLimitToggle, FfbgmBgm1xToggle, FfbgmCutsceneToggle, FfbgmSoundWindow, Microphone, PrevSample, NextSample, IncreasePressure, DecreasePressure;
+ 
+ 	SCustomKey PlayMovie, RecordMovie, StopMovie, ToggleReadOnly;
+ 	

@@ -1,0 +1,2044 @@
+diff --git a/CMakeModules/GenerateSettingKeys.cmake b/CMakeModules/GenerateSettingKeys.cmake
+index f75bfe5..75d17e2 100644
+--- a/CMakeModules/GenerateSettingKeys.cmake
++++ b/CMakeModules/GenerateSettingKeys.cmake
+@@ -276,6 +276,11 @@ if (ANDROID)
+         "performance_overlay_position"
+         "enable_secondary_display"
+         "combo_button_buttons"
++        # ff-bgm1x: PC 판은 레지스트리에 저장하므로 Android 에만 둔다
++        "ff_bgm1x_bgm_1x"
++        "ff_bgm1x_ff_cutscenes"
++        "ff_bgm1x_voices_1x"
++        "ff_bgm1x_sfx_volume"
+     )
+         string(REPLACE "_" "_1" KEY_JNI_ESCAPED ${KEY})
+         set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")
+diff --git a/src/android/app/build.gradle.kts b/src/android/app/build.gradle.kts
+index d873af1..0f883f1 100644
+--- a/src/android/app/build.gradle.kts
++++ b/src/android/app/build.gradle.kts
+@@ -91,6 +91,12 @@ android {
+         // ^ Has no suffix, unlike VERSION_NAME
+         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
+         buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
++
++        // ff-bgm1x: -PffbgmLab=true 면 소리 분류가 들어간 별도 앱 (기존 앱과 따로 설치된다)
++        val ffbgmLab = (project.findProperty("ffbgmLab") as String?) == "true"
++        if (ffbgmLab) applicationIdSuffix = ".lab"
++        buildConfigField("boolean", "FF_LAB", ffbgmLab.toString())
++        manifestPlaceholders["ffAppLabel"] = if (ffbgmLab) "Azahar 1x Lab" else "@string/app_name"
+     }
+ 
+     val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+diff --git a/src/android/app/src/main/AndroidManifest.xml b/src/android/app/src/main/AndroidManifest.xml
+index 022a4f6..64b7003 100644
+--- a/src/android/app/src/main/AndroidManifest.xml
++++ b/src/android/app/src/main/AndroidManifest.xml
+@@ -35,7 +35,7 @@
+ 
+     <application
+         android:name="org.citra.citra_emu.CitraApplication"
+-        android:label="@string/app_name"
++        android:label="${ffAppLabel}"
+         android:icon="@mipmap/ic_launcher"
+         android:appCategory="game"
+         android:allowBackup="false"
+@@ -81,6 +81,13 @@
+ 
+         </activity>
+ 
++        <!-- ff-bgm1x: 소리 분류 (1x Lab 앱) -->
++        <activity
++            android:name="org.citra.citra_emu.activities.FfSoundCatalogActivity"
++            android:exported="false"
++            android:theme="@style/Theme.Citra.Main"
++            android:label="@string/ff_sound_catalog"/>
++
+         <activity
+             android:name="org.citra.citra_emu.features.cheats.ui.CheatsActivity"
+             android:exported="false"
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+index b72ed24..075d222 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+@@ -208,6 +208,11 @@ object NativeLibrary {
+      */
+     external fun getRunningTitleId(): Long
+ 
++    // ff-bgm1x 소리 분류 (1x Lab 앱): 문자열 명령, 재생 소리
++    external fun catalogCommand(cmd: String): String
++
++    external fun previewRender(buffer: ShortArray, frames: Int, sampleRate: Int): Int
++
+     /**
+      * Returns the performance stats for the current game
+      */
+@@ -1087,6 +1092,8 @@ object NativeLibrary {
+         const val BUTTON_GPIO14 = 782
+         const val BUTTON_SWAP = 800
+         const val BUTTON_TURBO = 801
++        // ff-bgm1x: 화면 메뉴 버튼 (한 번 누르면 에뮬레이션 메뉴를 연다, 코어에는 의미 없음)
++        const val BUTTON_MENU = 802
+     }
+ 
+     /**
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+index 108fd3c..557b0e9 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/activities/EmulationActivity.kt
+@@ -354,7 +354,8 @@ class EmulationActivity : AppCompatActivity() {
+             return false
+         }
+ 
+-        if (emulationFragment.isDrawerOpen()) {
++        // ff-bgm1x: 배치 편집기가 열려 있으면 키보드 입력(숫자 칸)이 화면으로 가야 한다
++        if (emulationFragment.isDrawerOpen() || emulationFragment.isLayoutEditorOpen()) {
+             return super.dispatchKeyEvent(event)
+         }
+ 
+@@ -614,6 +615,13 @@ class EmulationActivity : AppCompatActivity() {
+         return true
+     }
+ 
++    // ff-bgm1x: 스킨 zip 고르기. 화면(조각)이 아니라 액티비티에 두어, 고르기 화면이 다른 방향으로 열려 돌아오며
++    // 게임 화면 조각이 새로 만들어져도 결과를 잃지 않는다 (조각에 두면 결과가 사라졌다)
++    val ffSkinPicker =
++        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
++            runCatching { emulationFragment }.getOrNull()?.onSkinPicked(uri)
++        }
++
+     val openAmiiboFileLauncher =
+         registerForActivityResult(OpenFileResultContract()) { result: Intent? ->
+             if (result == null) return@registerForActivityResult
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+index c7fb0d3..ebda6c0 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/display/ScreenAdjustmentUtil.kt
+@@ -71,6 +71,45 @@ class ScreenAdjustmentUtil(
+         NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+     }
+ 
++    // ff-bgm1x: 화면 배치 편집기용. 지금 저장된 사용자 배치 (x, y, 너비, 높이) 를 위·아래 화면 순서로 돌려준다
++    fun customLayout(portrait: Boolean): Pair<IntArray, IntArray> {
++        val s = customLayoutSettings(portrait)
++        return intArrayOf(s[0].int, s[1].int, s[2].int, s[3].int) to
++            intArrayOf(s[4].int, s[5].int, s[6].int, s[7].int)
++    }
++
++    // ff-bgm1x: 편집기에서 정한 사용자 배치를 저장하고, 배치를 '사용자 지정' 으로 바꿔 바로 적용한다
++    fun applyCustomLayout(portrait: Boolean, top: IntArray, bottom: IntArray) {
++        val s = customLayoutSettings(portrait)
++        val values = top + bottom
++        for (i in s.indices) {
++            s[i].int = values[i].coerceAtLeast(0)
++            settings.saveSetting(s[i], SettingsFile.FILE_NAME_CONFIG)
++        }
++        if (portrait) {
++            changePortraitOrientation(PortraitScreenLayout.CUSTOM_PORTRAIT_LAYOUT.int)
++        } else {
++            changeScreenOrientation(ScreenLayout.CUSTOM_LAYOUT.int)
++        }
++    }
++
++    private fun customLayoutSettings(portrait: Boolean): List<IntSetting> =
++        if (portrait) {
++            listOf(
++                IntSetting.PORTRAIT_TOP_X, IntSetting.PORTRAIT_TOP_Y,
++                IntSetting.PORTRAIT_TOP_WIDTH, IntSetting.PORTRAIT_TOP_HEIGHT,
++                IntSetting.PORTRAIT_BOTTOM_X, IntSetting.PORTRAIT_BOTTOM_Y,
++                IntSetting.PORTRAIT_BOTTOM_WIDTH, IntSetting.PORTRAIT_BOTTOM_HEIGHT
++            )
++        } else {
++            listOf(
++                IntSetting.LANDSCAPE_TOP_X, IntSetting.LANDSCAPE_TOP_Y,
++                IntSetting.LANDSCAPE_TOP_WIDTH, IntSetting.LANDSCAPE_TOP_HEIGHT,
++                IntSetting.LANDSCAPE_BOTTOM_X, IntSetting.LANDSCAPE_BOTTOM_Y,
++                IntSetting.LANDSCAPE_BOTTOM_WIDTH, IntSetting.LANDSCAPE_BOTTOM_HEIGHT
++            )
++        }
++
+     fun changeSecondaryOrientation(layoutOption: Int) {
+         IntSetting.SECONDARY_DISPLAY_LAYOUT.int = layoutOption
+         settings.saveSetting(IntSetting.SECONDARY_DISPLAY_LAYOUT, SettingsFile.FILE_NAME_CONFIG)
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+index 4a8c22d..62ca1e9 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+@@ -148,4 +148,8 @@ object SettingKeys {
+     external fun performance_overlay_position(): String
+     external fun enable_secondary_display(): String
+     external fun combo_button_buttons(): String
++    external fun ff_bgm1x_bgm_1x(): String
++    external fun ff_bgm1x_ff_cutscenes(): String
++    external fun ff_bgm1x_voices_1x(): String
++    external fun ff_bgm1x_sfx_volume(): String
+ }
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+index b45c270..7546eaf 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+@@ -93,6 +93,9 @@ enum class BooleanSetting(
+         Settings.SECTION_AUDIO,
+         false
+     ),
++    FF_BGM1X_BGM_1X(SettingKeys.ff_bgm1x_bgm_1x(), Settings.SECTION_AUDIO, true),
++    FF_BGM1X_FF_CUTSCENES(SettingKeys.ff_bgm1x_ff_cutscenes(), Settings.SECTION_AUDIO, false),
++    FF_BGM1X_VOICES_1X(SettingKeys.ff_bgm1x_voices_1x(), Settings.SECTION_AUDIO, true),
+     CPU_JIT(SettingKeys.use_cpu_jit(), Settings.SECTION_CORE, true),
+     HW_SHADER(SettingKeys.use_hw_shader(), Settings.SECTION_RENDERER, true),
+     SHADER_JIT(SettingKeys.use_shader_jit(), Settings.SECTION_RENDERER, true),
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
+index f4108f3..56c16da 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/IntSetting.kt
+@@ -65,7 +65,8 @@ enum class IntSetting(
+     ),
+     RENDER_3D_WHICH_DISPLAY(SettingKeys.render_3d_which_display(), Settings.SECTION_RENDERER, 0),
+     ASPECT_RATIO(SettingKeys.aspect_ratio(), Settings.SECTION_LAYOUT, 0),
+-    UPDATE_CHECK_CHANNEL(SettingKeys.update_check_channel(), Settings.SECTION_MISC, 0);
++    UPDATE_CHECK_CHANNEL(SettingKeys.update_check_channel(), Settings.SECTION_MISC, 0),
++    FF_BGM1X_SFX_VOLUME(SettingKeys.ff_bgm1x_sfx_volume(), Settings.SECTION_AUDIO, 100);
+ 
+     override var int: Int = defaultValue
+ 
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+index 044216e..3db3aed 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt
+@@ -1826,6 +1826,46 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView)
+                     ScaledFloatSetting.AUDIO_VOLUME.defaultValue
+                 )
+             )
++            // ff-bgm1x: PC 판 에뮬레이션 메뉴의 세 가지와 효과음 볼륨
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_BGM_1X,
++                    R.string.ff_bgm1x_bgm_1x,
++                    R.string.ff_bgm1x_bgm_1x_description,
++                    BooleanSetting.FF_BGM1X_BGM_1X.key,
++                    BooleanSetting.FF_BGM1X_BGM_1X.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES,
++                    R.string.ff_bgm1x_ff_cutscenes,
++                    R.string.ff_bgm1x_ff_cutscenes_description,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.key,
++                    BooleanSetting.FF_BGM1X_FF_CUTSCENES.defaultValue
++                )
++            )
++            add(
++                SwitchSetting(
++                    BooleanSetting.FF_BGM1X_VOICES_1X,
++                    R.string.ff_bgm1x_voices_1x,
++                    R.string.ff_bgm1x_voices_1x_description,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.key,
++                    BooleanSetting.FF_BGM1X_VOICES_1X.defaultValue
++                )
++            )
++            add(
++                SliderSetting(
++                    IntSetting.FF_BGM1X_SFX_VOLUME,
++                    R.string.ff_bgm1x_sfx_volume,
++                    0,
++                    0,
++                    100,
++                    "%",
++                    IntSetting.FF_BGM1X_SFX_VOLUME.key,
++                    IntSetting.FF_BGM1X_SFX_VOLUME.defaultValue.toFloat()
++                )
++            )
+             add(
+                 SwitchSetting(
+                     BooleanSetting.ENABLE_AUDIO_STRETCHING,
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+index 63430da..35fea3f 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+@@ -67,8 +67,11 @@ import org.citra.citra_emu.databinding.FragmentEmulationBinding
+ import org.citra.citra_emu.display.PortraitScreenLayout
+ import org.citra.citra_emu.display.ScreenAdjustmentUtil
+ import org.citra.citra_emu.display.ScreenLayout
++import org.citra.citra_emu.display.ScreenLayoutEditor
+ import org.citra.citra_emu.display.SecondaryDisplayLayout
+ import org.citra.citra_emu.features.hotkeys.Hotkey
++import org.citra.citra_emu.features.hotkeys.HotkeyUtility
++import org.citra.citra_emu.overlay.FfCustomButtons
+ import org.citra.citra_emu.features.settings.model.BooleanSetting
+ import org.citra.citra_emu.features.settings.model.IntSetting
+ import org.citra.citra_emu.features.settings.model.SettingsViewModel
+@@ -93,6 +96,86 @@ class EmulationFragment :
+     private val preferences: SharedPreferences
+         get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
+ 
++    // ff-bgm1x: 화면 배치 편집기의 스킨 zip 고르기
++    private var skinCallback: ((android.net.Uri) -> Unit)? = null
++    // 고르기를 시작한 때의 방향·버튼 층 크기 (파일 고르기 화면이 세로로 열려 돌아온 순간의 값은 틀릴 수 있다)
++    private var skinPickPortrait: Boolean? = null
++    private var skinPickWidth = 0
++    private var skinPickHeight = 0
++    /** 스킨 zip 고르기 결과 (액티비티의 ffSkinPicker 가 부른다) */
++    fun onSkinPicked(uri: android.net.Uri?) {
++        val cb = skinCallback
++        skinCallback = null
++        if (uri == null) {
++            clearSkinPick()
++            return
++        }
++        // 파일 고르기에서 돌아오며 화면이 다시 만들어졌으면 편집기가 없다: 편집기 없이 바로 적용한다
++        if (cb != null) {
++            clearSkinPick()
++            cb(uri)
++        } else {
++            applySkinWithoutEditor(uri)
++        }
++    }
++
++    private fun clearSkinPick() {
++        skinPickPortrait = null
++        skinPickWidth = 0
++        skinPickHeight = 0
++        preferences.edit().remove(PREF_SKIN_PICK_ORIENTATION).remove(PREF_SKIN_PICK_W).remove(PREF_SKIN_PICK_H).apply()
++    }
++
++    private fun applySkinWithoutEditor(uri: android.net.Uri) {
++        val overlay = _binding?.surfaceInputOverlay ?: return
++        overlay.post {
++            // 화면이 다시 만들어져 이 변수들이 비었으면, 고르기를 시작할 때 저장해 둔 값을 쓴다
++            val savedOrientation = preferences.getInt(PREF_SKIN_PICK_ORIENTATION, 0)
++            val pickPortrait = skinPickPortrait ?: if (savedOrientation != 0) savedOrientation == 1 else null
++            val pickW = if (skinPickWidth > 0) skinPickWidth else preferences.getInt(PREF_SKIN_PICK_W, 0)
++            val pickH = if (skinPickHeight > 0) skinPickHeight else preferences.getInt(PREF_SKIN_PICK_H, 0)
++            clearSkinPick()
++            val portrait = pickPortrait ?: (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
++            val w = if (pickPortrait != null && pickW > 0) pickW else overlay.width
++            val h = if (pickPortrait != null && pickH > 0) pickH else overlay.height
++            val ctx = CitraApplication.appContext
++            Thread {
++                val result = runCatching { org.citra.citra_emu.display.FfSkin.prepare(ctx, uri, portrait, w, h) }
++                overlay.post {
++                    val b = _binding ?: return@post
++                    result.onFailure {
++                        Toast.makeText(ctx, "스킨: " + (it.message ?: it.javaClass.simpleName), Toast.LENGTH_LONG).show()
++                    }.onSuccess { p ->
++                        val top = p.top
++                        val bottom = p.bottom
++                        if (top == null || bottom == null) {
++                            // 편집기 없이는 화면 자리를 맞출 수 없으니 버튼 그림만 바꾼다
++                            org.citra.citra_emu.display.FfSkin.save(
++                                preferences, p.dir, portrait, null, android.graphics.RectF(), android.graphics.RectF()
++                            )
++                            overlay.refreshControls()
++                            overlay.invalidate()
++                            val why = if (p.background == null) "배경 그림이 없는 스킨이라" else "배경에서 화면 자리를 찾지 못해"
++                            Toast.makeText(ctx, "스킨: $why 버튼 그림만 바꿨습니다", Toast.LENGTH_LONG).show()
++                            return@onSuccess
++                        }
++                        org.citra.citra_emu.display.FfSkin.save(preferences, p.dir, portrait, p.background, top, bottom)
++                        // 버튼 층 좌표 -> 게임 화면 층 좌표
++                        val dx = b.surfaceEmulation.left - overlay.left
++                        val dy = b.surfaceEmulation.top - overlay.top
++                        fun arr(r: android.graphics.RectF) = intArrayOf(
++                            Math.round(r.left - dx), Math.round(r.top - dy), Math.round(r.width()), Math.round(r.height())
++                        )
++                        screenAdjustmentUtil.applyCustomLayout(portrait, arr(top), arr(bottom))
++                        overlay.refreshControls()
++                        overlay.invalidate()
++                        Toast.makeText(ctx, "스킨: " + p.background?.name, Toast.LENGTH_SHORT).show()
++                    }
++                }
++            }.start()
++        }
++    }
++
+     private lateinit var emulationState: EmulationState
+     private var perfStatsUpdater: Runnable? = null
+ 
+@@ -211,6 +294,8 @@ class EmulationFragment :
+         _binding = FragmentEmulationBinding.inflate(inflater)
+         binding.inGameMenu.menu.findItem(R.id.menu_secondary_screen_layout).isVisible =
+             emulationActivity.secondaryDisplayManager.availableDisplays.isNotEmpty()
++        binding.inGameMenu.menu.findItem(R.id.menu_ff_sound_catalog).isVisible =
++            org.citra.citra_emu.BuildConfig.FF_LAB
+         binding.inGameMenu.menu.findItem(R.id.menu_landscape_screen_layout).isVisible =
+             CitraApplication.appContext.resources.configuration.orientation !=
+             Configuration.ORIENTATION_PORTRAIT
+@@ -233,6 +318,29 @@ class EmulationFragment :
+             binding.doneControlConfig.visibility = View.GONE
+             binding.surfaceInputOverlay.setIsInEditMode(false)
+         }
++        // ff-bgm1x: 화면 메뉴 버튼은 한 번 누르면 메뉴(서랍)를 연다
++        binding.surfaceInputOverlay.onMenuButtonPressed = {
++            binding.drawerLayout.post { binding.drawerLayout.open() }
++        }
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        val customHotkeys = HotkeyUtility(screenAdjustmentUtil, requireContext())
++        binding.surfaceInputOverlay.onCustomFunction = { function ->
++            when (function) {
++                FfCustomButtons.Function.NONE -> {}
++                FfCustomButtons.Function.MENU -> binding.drawerLayout.post { binding.drawerLayout.open() }
++                FfCustomButtons.Function.SWAP_SCREEN -> customHotkeys.handleHotkey(Hotkey.SWAP_SCREEN.button)
++                FfCustomButtons.Function.CYCLE_LAYOUT -> customHotkeys.handleHotkey(Hotkey.CYCLE_LAYOUT.button)
++                FfCustomButtons.Function.PAUSE_OR_RESUME -> customHotkeys.handleHotkey(Hotkey.PAUSE_OR_RESUME.button)
++                FfCustomButtons.Function.QUICKSAVE -> customHotkeys.handleHotkey(Hotkey.QUICKSAVE.button)
++                FfCustomButtons.Function.QUICKLOAD -> customHotkeys.handleHotkey(Hotkey.QUICKLOAD.button)
++                FfCustomButtons.Function.TURBO -> customHotkeys.handleHotkey(Hotkey.TURBO_LIMIT.button)
++                FfCustomButtons.Function.CLOSE_GAME -> customHotkeys.handleHotkey(Hotkey.CLOSE_GAME.button)
++                FfCustomButtons.Function.BGM_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_BGM_1X, R.string.ff_func_bgm_1x)
++                FfCustomButtons.Function.VOICES_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_VOICES_1X, R.string.ff_func_voices_1x)
++                FfCustomButtons.Function.FF_CUTSCENES -> toggleFfOption(BooleanSetting.FF_BGM1X_FF_CUTSCENES, R.string.ff_func_ff_cutscenes)
++                FfCustomButtons.Function.SOUND_CATALOG -> openFfSoundCatalog()
++            }
++        }
+ 
+         // Show/hide the "Stats" overlay
+         updateShowPerformanceOverlay()
+@@ -263,7 +371,11 @@ class EmulationFragment :
+             }
+ 
+             override fun onDrawerClosed(drawerView: View) {
+-                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++                // ff-bgm1x: 배치 편집기가 열려 있으면 서랍을 잠가 둔다 (왼쪽 끝을 끄는 동작과 겹치지 않게)
++                binding.drawerLayout.setDrawerLockMode(
++                    if (closeLayoutEditor != null) DrawerLayout.LOCK_MODE_LOCKED_CLOSED
++                    else EmulationMenuSettings.drawerLockMode
++                )
+                 binding.surfaceInputOverlay.isClickable = true
+                 binding.surfaceInputOverlay.isFocusable = true
+                 binding.surfaceInputOverlay.isFocusableInTouchMode = true
+@@ -393,6 +505,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_ff_sound_catalog -> {
++                    openFfSoundCatalog()
++                    true
++                }
++
+                 R.id.menu_cheats -> {
+                     val action = EmulationNavigationDirections
+                         .actionGlobalCheatsActivity(NativeLibrary.getRunningTitleId())
+@@ -443,6 +560,12 @@ class EmulationFragment :
+                         return
+                     }
+ 
++                    // ff-bgm1x: 배치 편집기가 열려 있으면 뒤로 = 저장하지 않고 닫기
++                    closeLayoutEditor?.let {
++                        it()
++                        return
++                    }
++
+                     if (binding.drawerLayout.isOpen) {
+                         binding.drawerLayout.close()
+                     } else {
+@@ -1024,6 +1147,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_screen_layout_edit_custom -> {
++                    showScreenLayoutEditor(false)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1083,6 +1211,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_portrait_layout_edit_custom -> {
++                    showScreenLayoutEditor(true)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1254,9 +1387,85 @@ class EmulationFragment :
+         }
+     }
+ 
++    // ff-bgm1x: 위·아래 화면 사용자 배치를 게임 화면 위에서 끌어서 정하는 편집기
++    // ff-bgm1x: 1배속 옵션을 켜고 끄고, 설정 파일에 저장해 바로 적용한다
++    // ff-bgm1x: 소리 분류 화면 (1x Lab 앱). 화면이 열려 있는 동안 게임은 멈춘다
++    private fun openFfSoundCatalog() {
++        if (!org.citra.citra_emu.BuildConfig.FF_LAB) return
++        binding.drawerLayout.close()
++        startActivity(
++            android.content.Intent(requireContext(), org.citra.citra_emu.activities.FfSoundCatalogActivity::class.java)
++        )
++    }
++
++    private fun toggleFfOption(setting: BooleanSetting, nameRes: Int) {
++        setting.boolean = !setting.boolean
++        settings.saveSetting(setting, SettingsFile.FILE_NAME_CONFIG)
++        NativeLibrary.reloadSettings()
++        val state = getString(if (setting.boolean) R.string.ff_func_state_on else R.string.ff_func_state_off)
++        Toast.makeText(requireContext(), "${getString(nameRes)}: $state", Toast.LENGTH_SHORT).show()
++    }
++
++    // ff-bgm1x: 배치 편집기가 열려 있을 때 닫는 함수 (닫혀 있으면 null)
++    private var closeLayoutEditor: (() -> Unit)? = null
++
++    fun isLayoutEditorOpen(): Boolean = closeLayoutEditor != null
++
++    private fun showScreenLayoutEditor(portrait: Boolean) {
++        binding.drawerLayout.close()
++        val parent = binding.surfaceEmulation.parent as ViewGroup
++        val (top, bottom) = screenAdjustmentUtil.customLayout(portrait)
++        var editor: View? = null
++        // 편집기가 버튼을 사각형으로 그리므로 편집하는 동안 실제 버튼은 숨긴다
++        val overlay = binding.surfaceInputOverlay
++        val overlayVisibility = overlay.visibility
++        // 편집기는 버튼 층과 같은 자리(노치 여백 안쪽)에 둔다. 화면 좌표는 게임 화면 층 기준이라 그 차이를 넘긴다
++        val screenOffsetX = binding.surfaceEmulation.left - overlay.left
++        val screenOffsetY = binding.surfaceEmulation.top - overlay.top
++        editor = ScreenLayoutEditor(
++            requireContext(),
++            top,
++            bottom,
++            overlay,
++            screenOffsetX,
++            screenOffsetY,
++            onSave = { t, b -> screenAdjustmentUtil.applyCustomLayout(portrait, t, b) },
++            onPickSkin = { callback ->
++                skinCallback = callback
++                skinPickPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
++                skinPickWidth = overlay.width
++                skinPickHeight = overlay.height
++                preferences.edit()
++                    .putInt(PREF_SKIN_PICK_ORIENTATION, if (skinPickPortrait == true) 1 else 2)
++                    .putInt(PREF_SKIN_PICK_W, skinPickWidth)
++                    .putInt(PREF_SKIN_PICK_H, skinPickHeight)
++                    .commit()
++                (requireActivity() as EmulationActivity).ffSkinPicker.launch(
++                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")
++                )
++            },
++            onClose = {
++                editor?.let { parent.removeView(it) }
++                overlay.visibility = overlayVisibility
++                closeLayoutEditor = null
++                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++            }
++        )
++        overlay.visibility = View.INVISIBLE
++        closeLayoutEditor = { (editor as ScreenLayoutEditor).close() }
++        binding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
++        val overlayParams = overlay.layoutParams as ViewGroup.MarginLayoutParams
++        parent.addView(
++            editor,
++            ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
++                setMargins(overlayParams.leftMargin, overlayParams.topMargin, overlayParams.rightMargin, overlayParams.bottomMargin)
++            }
++        )
++    }
++
+     private fun showToggleControlsDialog() {
+         val editor = preferences.edit()
+-        val enabledButtons = BooleanArray(17)
++        val enabledButtons = BooleanArray(18)  // ff-bgm1x: 17 = 메뉴 버튼 (기본 켜짐)
+         enabledButtons.forEachIndexed { i: Int, _: Boolean ->
+             // Buttons that are disabled by default
+             var defaultValue = true
+@@ -1469,7 +1678,7 @@ class EmulationFragment :
+ 
+         val editor = preferences.edit()
+         // TODO: This code sucks balls. We need to do this differently. -OS
+-        for (i in 0 until 17) {
++        for (i in 0 until 18) {  // ff-bgm1x: 17 = 메뉴 버튼
+             var defaultValue = true
+             when (i) {
+                 6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
+@@ -1815,5 +2024,10 @@ class EmulationFragment :
+ 
+     companion object {
+         private val perfStatsUpdateHandler = Handler(Looper.myLooper()!!)
++
++        // ff-bgm1x: 스킨 고르기를 시작한 때의 방향(1 = 세로, 2 = 가로)·버튼 층 크기 (화면이 다시 만들어져도 남게 저장)
++        private const val PREF_SKIN_PICK_ORIENTATION = "ffSkinPickOrientation"
++        private const val PREF_SKIN_PICK_W = "ffSkinPickW"
++        private const val PREF_SKIN_PICK_H = "ffSkinPickH"
+     }
+ }
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
+index 06c5ff2..09c86a6 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
+@@ -11,6 +11,8 @@ import android.content.res.Configuration
+ import android.graphics.Bitmap
+ import android.graphics.BitmapFactory
+ import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.Paint
+ import android.graphics.Rect
+ import android.graphics.drawable.VectorDrawable
+ import android.util.AttributeSet
+@@ -23,6 +25,8 @@ import androidx.core.content.ContextCompat
+ import androidx.core.view.ViewCompat
+ import androidx.preference.PreferenceManager
+ import java.lang.NullPointerException
++import kotlin.math.abs
++import kotlin.math.max
+ import kotlin.math.min
+ import org.citra.citra_emu.CitraApplication
+ import org.citra.citra_emu.NativeLibrary
+@@ -55,10 +59,18 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+     // Stores the ID of the pointer that interacted with the 3DS touchscreen.
+     private var touchscreenPointerId = -1
+ 
++    // ff-bgm1x: 화면 메뉴 버튼을 누르면 부른다 (EmulationFragment 가 메뉴를 연다)
++    var onMenuButtonPressed: (() -> Unit)? = null
++
++    // ff-bgm1x: 사용자가 만든 기능 버튼을 누르면 부른다 (EmulationFragment 가 기능을 실행한다)
++    var onCustomFunction: ((FfCustomButtons.Function) -> Unit)? = null
++    private var customFunctions: Map<Int, FfCustomButtons.Function> = emptyMap()
++
+     init {
+         if (!preferences.getBoolean("OverlayInit", false)) {
+             defaultOverlay()
+         }
++        defaultMenuButtonIfMissing()
+ 
+         // Reset 3ds touchscreen pointer ID
+         touchscreenPointerId = -1
+@@ -78,6 +90,11 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+ 
+     override fun draw(canvas: Canvas) {
+         super.draw(canvas)
++        // ff-bgm1x: 스킨 배경 (게임 화면 자리는 비워 둔다)
++        org.citra.citra_emu.display.FfSkin.drawBackground(
++            canvas, preferences,
++            resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT, width, height
++        )
+         overlayButtons.forEach { it.draw(canvas) }
+         overlayDpads.forEach { it.draw(canvas) }
+         overlayJoysticks.forEach { it.draw(canvas) }
+@@ -196,8 +213,19 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                         button.status == NativeLibrary.ButtonState.PRESSED
+                     ) {
+                         TurboHelper.toggleTurbo(true)
++                    } else if (button.id == NativeLibrary.ButtonType.BUTTON_MENU &&
++                        button.status == NativeLibrary.ButtonState.PRESSED
++                    ) {
++                        onMenuButtonPressed?.invoke()
+                     } else if (button.id == Hotkey.COMBO_BUTTON.button) {
+                         ComboHelper.comboActivate(button.status)
++                    } else if (FfCustomButtons.isCustom(button.id)) {
++                        // 사용자가 만든 기능 버튼: 코어에는 보내지 않는다
++                        if (button.status == NativeLibrary.ButtonState.PRESSED) {
++                            customFunctions[button.id]?.let { onCustomFunction?.invoke(it) }
++                        }
++                        shouldUpdateView = true
++                        continue
+                     }
+ 
+                     NativeLibrary.onGamePadEvent(
+@@ -608,6 +636,25 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             )
+         }
+ 
++        // ff-bgm1x: 화면 메뉴 버튼 (기본으로 보인다)
++        if (preferences.getBoolean("buttonToggle17", true)) {
++            overlayButtons.add(
++                initializeOverlayButton(
++                    context,
++                    R.drawable.button_menu,
++                    R.drawable.button_menu_pressed,
++                    NativeLibrary.ButtonType.BUTTON_MENU,
++                    orientation
++                )
++            )
++        }
++
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        customFunctions = FfCustomButtons.load(preferences)
++        customFunctions.forEach { (id, function) ->
++            overlayButtons.add(initializeCustomButton(context, id, function, orientation))
++        }
++
+         if (preferences.getBoolean("buttonToggle16", false)) {
+             overlayButtons.add(
+                 initializeOverlayButton(
+@@ -647,6 +694,37 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             .apply()
+     }
+ 
++    // ff-bgm1x: 화면 배치 편집기에서 버튼도 같이 다루기 위한 정보.
++    // posId 는 자리 설정 키("<posId><방향>-X/Y"), scaleId 는 크기 설정 키("controlScale-<scaleId>", 0~150, 50 = 기본)
++    class EditableControl(val posId: Int, val scaleId: Int, val isButton: Boolean, val bounds: Rect)
++
++    fun editableControls(): List<EditableControl> {
++        val list = ArrayList<EditableControl>()
++        overlayButtons.forEach { list.add(EditableControl(it.id, it.id, true, Rect(it.bounds))) }
++        overlayDpads.forEach { list.add(EditableControl(it.upId, NativeLibrary.ButtonType.DPAD, false, Rect(it.bounds))) }
++        overlayJoysticks.forEach { list.add(EditableControl(it.joystickId, it.joystickId, false, Rect(it.bounds))) }
++        return list
++    }
++
++    fun controlScale(scaleId: Int): Int = preferences.getInt("controlScale-$scaleId", 50)
++
++    fun customFunction(id: Int): FfCustomButtons.Function? = customFunctions[id]
++
++    // 새 기능 버튼의 크기 설정 50 일 때 너비 (px)
++    fun customButtonBaseSize(): Float {
++        val dm = context.resources.displayMetrics
++        return min(dm.widthPixels, dm.heightPixels) * CUSTOM_BUTTON_SCALE *
++            (preferences.getInt("controlScale", 50) + 50) / 100f
++    }
++
++    // 자리·크기를 저장한다. 다 바꾼 뒤 refreshControls() 를 불러야 화면에 반영된다
++    fun saveControlPlacement(posId: Int, scaleId: Int, x: Int, y: Int, scale: Int) {
++        val orientation =
++            if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) "-Portrait" else ""
++        saveControlPosition(posId, x, y, orientation)
++        preferences.edit().putInt("controlScale-$scaleId", scale.coerceIn(0, 150)).apply()
++    }
++
+     fun setIsInEditMode(isInEditMode: Boolean) {
+         this.isInEditMode = isInEditMode
+     }
+@@ -677,6 +755,37 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             .apply()
+     }
+ 
++    // ff-bgm1x: 메뉴 버튼이 생기기 전에 배치를 저장했으면 그 키가 없어 (0,0) 에 놓인다. 없을 때만 기본 자리를 넣는다.
++    // 예전 기본 자리(R 버튼, 세로 화면 X 버튼과 겹치는 곳)에 그대로 있으면 새 기본 자리로 한 번 옮긴다
++    private fun defaultMenuButtonIfMissing() {
++        val key = NativeLibrary.ButtonType.BUTTON_MENU.toString()
++        val outMetrics = DisplayMetrics()
++        (context as Activity).windowManager.defaultDisplay.getMetrics(outMetrics)
++        val longSide = maxOf(outMetrics.widthPixels, outMetrics.heightPixels).toFloat()
++        val shortSide = minOf(outMetrics.widthPixels, outMetrics.heightPixels).toFloat()
++        fun near(k: String, v: Float) = abs(preferences.getFloat(k, -1f) - v) < 2f
++        val atOldDefault = !preferences.getBoolean("FfMenuMoved2", false) &&
++            (near("$key-X", 910f / 1000 * longSide) && near("$key-Y", 30f / 1000 * shortSide) ||
++                near("$key-Portrait-X", 860f / 1000 * shortSide) && near("$key-Portrait-Y", 675f / 1000 * longSide) ||
++                near("$key-Portrait-X", 640f / 1000 * shortSide) && near("$key-Portrait-Y", 794f / 1000 * longSide))
++        preferences.edit().putBoolean("FfMenuMoved2", true).apply()
++        if (!atOldDefault && preferences.contains("$key-X") && preferences.contains("$key-Portrait-X")) {
++            return
++        }
++        preferences.edit()
++            .putFloat("$key-X", resources.getInteger(R.integer.N3DS_BUTTON_MENU_X).toFloat() / 1000 * longSide)
++            .putFloat("$key-Y", resources.getInteger(R.integer.N3DS_BUTTON_MENU_Y).toFloat() / 1000 * shortSide)
++            .putFloat(
++                "$key-Portrait-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_X).toFloat() / 1000 * shortSide
++            )
++            .putFloat(
++                "$key-Portrait-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_Y).toFloat() / 1000 * longSide
++            )
++            .apply()
++    }
++
+     fun resetButtonPlacement() {
+         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+         if (isLandscape) {
+@@ -835,6 +944,14 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_TURBO.toString() + "-Y",
+                 resources.getInteger(R.integer.N3DS_BUTTON_TURBO_Y).toFloat() / 1000 * maxY
+             )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + "-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_X).toFloat() / 1000 * maxX
++            )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + "-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_Y).toFloat() / 1000 * maxY
++            )
+             .putFloat(
+                 Hotkey.COMBO_BUTTON.button.toString() + "-X",
+                 resources.getInteger(R.integer.N3DS_BUTTON_COMBO_X).toFloat() / 1000 * maxX
+@@ -997,6 +1114,14 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_TURBO.toString() + portrait + "-Y",
+                 resources.getInteger(R.integer.N3DS_BUTTON_TURBO_PORTRAIT_Y).toFloat() / 1000 * maxY
+             )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + portrait + "-X",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_X).toFloat() / 1000 * maxX
++            )
++            .putFloat(
++                NativeLibrary.ButtonType.BUTTON_MENU.toString() + portrait + "-Y",
++                resources.getInteger(R.integer.N3DS_BUTTON_MENU_PORTRAIT_Y).toFloat() / 1000 * maxY
++            )
+             .putFloat(
+                 Hotkey.COMBO_BUTTON.button.toString() + portrait + "-X",
+                 resources.getInteger(R.integer.N3DS_BUTTON_COMBO_PORTRAIT_X).toFloat() / 1000 * maxX
+@@ -1023,6 +1148,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+          * @return The scaled [Bitmap]
+          */
+         private fun getBitmap(context: Context, drawableId: Int, scale: Float): Bitmap {
++            // ff-bgm1x: 스킨의 버튼 그림이 있으면 그것을 쓴다
++            org.citra.citra_emu.display.FfSkin.buttonBitmap(context, preferences, drawableId)?.let {
++                return resizeBitmap(context, it, scale)
++            }
++            // ff-bgm1x: 스킨이 켜져 있는데 그 버튼 그림이 없으면 기능 버튼처럼 메뉴 버튼 모양 + 글자
++            if (org.citra.citra_emu.display.FfSkin.activeDir(context, preferences) != null) {
++                val name = runCatching { context.resources.getResourceEntryName(drawableId) }.getOrNull()
++                val label = name?.let { SKIN_FALLBACK_LABELS[it.removeSuffix("_pressed")] }
++                if (label != null) {
++                    val dm = context.resources.displayMetrics
++                    val size = (min(dm.widthPixels, dm.heightPixels) * scale).toInt()
++                    return customButtonBitmap(size, label, name.endsWith("_pressed"))
++                }
++            }
+             try {
+                 val bitmap = BitmapFactory.decodeResource(context.resources, drawableId)
+                 return resizeBitmap(context, bitmap, scale)
+@@ -1114,7 +1253,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+                 NativeLibrary.ButtonType.BUTTON_HOME,
+                 NativeLibrary.ButtonType.BUTTON_START,
+                 NativeLibrary.ButtonType.BUTTON_SELECT,
+-                NativeLibrary.ButtonType.BUTTON_SWAP -> 0.08f
++                NativeLibrary.ButtonType.BUTTON_SWAP,
++                NativeLibrary.ButtonType.BUTTON_MENU -> 0.08f
+ 
+                 NativeLibrary.ButtonType.BUTTON_TURBO -> 0.10f
+ 
+@@ -1163,6 +1303,80 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+             return overlayDrawable
+         }
+ 
++        private const val CUSTOM_BUTTON_SCALE = 0.11f
++
++        // 스킨에 그림이 없을 때 메뉴 버튼 모양에 쓰는 글자 (앱 그림 이름 -> 글자)
++        private val SKIN_FALLBACK_LABELS = mapOf(
++            "button_a" to "A", "button_b" to "B", "button_x" to "X", "button_y" to "Y",
++            "button_l" to "L", "button_r" to "R", "button_zl" to "ZL", "button_zr" to "ZR",
++            "button_start" to "START", "button_select" to "SELECT", "button_home" to "HOME",
++            "button_swap" to "SWAP", "button_turbo" to "TURBO", "button_combo" to "COMBO",
++        )
++
++        /**
++         * ff-bgm1x: 기능 버튼 그림. 화면 메뉴 버튼(button_menu / button_menu_pressed)과 같은 모양으로,
++         * 가로줄 세 개 대신 기능 이름을 쓴다: 반투명 밝은 동그라미 + 어두운 글자, 눌리면 반투명 어두운 동그라미 + 흰 글자.
++         * 글자는 메뉴 버튼의 가로줄 폭(지름의 약 46%)에 맞춰 줄이고, 너무 작아지면 띄어쓰기에서 두 줄로 나눈다.
++         */
++        private fun customButtonBitmap(size: Int, label: String, pressed: Boolean): Bitmap {
++            val bitmap = Bitmap.createBitmap(max(size, 1), max(size, 1), Bitmap.Config.ARGB_8888)
++            val canvas = Canvas(bitmap)
++            val r = size / 2f
++            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
++            paint.color = if (pressed) 0x80151515.toInt() else 0x80EAEAEA.toInt()
++            canvas.drawCircle(r, r, r, paint)
++            paint.color = if (pressed) 0xBFFFFFFF.toInt() else 0xBF000000.toInt()
++            paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
++            paint.textAlign = Paint.Align.CENTER
++            val maxW = size * 0.62f
++            fun fit(text: String, start: Float): Float {
++                paint.textSize = start
++                val w = paint.measureText(text)
++                return if (w > maxW) start * maxW / w else start
++            }
++            val one = fit(label, size * 0.26f)
++            val space = label.indexOf(' ')
++            if (one < size * 0.17f && space > 0) {
++                val lines = listOf(label.substring(0, space), label.substring(space + 1))
++                val textSize = lines.minOf { fit(it, size * 0.24f) }
++                paint.textSize = textSize
++                canvas.drawText(lines[0], r, r - textSize * 0.15f, paint)
++                canvas.drawText(lines[1], r, r + textSize * 0.95f, paint)
++            } else {
++                paint.textSize = one
++                canvas.drawText(label, r, r + one / 3f, paint)
++            }
++            return bitmap
++        }
++
++        private fun initializeCustomButton(
++            context: Context,
++            id: Int,
++            function: FfCustomButtons.Function,
++            orientation: String
++        ): InputOverlayDrawableButton {
++            val dm = context.resources.displayMetrics
++            var scale = CUSTOM_BUTTON_SCALE
++            scale *= (preferences.getInt("controlScale", 50) + 50).toFloat() / 100f
++            scale *= (preferences.getInt("controlScale-$id", 50) + 50).toFloat() / 100f
++            val size = (min(dm.widthPixels, dm.heightPixels) * scale).toInt()
++            val label = context.getString(function.labelRes)
++            val opacity: Int = preferences.getInt("controlOpacity", 50) * 255 / 100
++            val overlayDrawable = InputOverlayDrawableButton(
++                context.resources,
++                customButtonBitmap(size, label, false),
++                customButtonBitmap(size, label, true),
++                id,
++                opacity
++            )
++            // 자리가 없으면 화면 가운데
++            val x = preferences.getFloat("$id$orientation-X", ((dm.widthPixels - size) / 2).toFloat()).toInt()
++            val y = preferences.getFloat("$id$orientation-Y", ((dm.heightPixels - size) / 2).toFloat()).toInt()
++            overlayDrawable.setBounds(x, y, x + size, y + size)
++            overlayDrawable.setPosition(x, y)
++            return overlayDrawable
++        }
++
+         /**
+          * Initializes an [InputOverlayDrawableDpad]
+          *
+diff --git a/src/android/app/src/main/jni/CMakeLists.txt b/src/android/app/src/main/jni/CMakeLists.txt
+index 251788e..2237f1a 100644
+--- a/src/android/app/src/main/jni/CMakeLists.txt
++++ b/src/android/app/src/main/jni/CMakeLists.txt
+@@ -19,6 +19,7 @@ add_library(citra-android SHARED
+     default_ini.h
+     emu_window/emu_window.cpp
+     emu_window/emu_window.h
++    ff_catalog_command.cpp
+     game_info.cpp
+     id_cache.cpp
+     id_cache.h
+diff --git a/src/android/app/src/main/jni/config.cpp b/src/android/app/src/main/jni/config.cpp
+index f5f80bf..2367299 100644
+--- a/src/android/app/src/main/jni/config.cpp
++++ b/src/android/app/src/main/jni/config.cpp
+@@ -2,6 +2,7 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <iomanip>
+ #include <memory>
+ #include <ranges>
+@@ -9,6 +10,7 @@
+ #include <unordered_map>
+ #include <INIReader.h>
+ #include <boost/hana/string.hpp>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/file_util.h"
+ #include "common/logging/backend.h"
+ #include "common/logging/log.h"
+@@ -251,6 +253,19 @@ void Config::ReadValues() {
+     ReadSetting("Audio", Settings::values.input_type);
+     ReadSetting("Audio", Settings::values.input_device);
+ 
++    // ff-bgm1x: 설정 화면에서 바꾸면 reloadSettings 로 다시 읽혀 바로 적용된다
++    {
++        auto& bgm = AudioCore::HLE::BgmReplacer::Instance();
++        bgm.SetEnabled(android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_bgm_1x, true));
++        bgm.SetFastForwardCutscenes(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_ff_cutscenes, false));
++        bgm.SetVoices1x(
++            android_config->GetBoolean("Audio", Settings::Keys::ff_bgm1x_voices_1x, true));
++        const long sfx_volume =
++            android_config->GetInteger("Audio", Settings::Keys::ff_bgm1x_sfx_volume, 100);
++        bgm.SetSfxVolume(std::clamp(sfx_volume, 0L, 100L) / 100.0f);
++    }
++
+     // Data Storage
+     ReadSetting("Data Storage", Settings::values.use_virtual_sd);
+ 
+diff --git a/src/android/app/src/main/jni/default_ini.h b/src/android/app/src/main/jni/default_ini.h
+index 9422927..7203383 100644
+--- a/src/android/app/src/main/jni/default_ini.h
++++ b/src/android/app/src/main/jni/default_ini.h
+@@ -428,6 +428,22 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
+ # 0 (default): No, 1: Yes
+ )") DECLARE_KEY(simulate_headphones_plugged) BOOST_HANA_STRING(R"(
+ 
++# ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_bgm_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 연출 중에도 배속 (끄면 연출 동안 배속을 잠시 멈춤)
++# 0 (default): 끔, 1: 켬
++)") DECLARE_KEY(ff_bgm1x_ff_cutscenes) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 대사·효과음 1배속
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_voices_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 1배속으로 내는 효과음의 볼륨 (0~100)
++# 100 (default)
++)") DECLARE_KEY(ff_bgm1x_sfx_volume) BOOST_HANA_STRING(R"(
++
+ # Output volume.
+ # 1.0 (default): 100%, 0.0; mute
+ )") DECLARE_KEY(volume) BOOST_HANA_STRING(R"(
+diff --git a/src/android/app/src/main/jni/native.cpp b/src/android/app/src/main/jni/native.cpp
+index fd52ce0..7db53ec 100644
+--- a/src/android/app/src/main/jni/native.cpp
++++ b/src/android/app/src/main/jni/native.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include <core/hle/service/cfg/cfg.h>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/arch.h"
+ 
+ #if CITRA_ARCH(arm64)
+@@ -379,6 +380,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
+             SCOPE_EXIT({ Settings::values.volume = volume; });
+             Settings::values.volume = 0;
+ 
++            // ff-bgm1x: 사용자가 일시정지한 동안 대체 재생도 멈춘다
++            AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(false);
++            SCOPE_EXIT({ AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(true); });
++
+             std::unique_lock pause_lock{paused_mutex};
+             running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
+             window->PollEvents();
+diff --git a/src/android/app/src/main/res/menu/menu_in_game.xml b/src/android/app/src/main/res/menu/menu_in_game.xml
+index f7e9017..220f669 100644
+--- a/src/android/app/src/main/res/menu/menu_in_game.xml
++++ b/src/android/app/src/main/res/menu/menu_in_game.xml
+@@ -52,6 +52,12 @@
+         android:icon="@drawable/ic_unlocked"
+         android:title="@string/lock_drawer" />
+ 
++    <!-- ff-bgm1x: 소리 분류 (1x Lab 앱에서만 보인다) -->
++    <item
++        android:id="@+id/menu_ff_sound_catalog"
++        android:icon="@drawable/ic_code"
++        android:title="@string/ff_sound_catalog" />
++
+     <item
+         android:id="@+id/menu_cheats"
+         android:icon="@drawable/ic_code"
+diff --git a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+index 0fe950e..93362e5 100644
+--- a/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_landscape_screen_layout.xml
+@@ -29,4 +29,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_screen_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>
+diff --git a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+index 866824a..101ade3 100644
+--- a/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
++++ b/src/android/app/src/main/res/menu/menu_portrait_screen_layout.xml
+@@ -17,4 +17,9 @@
+ 
+     </group>
+ 
++    <!-- ff-bgm1x: 화면에서 끌어서 사용자 배치를 정한다 -->
++    <item
++        android:id="@+id/menu_portrait_layout_edit_custom"
++        android:title="@string/ff_bgm1x_layout_edit" />
++
+ </menu>
+diff --git a/src/android/app/src/main/res/values/arrays.xml b/src/android/app/src/main/res/values/arrays.xml
+index 5e8aff3..cc34867 100644
+--- a/src/android/app/src/main/res/values/arrays.xml
++++ b/src/android/app/src/main/res/values/arrays.xml
+@@ -189,6 +189,7 @@
+         <item>@string/button_swap</item>
+         <item>@string/button_turbo</item>
+         <item>@string/button_combo</item>
++        <item>@string/button_menu</item>
+     </string-array>
+ 
+     <string-array name="comboOptions">
+diff --git a/src/android/app/src/main/res/values/integers.xml b/src/android/app/src/main/res/values/integers.xml
+index 5843e67..e7c6cdf 100644
+--- a/src/android/app/src/main/res/values/integers.xml
++++ b/src/android/app/src/main/res/values/integers.xml
+@@ -35,6 +35,9 @@
+     <integer name="N3DS_BUTTON_SWAP_Y">850</integer>
+     <integer name="N3DS_BUTTON_TURBO_X">630</integer>
+     <integer name="N3DS_BUTTON_TURBO_Y">850</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_X">630</integer>
++    <integer name="N3DS_BUTTON_MENU_Y">850</integer>
+     <integer name="N3DS_BUTTON_COMBO_X">740</integer>
+     <integer name="N3DS_BUTTON_COMBO_Y">480</integer>
+ 
+@@ -71,6 +74,9 @@
+     <integer name="N3DS_BUTTON_SWAP_PORTRAIT_Y">675</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_X">453</integer>
+     <integer name="N3DS_BUTTON_TURBO_PORTRAIT_Y">720</integer>
++    <!-- ff-bgm1x: 화면 메뉴 버튼 -->
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_X">280</integer>
++    <integer name="N3DS_BUTTON_MENU_PORTRAIT_Y">794</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_X">450</integer>
+     <integer name="N3DS_BUTTON_COMBO_PORTRAIT_Y">925</integer>
+ 
+diff --git a/src/android/app/src/main/res/values/strings.xml b/src/android/app/src/main/res/values/strings.xml
+index 12bb68c..e072a6c 100644
+--- a/src/android/app/src/main/res/values/strings.xml
++++ b/src/android/app/src/main/res/values/strings.xml
+@@ -165,6 +165,7 @@
+     <string name="button_home">HOME</string>
+     <string name="button_swap">Swap Screens</string>
+     <string name="button_turbo">Turbo</string>
++    <string name="button_menu">Menu</string>
+     <string name="button_combo">Combo Button</string>
+     <string name="button_x" translatable="false">X</string>
+     <string name="button_y" translatable="false">Y</string>
+@@ -364,6 +365,97 @@
+     <string name="realtime_audio_description">Scales audio playback speed to account for drops in emulation framerate. This means that audio will play at full speed even while the game framerate is low. May cause audio desync issues.</string>
+     <string name="simulate_headphones_plugged">Simulate Headphones Plugged In</string>
+     <string name="simulate_headphones_plugged_description">Simulates whether headphones are plugged in to the emulated 3DS system.</string>
++    <!-- ff-bgm1x -->
++    <string name="ff_bgm1x_bgm_1x">BGM 1배속 유지 (배속 중)</string>
++    <string name="ff_bgm1x_bgm_1x_description">배속 중에도 BGM 을 1배속으로 재생합니다.</string>
++    <string name="ff_bgm1x_ff_cutscenes">연출 중에도 배속</string>
++    <string name="ff_bgm1x_ff_cutscenes_description">끄면 연출 음악·동영상이 나오는 동안 배속을 잠시 멈춥니다.</string>
++    <string name="ff_bgm1x_voices_1x">대사·효과음 1배속</string>
++    <string name="ff_bgm1x_voices_1x_description">배속 중이나 느린 속도(속도 제한 100% 미만)에서도 대사와 효과음을 1배속으로 냅니다.</string>
++    <string name="ff_bgm1x_layout_edit">화면·버튼 배치 직접 편집…</string>
++    <string name="ff_bgm1x_layout_top_screen">위 화면</string>
++    <string name="ff_bgm1x_layout_bottom_screen">아래 화면</string>
++    <string name="ff_bgm1x_layout_panel_handle">☰ 여기를 끌어 패널 옮기기 · 화면·버튼을 끌어 옮기고, 모서리로 크기 조절</string>
++    <string name="ff_bgm1x_layout_width">너비</string>
++    <string name="ff_bgm1x_layout_height">높이</string>
++    <string name="ff_bgm1x_layout_keep_aspect">원래 비율 유지</string>
++    <string name="ff_bgm1x_layout_fix_aspect">비율 맞추기</string>
++    <string name="ff_skin_apply">스킨 적용 (zip)</string>
++    <string name="ff_skin_remove">스킨 끄기</string>
++    <string name="ff_bgm1x_layout_save">저장</string>
++    <string name="ff_bgm1x_layout_size_percent">크기 %</string>
++    <string name="ff_bgm1x_layout_center_h">가로 가운데</string>
++    <string name="ff_bgm1x_layout_center_v">세로 가운데</string>
++    <string name="ff_bgm1x_layout_edge_left">◀ 왼쪽</string>
++    <string name="ff_bgm1x_layout_edge_right">오른쪽 ▶</string>
++    <string name="ff_bgm1x_layout_edge_top">▲ 위</string>
++    <string name="ff_bgm1x_layout_edge_bottom">▼ 아래</string>
++    <string name="ff_bgm1x_layout_fill">꽉 채우기</string>
++    <string name="ff_bgm1x_layout_same_size">고른 버튼 같은 크기로</string>
++    <string name="ff_bgm1x_layout_mirror">왼쪽 기준 좌우 대칭</string>
++    <string name="ff_bgm1x_layout_margin">여백 px</string>
++    <string name="ff_bgm1x_layout_grid">격자 px (0 = 끔)</string>
++    <string name="ff_bgm1x_layout_hint">누르면 하나(그룹이면 그룹 전체) 선택, 길게 누르면 여러 개 선택</string>
++    <string name="ff_bgm1x_layout_add_button">버튼 추가</string>
++    <string name="ff_bgm1x_layout_change_function">기능 바꾸기</string>
++    <string name="ff_bgm1x_layout_delete">버튼 삭제 (다시 추가 가능)</string>
++    <string name="ff_bgm1x_layout_choose_function">추가할 기능 (화면에 없는 것만)</string>
++    <string name="ff_bgm1x_layout_group">그룹 만들기</string>
++    <string name="ff_bgm1x_layout_ungroup">그룹 풀기</string>
++    <string name="ff_bgm1x_layout_section_each">서로 맞추기 (그룹 하나만 고르면 그 안에서)</string>
++    <string name="ff_bgm1x_layout_section_screen">화면 기준</string>
++    <string name="ff_bgm1x_layout_align_left">왼끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_hcenter">좌우 가운데 맞춤</string>
++    <string name="ff_bgm1x_layout_align_right">오른끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_top">위끝 맞춤</string>
++    <string name="ff_bgm1x_layout_align_vcenter">높이 맞춤</string>
++    <string name="ff_bgm1x_layout_align_bottom">아래끝 맞춤</string>
++    <string name="ff_bgm1x_layout_dist_h">가로 등간격</string>
++    <string name="ff_bgm1x_layout_dist_v">세로 등간격</string>
++    <string name="ff_bgm1x_layout_gap">간격 px (빈칸이면 양 끝 사이 균등)</string>
++    <string name="ff_func_none">미지정</string>
++    <string name="ff_func_menu">메뉴</string>
++    <string name="ff_func_swap_screen">화면 전환</string>
++    <string name="ff_func_cycle_layout">배치 바꾸기</string>
++    <string name="ff_func_pause">일시정지</string>
++    <string name="ff_func_quicksave">빠른 저장</string>
++    <string name="ff_func_quickload">빠른 불러오기</string>
++    <string name="ff_func_turbo">터보</string>
++    <string name="ff_func_close_game">게임 닫기</string>
++    <string name="ff_func_bgm_1x">BGM 1배속</string>
++    <string name="ff_func_voices_1x">효과음 1배속</string>
++    <string name="ff_func_ff_cutscenes">연출 중 배속</string>
++    <string name="ff_func_state_on">켜짐</string>
++    <!-- ff-bgm1x: 소리 분류 (1x Lab 앱) -->
++    <string name="ff_sound_catalog">Sound classification</string>
++    <string name="ff_sounds_collect">Collect sounds</string>
++    <string name="ff_sounds_collect_hint">While on, sounds that play in the game are added to the list. Turn it off when you are done.</string>
++    <string name="ff_sounds_play">Play</string>
++    <string name="ff_sounds_pause">Pause</string>
++    <string name="ff_sounds_stop">Stop</string>
++    <string name="ff_sounds_kind">Classification</string>
++    <string name="ff_sounds_volume">Volume</string>
++    <string name="ff_sounds_reset">Default</string>
++    <string name="ff_sounds_import">Import</string>
++    <string name="ff_sounds_export">Export</string>
++    <string name="ff_sounds_clear">Clear list</string>
++    <string name="ff_sounds_empty">No sounds yet. Turn on \"Collect sounds\" and play.</string>
++    <string name="ff_sounds_unsupported">No game is running.</string>
++    <string name="ff_sounds_auto">Auto</string>
++    <string name="ff_sounds_count">%1$d times</string>
++    <string name="ff_sounds_kind_auto">Auto (default)</string>
++    <string name="ff_sounds_kind_bgm">BGM</string>
++    <string name="ff_sounds_kind_jingle">Fanfare / voice</string>
++    <string name="ff_sounds_kind_cutscene">Cutscene</string>
++    <string name="ff_sounds_kind_sfx">Sound effect</string>
++    <string name="ff_sounds_kind_none">Nothing</string>
++    <string name="ff_sounds_kind_unknown">Not heard yet</string>
++    <string name="ff_func_state_off">꺼짐</string>
++    <string name="ff_bgm1x_layout_selected_many">%1$s 외 %2$d개 선택 (노란 테두리 기준)</string>
++    <string name="ff_bgm1x_layout_collapse">접기</string>
++    <string name="ff_bgm1x_layout_picker_close">목록 닫기</string>
++    <string name="ff_bgm1x_layout_expand">펴기</string>
++    <string name="ff_bgm1x_sfx_volume">효과음 볼륨</string>
+     <string name="audio_input_type">Audio Input Device</string>
+     <string name="sound_output_mode">Sound Output Mode</string>
+ 
+diff --git a/src/audio_core/CMakeLists.txt b/src/audio_core/CMakeLists.txt
+index f6f8bf9..972a17a 100644
+--- a/src/audio_core/CMakeLists.txt
++++ b/src/audio_core/CMakeLists.txt
+@@ -18,6 +18,12 @@ add_library(audio_core STATIC EXCLUDE_FROM_ALL
+     hle/shared_memory.h
+     hle/source.cpp
+     hle/source.h
++    hle/bgm_replacer.cpp
++    hle/bgm_replacer.h
++    hle/sfx_mirror.cpp
++    hle/sfx_mirror.h
++    hle/sound_catalog.cpp
++    hle/sound_catalog.h
+     lle/lle.cpp
+     lle/lle.h
+     input.h
+diff --git a/src/audio_core/dsp_interface.cpp b/src/audio_core/dsp_interface.cpp
+index e0ce087..21d72bf 100644
+--- a/src/audio_core/dsp_interface.cpp
++++ b/src/audio_core/dsp_interface.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <cstddef>
+ #include "audio_core/dsp_interface.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+ #include "common/assert.h"
+@@ -107,6 +108,10 @@ void DspInterface::OutputCallback(s16* buffer, std::size_t num_frames) {
+         std::memcpy(buffer + 2 * i, &last_frame[0], 2 * sizeof(s16));
+     }
+ 
++    // ff-bgm1x: 오디오 장치가 요청한 전체 분량만큼 1배속 BGM 을 섞는다.
++    // 에뮬레이션이 성능 때문에 멈칫해 원본 소리가 비어도 BGM 은 끊기지 않는다 (일시정지는 따로 처리).
++    HLE::BgmReplacer::Instance().Mix(buffer, num_frames, sink->GetNativeSampleRate());
++
+     // Implementation of the hardware volume slider
+     // A cubic curve is used to approximate a linear change in human-perceived loudness
+     const float linear_volume = std::clamp(Settings::Volume(), 0.0f, 1.0f);
+diff --git a/src/audio_core/hle/aac_decoder.cpp b/src/audio_core/hle/aac_decoder.cpp
+index 33682a9..555a1b9 100644
+--- a/src/audio_core/hle/aac_decoder.cpp
++++ b/src/audio_core/hle/aac_decoder.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <neaacdec.h>
+ #include "audio_core/hle/aac_decoder.h"
++#include "audio_core/hle/bgm_replacer.h"
+ 
+ namespace AudioCore::HLE {
+ 
+@@ -91,6 +92,9 @@ BinaryMessage AACDecoder::Decode(const BinaryMessage& request) {
+     }
+     u8* data = memory.GetFCRAMPointer(request.decode_aac_request.src_addr - Memory::FCRAM_PADDR);
+     u32 data_len = request.decode_aac_request.size;
++    // ff-bgm1x: 어떤 BGM 파일의 몇 번째 프레임인지, 어디로 풀리는지 알려 준다
++    BgmReplacer::Instance().OnAacDecode(data, data_len, request.decode_aac_request.dst_addr_ch0,
++                                        request.decode_aac_request.dst_addr_ch1);
+ 
+     if (!decoder_initialized) {
+         unsigned long sample_rate;
+diff --git a/src/audio_core/hle/hle.cpp b/src/audio_core/hle/hle.cpp
+index 05ff9d7..7e915f4 100644
+--- a/src/audio_core/hle/hle.cpp
++++ b/src/audio_core/hle/hle.cpp
+@@ -15,6 +15,7 @@
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/decoder.h"
+ #include "audio_core/hle/hle.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/mixers.h"
+ #include "audio_core/hle/shared_memory.h"
+ #include "audio_core/hle/source.h"
+@@ -303,6 +304,7 @@ void DspHle::Impl::Initialize() {
+     // is clean and consistent every time the HW is initialized,
+     // but what is exactly reset needs to be figured out.
+     dsp_memory->raw_memory.fill(0);
++    HLE::BgmReplacer::Instance().Reset();  // ff-bgm1x
+     mixers.Reset();
+     for (auto& s : sources) {
+         s.Reset();
+@@ -412,6 +414,7 @@ HLE::SharedMemory& DspHle::Impl::WriteRegion() {
+ }
+ 
+ StereoFrame16 DspHle::Impl::GenerateCurrentFrame() {
++    HLE::BgmReplacer::Instance().OnDspFrame();  // ff-bgm1x: 게임 시간 기준
+     HLE::SharedMemory& read = ReadRegion();
+     HLE::SharedMemory& write = WriteRegion();
+ 
+diff --git a/src/audio_core/hle/mixers.cpp b/src/audio_core/hle/mixers.cpp
+index 03dab65..16900fd 100644
+--- a/src/audio_core/hle/mixers.cpp
++++ b/src/audio_core/hle/mixers.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <algorithm>
+ #include <cstddef>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/mixers.h"
+ #include "common/assert.h"
+ #include "common/logging/log.h"
+@@ -75,6 +76,9 @@ void Mixers::ParseConfig(DspConfiguration& config) {
+         LOG_TRACE(Audio_DSP, "mixers aux_return_volume[1] = {}", config.aux_return_volume[1]);
+     }
+ 
++    // ff-bgm1x: 대체 재생 BGM 도 같은 믹서 볼륨을 쓴다
++    BgmReplacer::Instance().UpdateMixerVolumes(state.intermediate_mixer_volume);
++
+     if (config.output_format_dirty) {
+         config.output_format_dirty.Assign(0);
+         state.output_format = config.output_format;
+diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
+index 4728526..86e364f 100755
+--- a/src/audio_core/hle/source.cpp
++++ b/src/audio_core/hle/source.cpp
+@@ -5,6 +5,7 @@
+ #include <algorithm>
+ #include <array>
+ #include "audio_core/codec.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/source.h"
+ #include "audio_core/interpolate.h"
+@@ -18,6 +19,16 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+                                   const s16_le (&adpcm_coeffs)[16]) {
+     ParseConfig(config, adpcm_coeffs);
+ 
++    // ff-bgm1x: 새 소리를 시작했으면 효과음 미러 방식을 정한다
++    if (mirror_new && state.enabled) {
++        mirror_new = false;
++        sfx_first = true;  // 소리 분류: 이 소리의 첫 버퍼를 볼 것
++        sfx_gain = 1.0f;
++        sfx_cutscene = false;
++        if (mirror_mode) BgmReplacer::Instance().MirrorEnd(source_id);
++        mirror_mode = BgmReplacer::Instance().MirrorBegin(source_id);
++    }
++
+     if (state.enabled) {
+         GenerateFrame();
+     }
+@@ -28,6 +39,54 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
+     if (!state.enabled) {
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        if (bgm_replaced) {
++            bgm_replaced = false;
++            BgmReplacer::Instance().OnSourceIdle(source_id);
++        }
++        if (mirror_mode) {
++            mirror_mode = 0;
++            if (BgmReplacer::Diag()) LOG_INFO(Audio_DSP, "ff-diag voice-off src={}", source_id);
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
++        return;
++    }
++
++    // ff-bgm1x: 1배속으로 대체 재생 중인 BGM 음성은 원본 믹스에 넣지 않고 볼륨만 알려 준다
++    if (bgm_replaced && BgmReplacer::Instance().IsEnabled()) {
++        if (intermediate_mix_id == 0) {
++            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
++        }
++        if (mirror_mode) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        return;
++    }
++
++    // ff-bgm1x: 효과음 음성 미러. 배속 중에 시작한 소리는 이 음성의 출력(볼륨 포함)을 녹음해 1배속으로 내고,
++    // 느린 속도에서 시작한 소리는 앞당겨 해독한 버퍼를 지금 볼륨·재생 배율로 낸다. 어느 쪽이든 원본 믹스에서는 뺀다
++    // (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
++    // 소리 분류 창에서 연출로 정한 소리가 나오는 동안은 배속을 멈춘다
++    if (intermediate_mix_id == 0 && sfx_cutscene) BgmReplacer::Instance().HoldCutscene();
++    if (intermediate_mix_id == 0 && mirror_mode) {
++        // 소리 분류 창에서 정한 볼륨은 1배속으로 내는 소리에만 곱한다
++        auto gain = state.gain;
++        if (sfx_gain != 1.0f) {
++            for (auto& mix : gain) {
++                for (float& g : mix) g *= sfx_gain;
++            }
++        }
++        const bool alive =
++            mirror_mode == 1
++                ? BgmReplacer::Instance().MirrorFeed(source_id, current_frame, gain)
++                : BgmReplacer::Instance().MirrorAheadUpdate(source_id, gain, state.rate_multiplier);
++        if (!alive) mirror_mode = 0;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
++    }
++    if (mirror_mode) {
+         state.gain_ramp_start.at(intermediate_mix_id) = gains;
+         state.gain_ramp_active.at(intermediate_mix_id) = false;
+         return;
+@@ -36,17 +95,23 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const bool ramp_active = state.gain_ramp_active.at(intermediate_mix_id);
+     const std::array<float, 4>& ramp_start = state.gain_ramp_start.at(intermediate_mix_id);
+     constexpr float ramp_scale = 1.0f / static_cast<float>(samples_per_frame - 1);
++    // ff-bgm1x: 소리 분류 창에서 정한 볼륨 (원본 그대로 나오는 소리에도 적용, 지정이 없으면 1)
++    const float user_scale = sfx_gain * stream_gain;
+ 
+     for (std::size_t samplei = 0; samplei < samples_per_frame; samplei++) {
+         const float progress = static_cast<float>(samplei) * ramp_scale;
+         const float gain0 =
+-            ramp_active ? ramp_start[0] + (gains[0] - ramp_start[0]) * progress : gains[0];
++            (ramp_active ? ramp_start[0] + (gains[0] - ramp_start[0]) * progress : gains[0]) *
++            user_scale;
+         const float gain1 =
+-            ramp_active ? ramp_start[1] + (gains[1] - ramp_start[1]) * progress : gains[1];
++            (ramp_active ? ramp_start[1] + (gains[1] - ramp_start[1]) * progress : gains[1]) *
++            user_scale;
+         const float gain2 =
+-            ramp_active ? ramp_start[2] + (gains[2] - ramp_start[2]) * progress : gains[2];
++            (ramp_active ? ramp_start[2] + (gains[2] - ramp_start[2]) * progress : gains[2]) *
++            user_scale;
+         const float gain3 =
+-            ramp_active ? ramp_start[3] + (gains[3] - ramp_start[3]) * progress : gains[3];
++            (ramp_active ? ramp_start[3] + (gains[3] - ramp_start[3]) * progress : gains[3]) *
++            user_scale;
+ 
+         // Conversion from stereo (current_frame) to quadraphonic (dest) occurs here.
+         dest[samplei][0] += static_cast<s32>(gain0 * current_frame[samplei][0]);
+@@ -64,6 +129,19 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+ void Source::Reset() {
+     current_frame.fill({});
+     state = {};
++    if (bgm_replaced) {
++        bgm_replaced = false;
++        BgmReplacer::Instance().OnSourceIdle(source_id);
++    }
++    if (mirror_mode) {
++        mirror_mode = 0;
++        BgmReplacer::Instance().MirrorEnd(source_id);
++    }
++    mirror_new = true;
++    sfx_first = false;
++    sfx_gain = 1.0f;
++    sfx_cutscene = false;
++    stream_gain = 1.0f;
+ }
+ 
+ void Source::Sleep() {
+@@ -102,6 +180,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.enable_dirty) {
+         config.enable_dirty.Assign(0);
++        if (config.enable != 0 && !state.enabled) mirror_new = true;  // ff-bgm1x: 새 소리
+         state.enabled = config.enable != 0;
+         LOG_TRACE(Audio_DSP, "source_id={} enable={}", source_id, state.enabled);
+     }
+@@ -281,6 +360,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.embedded_buffer_dirty) {
+         config.embedded_buffer_dirty.Assign(0);
++        mirror_new = true;  // ff-bgm1x: 새 소리
+         // HACK
+         // Luigi's Mansion Dark Moon configures the embedded buffer with an extremely large value
+         // for length, causing the Dequeue method to allocate a buffer of that size, eating up all
+@@ -449,6 +529,12 @@ bool Source::DequeueBuffer() {
+ 
+     Buffer buf = state.input_queue.top();
+     state.input_queue.pop();
++    const bool loop_repeat = buf.has_played;  // ff-bgm1x: 반복 버퍼가 다시 돌아옴
++    if (BgmReplacer::Diag()) {
++        LOG_INFO(Audio_DSP, "ff-diag buf src={} fmt={} len={} looping={} repeat={} pos={} mirror={} first={} bgm={}",
++                 source_id, static_cast<int>(buf.format), buf.length, buf.is_looping, loop_repeat, buf.play_position,
++                 mirror_mode, sfx_first, bgm_replaced);
++    }
+ 
+     if (buf.adpcm_dirty) {
+         state.adpcm_state.yn1 = buf.adpcm_yn[0];
+@@ -462,13 +548,28 @@ bool Source::DequeueBuffer() {
+         const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
+         switch (buf.format) {
+         case Format::PCM8:
++            if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM8(num_channels, memory, buf.length);
+             break;
+         case Format::PCM16:
++            // ff-bgm1x: AAC 디코더가 BGM 을 풀어 놓은 버퍼인지 확인
++            if (BgmReplacer::Instance().OnPcmBuffer(source_id, buf.physical_address, buf.length,
++                                                    num_channels)) {
++                bgm_replaced = true;
++            } else if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM16(num_channels, memory, buf.length);
+             break;
+         case Format::ADPCM:
+             DEBUG_ASSERT(num_channels == 1);
++            // ff-bgm1x: BGM 스트림 버퍼인지 확인
++            bgm_replaced = BgmReplacer::Instance().OnAdpcmBuffer(source_id, state.adpcm_coeffs,
++                                                                 memory, buf.length);
+             state.current_buffer =
+                 Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
+             break;
+@@ -476,6 +577,36 @@ bool Source::DequeueBuffer() {
+             UNIMPLEMENTED();
+             break;
+         }
++        // ff-bgm1x: 소리 분류 - 원본 그대로 내는 스트림 곡(연출 등)에 사용자가 정한 볼륨
++        stream_gain = buf.format == Format::PCM8 ? 1.0f : BgmReplacer::Instance().NativeGain(source_id);
++        // ff-bgm1x: 소리 분류 - 새 소리의 첫 버퍼로 어느 파형인지 알아내 사용자 지정을 따른다
++        // (분류 창이 닫혀 있고 사용자 지정도 없으면 Active() 가 false 라 아무것도 하지 않는다)
++        if (sfx_first && !bgm_replaced && !loop_repeat &&
++            BgmReplacer::Instance().Catalog().Active()) {
++            sfx_first = false;
++            const bool adpcm = buf.format == Format::ADPCM;
++            const u32 bytes = adpcm ? (buf.length + 13) / 14 * 8
++                              : buf.format == Format::PCM16 ? buf.length * 2 * num_channels
++                                                            : buf.length * num_channels;
++            const auto policy =
++                BgmReplacer::Instance().OnSfxBuffer(source_id, adpcm, state.adpcm_coeffs, memory, bytes);
++            if (policy.matched) {
++                sfx_gain = policy.gain;
++                sfx_cutscene = policy.kind == SoundCatalog::Kind_Cutscene;
++                if (policy.kind == SoundCatalog::Kind_None ||
++                    policy.kind == SoundCatalog::Kind_Cutscene) {
++                    // 원본 그대로 (게임 속도)
++                    if (mirror_mode) {
++                        mirror_mode = 0;
++                        BgmReplacer::Instance().MirrorEnd(source_id);
++                    }
++                } else if (policy.kind == SoundCatalog::Kind_Bgm ||
++                           policy.kind == SoundCatalog::Kind_Jingle) {
++                    // "대사·효과음 1배속" 이 꺼져 있어도 1배속
++                    if (!mirror_mode) mirror_mode = BgmReplacer::Instance().MirrorBeginForced(source_id);
++                }
++            }
++        }
+     } else {
+         LOG_WARNING(Audio_DSP,
+                     "source_id={} buffer_id={} length={}: Invalid physical address {:#010x}",
+@@ -506,6 +637,16 @@ bool Source::DequeueBuffer() {
+         state.current_buffer.begin(),
+         std::next(state.current_buffer.begin(), state.current_sample_number));
+ 
++    // ff-bgm1x: 느린 속도의 효과음 미러 - 받은 버퍼 전체를 넘겨 실제 시간으로 낸다 (BGM 음성은 BGM 쪽이 맡는다)
++    if (mirror_mode == 2) {
++        if (bgm_replaced) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        } else if (!loop_repeat) {
++            BgmReplacer::Instance().MirrorAheadBuffer(source_id, state.current_buffer, buf.is_looping);
++        }
++    }
++
+     LOG_TRACE(Audio_DSP,
+               "source_id={} buffer_id={} from_queue={} current_buffer.size()={}, "
+               "buf.has_played={}, buf.play_position={}",
+diff --git a/src/audio_core/hle/source.h b/src/audio_core/hle/source.h
+index 1223f68..cb35b13 100755
+--- a/src/audio_core/hle/source.h
++++ b/src/audio_core/hle/source.h
+@@ -69,6 +69,14 @@ public:
+ 
+ private:
+     const std::size_t source_id;
++    bool bgm_replaced = false;  // ff-bgm1x: 이 음성을 1배속 대체 재생 중
++    bool mirror_new = false;    // ff-bgm1x: 새 소리 시작 (켜짐, 리셋, 새 임베디드 버퍼)
++    int mirror_mode = 0;        // ff-bgm1x: 효과음 미러 0 = 원본, 1 = 녹음(배속), 2 = 앞당겨 해독(느린 속도)
++    // ff-bgm1x 소리 분류: 새 소리의 첫 버퍼를 아직 보지 않음, 1배속 볼륨 배율, 연출로 지정한 소리
++    bool sfx_first = false;
++    float sfx_gain = 1.0f;
++    bool sfx_cutscene = false;
++    float stream_gain = 1.0f;  // 원본 그대로 내는 스트림 곡의 사용자 볼륨
+     Memory::MemorySystem* memory_system{};
+     StereoFrame16 current_frame;
+     StereoFrame16 backup_frame; // TODO(PabloMK7): Check if we actually need this
+diff --git a/src/citra_qt/CMakeLists.txt b/src/citra_qt/CMakeLists.txt
+index 91d8e13..1431924 100644
+--- a/src/citra_qt/CMakeLists.txt
++++ b/src/citra_qt/CMakeLists.txt
+@@ -29,6 +29,8 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
+     camera/qt_multimedia_camera.h
+     citra_qt.cpp
+     citra_qt.h
++    ff_sound_catalog_dialog.cpp
++    ff_sound_catalog_dialog.h
+     configuration/config.cpp
+     configuration/config.h
+     configuration/configure.ui
+diff --git a/src/citra_qt/bootmanager.h b/src/citra_qt/bootmanager.h
+index 9bd922e..d4f9bfa 100644
+--- a/src/citra_qt/bootmanager.h
++++ b/src/citra_qt/bootmanager.h
+@@ -4,6 +4,7 @@
+ 
+ #pragma once
+ 
++#include "audio_core/hle/bgm_replacer.h"
+ #include <atomic>
+ #include <condition_variable>
+ #include <memory>
+@@ -54,6 +55,7 @@ public:
+      * @note This function is thread-safe
+      */
+     void SetRunning(bool running) {
++        AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(running);  // ff-bgm1x
+         std::unique_lock lock{running_mutex};
+         this->running = running;
+         lock.unlock();
+diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
+index f75e16f..92b2f22 100644
+--- a/src/citra_qt/citra_qt.cpp
++++ b/src/citra_qt/citra_qt.cpp
+@@ -43,8 +43,11 @@
+ #include "citra_qt/applets/swkbd.h"
+ #include "citra_qt/bootmanager.h"
+ #include "citra_qt/camera/qt_multimedia_camera.h"
++#include "citra_qt/ff_sound_catalog_dialog.h"
+ #include "citra_qt/camera/still_image_camera.h"
+ #include "citra_qt/citra_qt.h"
++#include "audio_core/hle/bgm_replacer.h"
++#include <QSettings>
+ #include "citra_qt/compatibility_list.h"
+ #include "citra_qt/configuration/config.h"
+ #include "citra_qt/configuration/configure_dialog.h"
+@@ -951,6 +954,28 @@ void GMainWindow::InitializeHotkeys() {
+     connect_shortcut(QStringLiteral("Toggle Turbo Mode"),
+                      [&] { GMainWindow::SetTurboEnabled(!GMainWindow::IsTurboEnabled()); });
+ 
++    // ff-bgm1x: 메뉴의 체크 항목을 단축키로 켜고 끈다 (설정 저장은 메뉴 항목이 한다)
++    for (const auto& [hotkey, object] :
++         {std::pair{QStringLiteral("Toggle BGM at 1x Speed"), QStringLiteral("ff_bgm1x_1x")},
++          std::pair{QStringLiteral("Toggle Fast Forward During Cutscenes"), QStringLiteral("ff_bgm1x_ff_cutscenes")},
++          std::pair{QStringLiteral("Toggle Voices at 1x Speed"), QStringLiteral("ff_bgm1x_voices_1x")}}) {
++        const QString name = object;
++        connect_shortcut(hotkey, [this, name] {
++            if (QAction* action = findChild<QAction*>(name)) {
++                action->toggle();
++                statusBar()->showMessage(
++                    QStringLiteral("%1: %2").arg(action->text(), action->isChecked() ? tr("켜짐") : tr("꺼짐")),
++                    3000);
++            }
++        });
++    }
++
++    connect_shortcut(QStringLiteral("Open Sound Classification"), [this] {
++        if (QAction* action = findChild<QAction*>(QStringLiteral("ff_bgm1x_sound_catalog"))) {
++            action->trigger();
++        }
++    });
++
+     connect_shortcut(QStringLiteral("Increase Speed Limit"), [&] { AdjustSpeedLimit(true); });
+     connect_shortcut(QStringLiteral("Decrease Speed Limit"), [&] { AdjustSpeedLimit(false); });
+ 
+@@ -1115,6 +1140,72 @@ void GMainWindow::ConnectWidgetEvents() {
+ }
+ 
+ void GMainWindow::ConnectMenuEvents() {
++    // ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생 (기본 켜짐, 설정 유지)
++    {
++        QSettings bgm_settings(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        const bool bgm_on = bgm_settings.value(QStringLiteral("bgm_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetEnabled(bgm_on);
++        QAction* bgm_action = new QAction(tr("BGM 1배속 유지 (배속 중)"), this);
++        bgm_action->setObjectName(QStringLiteral("ff_bgm1x_1x"));
++        bgm_action->setCheckable(true);
++        bgm_action->setChecked(bgm_on);
++        ui->menu_Emulation->addSeparator();
++        ui->menu_Emulation->addAction(bgm_action);
++        connect(bgm_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("bgm_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetEnabled(checked);
++        });
++
++        // 연출(연출 음악이 나오는 장면) 중에도 배속할지 (기본 꺼짐: 연출은 1배속으로 본다)
++        const bool ff_cutscenes = bgm_settings.value(QStringLiteral("ff_cutscenes"), false).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(ff_cutscenes);
++        QAction* cutscene_action = new QAction(tr("연출 중에도 배속"), this);
++        cutscene_action->setObjectName(QStringLiteral("ff_bgm1x_ff_cutscenes"));
++        cutscene_action->setCheckable(true);
++        cutscene_action->setChecked(ff_cutscenes);
++        ui->menu_Emulation->addAction(cutscene_action);
++        connect(cutscene_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("ff_cutscenes"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetFastForwardCutscenes(checked);
++        });
++
++        // 대사처럼 BGM 위에 겹쳐 트는 소리를 1배속으로 낼지 (기본 켜짐)
++        const bool voices_1x = bgm_settings.value(QStringLiteral("voices_1x"), true).toBool();
++        AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(voices_1x);
++        // 효과음 볼륨 (설정 > 오디오 에서 바꾼다)
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(
++            bgm_settings.value(QStringLiteral("sfx_volume"), 100).toInt() / 100.0f);
++        QAction* voices_action = new QAction(tr("대사·효과음 1배속"), this);
++        voices_action->setObjectName(QStringLiteral("ff_bgm1x_voices_1x"));
++        voices_action->setCheckable(true);
++        voices_action->setChecked(voices_1x);
++        ui->menu_Emulation->addAction(voices_action);
++        connect(voices_action, &QAction::toggled, this, [](bool checked) {
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            s.setValue(QStringLiteral("voices_1x"), checked);
++            AudioCore::HLE::BgmReplacer::Instance().SetVoices1x(checked);
++        });
++
++        // 소리 분류 창: 게임에서 나온 소리를 모아 BGM·연출·효과음 등을 직접 정한다
++        QAction* catalog_action = new QAction(tr("소리 분류..."), this);
++        catalog_action->setObjectName(QStringLiteral("ff_bgm1x_sound_catalog"));
++        ui->menu_Emulation->addAction(catalog_action);
++        connect(catalog_action, &QAction::triggered, this, [this] {
++            FfSoundCatalogDialog::Hooks hooks;
++            hooks.is_running = [this] {
++                return emulation_running && emu_thread && emu_thread->IsRunning() &&
++                       !system.frame_limiter.IsFrameAdvancing();
++            };
++            hooks.pause = [this] { OnPauseGame(); };
++            hooks.resume = [this] {
++                if (emulation_running && emu_thread) OnResumeGame(false);
++            };
++            FfSoundCatalogDialog::Open(this, std::move(hooks));
++        });
++    }
++
+     const auto connect_menu = [&](QAction* action, const auto& event_fn,
+                                   QAction::MenuRole role = QAction::NoRole) {
+         action->setMenuRole(role);
+@@ -4037,6 +4128,8 @@ void GMainWindow::closeEvent(QCloseEvent* event) {
+         return;
+     }
+ 
++    FfSoundCatalogDialog::CloseIfOpen();  // ff-bgm1x: 소리 분류 창을 먼저 닫는다
++
+     UpdateUISettings();
+     game_list->SaveInterfaceLayout();
+     hotkey_registry.SaveHotkeys();
+diff --git a/src/citra_qt/configuration/config.cpp b/src/citra_qt/configuration/config.cpp
+index 6f2b59b..57e4ab7 100644
+--- a/src/citra_qt/configuration/config.cpp
++++ b/src/citra_qt/configuration/config.cpp
+@@ -99,6 +99,11 @@ const std::vector<UISettings::Shortcut> QtConfig::default_hotkeys{ {
+      {QStringLiteral("Toggle Status Bar"),        QStringLiteral("Main Window"), {QStringLiteral("Ctrl+S"), QStringLiteral(""), Qt::ApplicationShortcut}},
+      {QStringLiteral("Toggle Texture Dumping"),   QStringLiteral("Main Window"), {QStringLiteral(""),       QStringLiteral(""), Qt::ApplicationShortcut}},
+      {QStringLiteral("Toggle Turbo Mode"),        QStringLiteral("Main Window"), {QStringLiteral(""),      QStringLiteral(""), Qt::ApplicationShortcut}},
++     // ff-bgm1x: 기본 키 없음
++     {QStringLiteral("Toggle BGM at 1x Speed"),   QStringLiteral("Main Window"), {QStringLiteral(""),      QStringLiteral(""), Qt::ApplicationShortcut}},
++     {QStringLiteral("Toggle Fast Forward During Cutscenes"), QStringLiteral("Main Window"), {QStringLiteral(""), QStringLiteral(""), Qt::ApplicationShortcut}},
++     {QStringLiteral("Toggle Voices at 1x Speed"), QStringLiteral("Main Window"), {QStringLiteral(""),     QStringLiteral(""), Qt::ApplicationShortcut}},
++     {QStringLiteral("Open Sound Classification"), QStringLiteral("Main Window"), {QStringLiteral(""),     QStringLiteral(""), Qt::ApplicationShortcut}},
+     } };
+ // clang-format on
+ 
+diff --git a/src/citra_qt/configuration/configure_audio.cpp b/src/citra_qt/configuration/configure_audio.cpp
+index d67f84a..4b86046 100644
+--- a/src/citra_qt/configuration/configure_audio.cpp
++++ b/src/citra_qt/configuration/configure_audio.cpp
+@@ -2,8 +2,14 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <memory>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QSettings>
++#include <QSlider>
+ #include <QtGlobal>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/input_details.h"
+ #include "audio_core/sink.h"
+ #include "audio_core/sink_details.h"
+@@ -42,6 +48,39 @@ ConfigureAudio::ConfigureAudio(bool is_powered_on, QWidget* parent)
+     ui->volume_label->setVisible(Settings::IsConfiguringGlobal());
+     ui->volume_combo_box->setVisible(!Settings::IsConfiguringGlobal());
+ 
++    // ff-bgm1x: 볼륨 슬라이더 아래 한 줄 (1배속으로 내는 효과음의 볼륨, 설정은 ff-bgm1x 레지스트리에 저장)
++    if (Settings::IsConfiguringGlobal()) {
++        if (auto* parent_layout = qobject_cast<QBoxLayout*>(ui->volume_layout->parentWidget()->layout())) {
++            sfx_volume_row = new QWidget(this);
++            auto* row = new QHBoxLayout(sfx_volume_row);
++            row->setContentsMargins(0, 0, 0, 0);
++            // 기존 볼륨 줄과 같은 구성 (이름 칸 너비를 맞추고, 늘어나는 빈칸 + 슬라이더)
++            auto* sfx_label = new QLabel(tr("효과음 볼륨:"), sfx_volume_row);
++            const int label_width =
++                std::max(sfx_label->sizeHint().width(), ui->volume_label->sizeHint().width());
++            sfx_label->setMinimumWidth(label_width);
++            ui->volume_label->setMinimumWidth(label_width);
++            row->addWidget(sfx_label);
++            row->addItem(new QSpacerItem(30, 20, QSizePolicy::Expanding, QSizePolicy::Minimum));
++            sfx_volume_slider = new QSlider(Qt::Horizontal, sfx_volume_row);
++            sfx_volume_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++            sfx_volume_slider->setMaximum(100);
++            sfx_volume_slider->setPageStep(5);
++            row->addWidget(sfx_volume_slider);
++            sfx_volume_indicator = new QLabel(sfx_volume_row);
++            sfx_volume_indicator->setMinimumWidth(32);
++            sfx_volume_indicator->setAlignment(Qt::AlignCenter);
++            row->addWidget(sfx_volume_indicator);
++            parent_layout->insertWidget(parent_layout->indexOf(ui->volume_layout) + 1, sfx_volume_row);
++            connect(sfx_volume_slider, &QSlider::valueChanged, this, [this](int percentage) {
++                sfx_volume_indicator->setText(QStringLiteral("%1%").arg(percentage));
++            });
++            QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++            sfx_volume_slider->setValue(s.value(QStringLiteral("sfx_volume"), 100).toInt());
++            sfx_volume_indicator->setText(QStringLiteral("%1%").arg(sfx_volume_slider->value()));
++        }
++    }
++
+     SetupPerGameUI();
+     SetConfiguration();
+ 
+@@ -181,6 +220,12 @@ void ConfigureAudio::ApplyConfiguration() {
+                                              ui->simulate_headphones_plugged,
+                                              simulate_headphones_plugged);
+ 
++    if (sfx_volume_slider) {
++        QSettings s(QStringLiteral("ff-bgm1x"), QStringLiteral("azahar"));
++        s.setValue(QStringLiteral("sfx_volume"), sfx_volume_slider->value());
++        AudioCore::HLE::BgmReplacer::Instance().SetSfxVolume(sfx_volume_slider->value() / 100.0f);
++    }
++
+     if (Settings::IsConfiguringGlobal()) {
+         Settings::values.output_type =
+             static_cast<AudioCore::SinkType>(ui->output_type_combo_box->currentData().toUInt());
+diff --git a/src/citra_qt/configuration/configure_audio.h b/src/citra_qt/configuration/configure_audio.h
+index 11fa7e2..e120d9f 100644
+--- a/src/citra_qt/configuration/configure_audio.h
++++ b/src/citra_qt/configuration/configure_audio.h
+@@ -7,6 +7,9 @@
+ #include <memory>
+ #include <QWidget>
+ 
++class QLabel;
++class QSlider;
++
+ namespace Ui {
+ class ConfigureAudio;
+ }
+@@ -43,4 +46,8 @@ private:
+     ConfigurationShared::CheckState realtime_audio;
+     ConfigurationShared::CheckState simulate_headphones_plugged;
+     std::unique_ptr<Ui::ConfigureAudio> ui;
++    // ff-bgm1x: 효과음 볼륨 (전역 설정에서만)
++    QWidget* sfx_volume_row = nullptr;
++    QSlider* sfx_volume_slider = nullptr;
++    QLabel* sfx_volume_indicator = nullptr;
+ };
+diff --git a/src/common/dynamic_library/dynamic_library.cpp b/src/common/dynamic_library/dynamic_library.cpp
+index ba9d327..c60d40e 100644
+--- a/src/common/dynamic_library/dynamic_library.cpp
++++ b/src/common/dynamic_library/dynamic_library.cpp
+@@ -65,6 +65,19 @@ void* DynamicLibrary::GetRawSymbol(std::string_view name) const {
+ #endif // defined(_WIN32)
+ }
+ 
++void* DynamicLibrary::SelfHandle() {
++#if defined(_WIN32)
++    // GetModuleHandleExW without flags adds a reference, so the FreeLibrary in the destructor is balanced
++    HMODULE self = nullptr;
++    if (!GetModuleHandleExW(0, nullptr, &self)) {
++        return nullptr;
++    }
++    return reinterpret_cast<void*>(self);
++#else
++    return dlopen(nullptr, RTLD_LAZY);
++#endif
++}
++
+ std::string DynamicLibrary::GetLibraryName(std::string_view name, int major, int minor) {
+ #if defined(_WIN32)
+     if (major >= 0 && minor >= 0) {
+diff --git a/src/common/dynamic_library/dynamic_library.h b/src/common/dynamic_library/dynamic_library.h
+index 143b85f..9362e8c 100644
+--- a/src/common/dynamic_library/dynamic_library.h
++++ b/src/common/dynamic_library/dynamic_library.h
+@@ -41,6 +41,10 @@ public:
+     [[nodiscard]] static std::string GetLibraryName(std::string_view name, int major = -1,
+                                                     int minor = -1);
+ 
++    /// ff-bgm1x: handle of the running executable itself (with its own reference), for libraries
++    /// linked statically into the exe whose functions are exported from it
++    [[nodiscard]] static void* SelfHandle();
++
+ private:
+     void* GetRawSymbol(std::string_view name) const;
+ 
+diff --git a/src/common/dynamic_library/ffmpeg.cpp b/src/common/dynamic_library/ffmpeg.cpp
+index 709f887..aa8932f 100644
+--- a/src/common/dynamic_library/ffmpeg.cpp
++++ b/src/common/dynamic_library/ffmpeg.cpp
+@@ -10,6 +10,18 @@
+ 
+ namespace DynamicLibrary::FFmpeg {
+ 
++// ff-bgm1x: in the static build (FFBGM_STATIC_FFMPEG) FFmpeg is linked into the exe and its functions
++// are exported from it, so they are looked up in the exe itself instead of avcodec-60.dll etc.
++static std::unique_ptr<Common::DynamicLibrary> OpenLibrary(std::string_view name, int major) {
++#ifdef FFBGM_STATIC_FFMPEG
++    (void)name;
++    (void)major;
++    return std::make_unique<Common::DynamicLibrary>(Common::DynamicLibrary::SelfHandle());
++#else
++    return std::make_unique<Common::DynamicLibrary>(name, major);
++#endif
++}
++
+ // avutil
+ av_buffer_ref_func av_buffer_ref;
+ av_buffer_unref_func av_buffer_unref;
+@@ -127,7 +139,7 @@ static bool LoadAVUtil() {
+         return true;
+     }
+ 
+-    avutil = std::make_unique<Common::DynamicLibrary>("avutil", LIBAVUTIL_VERSION_MAJOR);
++    avutil = OpenLibrary("avutil", LIBAVUTIL_VERSION_MAJOR);
+     if (!avutil->IsLoaded()) {
+         LOG_WARNING(Common, "Could not dynamically load libavutil: {}", avutil->GetLoadError());
+         avutil.reset();
+@@ -197,7 +209,7 @@ static bool LoadAVCodec() {
+         return true;
+     }
+ 
+-    avcodec = std::make_unique<Common::DynamicLibrary>("avcodec", LIBAVCODEC_VERSION_MAJOR);
++    avcodec = OpenLibrary("avcodec", LIBAVCODEC_VERSION_MAJOR);
+     if (!avcodec->IsLoaded()) {
+         LOG_WARNING(Common, "Could not dynamically load libavcodec: {}", avcodec->GetLoadError());
+         avcodec.reset();
+@@ -254,7 +266,7 @@ static bool LoadAVFilter() {
+         return true;
+     }
+ 
+-    avfilter = std::make_unique<Common::DynamicLibrary>("avfilter", LIBAVFILTER_VERSION_MAJOR);
++    avfilter = OpenLibrary("avfilter", LIBAVFILTER_VERSION_MAJOR);
+     if (!avfilter->IsLoaded()) {
+         LOG_WARNING(Common, "Could not dynamically load libavfilter: {}", avfilter->GetLoadError());
+         avfilter.reset();
+@@ -299,7 +311,7 @@ static bool LoadAVFormat() {
+         return true;
+     }
+ 
+-    avformat = std::make_unique<Common::DynamicLibrary>("avformat", LIBAVFORMAT_VERSION_MAJOR);
++    avformat = OpenLibrary("avformat", LIBAVFORMAT_VERSION_MAJOR);
+     if (!avformat->IsLoaded()) {
+         LOG_WARNING(Common, "Could not dynamically load libavformat: {}", avformat->GetLoadError());
+         avformat.reset();
+@@ -348,7 +360,7 @@ static bool LoadSWResample() {
+     }
+ 
+     swresample =
+-        std::make_unique<Common::DynamicLibrary>("swresample", LIBSWRESAMPLE_VERSION_MAJOR);
++        OpenLibrary("swresample", LIBSWRESAMPLE_VERSION_MAJOR);
+     if (!swresample->IsLoaded()) {
+         LOG_WARNING(Common, "Could not dynamically load libswresample: {}",
+                     swresample->GetLoadError());
+diff --git a/src/common/settings.cpp b/src/common/settings.cpp
+index db0b3de..e1fe645 100644
+--- a/src/common/settings.cpp
++++ b/src/common/settings.cpp
+@@ -79,6 +79,7 @@ Values values = {};
+ static bool configuring_global = true;
+ bool is_temporary_frame_limit;
+ double temporary_frame_limit;
++std::atomic<bool> cutscene_speed_hold{false};  // ff-bgm1x
+ 
+ void LogSettings() {
+     const auto log_setting = [](std::string_view name, const auto& value) {
+diff --git a/src/common/settings.h b/src/common/settings.h
+index c83f322..59b8353 100644
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -710,8 +710,16 @@ static inline void ResetTemporaryFrameLimit() {
+     is_temporary_frame_limit = false;
+     temporary_frame_limit = 0;
+ }
++// ff-bgm1x: 연출(연출 음악·동영상) 중에는 배속을 잠시 멈춘다. 오디오 쪽(BgmReplacer)이 켜고 끈다
++extern std::atomic<bool> cutscene_speed_hold;
+ static inline double GetFrameLimit() {
+-    return is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    const double limit =
++        is_temporary_frame_limit ? temporary_frame_limit : values.frame_limit.GetValue();
++    // 0 은 제한 없음. 100% 보다 느리게 맞춰 둔 속도는 그대로 둔다
++    if (cutscene_speed_hold.load(std::memory_order_relaxed) && (limit == 0 || limit > 100)) {
++        return 100;
++    }
++    return limit;
+ }
+ 
+ } // namespace Settings
+diff --git a/src/core/file_sys/ncch_container.cpp b/src/core/file_sys/ncch_container.cpp
+index 666d603..c29da7a 100644
+--- a/src/core/file_sys/ncch_container.cpp
++++ b/src/core/file_sys/ncch_container.cpp
+@@ -236,6 +236,34 @@ Loader::ResultStatus NCCHContainer::LoadHeader() {
+ 
+     LOG_DEBUG(Service_FS, "NCCH type: {}", file->GetType().to_string());
+ 
++    // ff-bgm1x: NoCrypto 플래그가 꺼져 있어도 실제 내용이 평문인 덤프가 있다.
++    // ExeFS 첫 파일 이름(".code")이나 RomFS 표식("IVFC")이 그대로 읽히면 평문으로 본다.
++    if (!ncch_header.no_crypto) {
++        bool plaintext = false;
++        if (ncch_header.exefs_offset != 0) {
++            char name[8] = {};
++            if (file->ReadAtBytes(name, sizeof(name),
++                                  static_cast<std::size_t>(ncch_header.exefs_offset) * kBlockSize) ==
++                    sizeof(name) &&
++                std::memcmp(name, ".code\0\0\0", 8) == 0) {
++                plaintext = true;
++            }
++        }
++        if (!plaintext && ncch_header.romfs_offset != 0) {
++            char magic[4] = {};
++            if (file->ReadAtBytes(magic, sizeof(magic),
++                                  static_cast<std::size_t>(ncch_header.romfs_offset) * kBlockSize) ==
++                    sizeof(magic) &&
++                std::memcmp(magic, "IVFC", 4) == 0) {
++                plaintext = true;
++            }
++        }
++        if (plaintext) {
++            LOG_INFO(Service_FS, "ff-bgm1x: NoCrypto 플래그는 꺼져 있지만 내용이 평문이라 그대로 읽습니다");
++            ncch_header.no_crypto.Assign(1);
++        }
++    }
++
+     if (!ncch_header.no_crypto) {
+         // Encrypted NCCH are not supported
+         return Loader::ResultStatus::ErrorEncrypted;
+diff --git a/src/core/file_sys/romfs_reader.cpp b/src/core/file_sys/romfs_reader.cpp
+index 6b1387b..742eaa0 100644
+--- a/src/core/file_sys/romfs_reader.cpp
++++ b/src/core/file_sys/romfs_reader.cpp
+@@ -6,6 +6,7 @@
+ #include <vector>
+ #include <cryptopp/aes.h>
+ #include <cryptopp/modes.h>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/archives.h"
+ #include "common/logging/log.h"
+ #include "core/file_sys/archive_artic.h"
+@@ -23,6 +24,9 @@ std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length,
+     if (length == 0)
+         return 0; // Crypto++ does not like zero size buffer
+ 
++    // ff-bgm1x: 동영상 파일을 읽는 동안은 연출로 본다
++    AudioCore::HLE::BgmReplacer::Instance().OnRomFsRead(*this, offset, length);
++
+     const auto segments = BreakupRead(offset, length);
+     std::size_t read_progress = 0;
+ 
+diff --git a/src/core/hle/service/cam/y2r_u.cpp b/src/core/hle/service/cam/y2r_u.cpp
+index cd2d90a..37c63a0 100644
+--- a/src/core/hle/service/cam/y2r_u.cpp
++++ b/src/core/hle/service/cam/y2r_u.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <array>
+ #include <cstring>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/archives.h"
+ #include "common/common_funcs.h"
+ #include "common/logging/log.h"
+@@ -514,6 +515,7 @@ void Y2R_U::GetDitheringWeightParams(Kernel::HLERequestContext& ctx) {
+ 
+ void Y2R_U::StartConversion(Kernel::HLERequestContext& ctx) {
+     IPC::RequestParser rp(ctx);
++    AudioCore::HLE::BgmReplacer::Instance().OnVideoFrame();  // ff-bgm1x: 동영상 재생 중
+ 
+     // dst_image_size would seem to be perfect for this, but it doesn't include the gap :(
+     u32 total_output_size =

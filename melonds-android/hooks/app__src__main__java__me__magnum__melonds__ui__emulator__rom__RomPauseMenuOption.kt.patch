@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
+index ea395486..1be63dd9 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
+@@ -9,6 +9,7 @@ enum class RomPauseMenuOption(override val textResource: Int) : PauseMenuOption
+     LOAD_STATE(R.string.load_state),
+     REWIND(R.string.rewind),
+     CHEATS(R.string.cheats),
++    SOUNDS(R.string.ff_sound_catalog),  // ff-bgm1x: 소리 분류 (1x Lab 앱)
+     VIEW_ACHIEVEMENTS(R.string.achievements),
+     RESET(R.string.reset),
+     EXIT(R.string.exit)

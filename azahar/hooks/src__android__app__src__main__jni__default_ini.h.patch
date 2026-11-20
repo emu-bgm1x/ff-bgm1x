@@ -1,0 +1,27 @@
+diff --git a/src/android/app/src/main/jni/default_ini.h b/src/android/app/src/main/jni/default_ini.h
+index 9422927..7203383 100644
+--- a/src/android/app/src/main/jni/default_ini.h
++++ b/src/android/app/src/main/jni/default_ini.h
+@@ -428,6 +428,22 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
+ # 0 (default): No, 1: Yes
+ )") DECLARE_KEY(simulate_headphones_plugged) BOOST_HANA_STRING(R"(
+ 
++# ff-bgm1x: 배속 중에도 스트리밍 BGM 을 1배속으로 재생
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_bgm_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 연출 중에도 배속 (끄면 연출 동안 배속을 잠시 멈춤)
++# 0 (default): 끔, 1: 켬
++)") DECLARE_KEY(ff_bgm1x_ff_cutscenes) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 대사·효과음 1배속
++# 0: 끔, 1 (default): 켬
++)") DECLARE_KEY(ff_bgm1x_voices_1x) BOOST_HANA_STRING(R"(
++
++# ff-bgm1x: 1배속으로 내는 효과음의 볼륨 (0~100)
++# 100 (default)
++)") DECLARE_KEY(ff_bgm1x_sfx_volume) BOOST_HANA_STRING(R"(
++
+ # Output volume.
+ # 1.0 (default): 100%, 0.0; mute
+ )") DECLARE_KEY(volume) BOOST_HANA_STRING(R"(

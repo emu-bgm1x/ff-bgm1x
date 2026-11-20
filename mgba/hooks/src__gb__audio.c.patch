@@ -1,0 +1,72 @@
+diff --git a/src/gb/audio.c b/src/gb/audio.c
+index 64edb9010..02a59dd82 100644
+--- a/src/gb/audio.c
++++ b/src/gb/audio.c
+@@ -67,6 +67,10 @@ void GBAudioInit(struct GBAudio* audio, size_t samples, uint8_t* nr52, enum GBAu
+ 	audio->forceDisableCh[1] = false;
+ 	audio->forceDisableCh[2] = false;
+ 	audio->forceDisableCh[3] = false;
++	audio->ffbgmGainQ8[0] = 256;
++	audio->ffbgmGainQ8[1] = 256;
++	audio->ffbgmGainQ8[2] = 256;
++	audio->ffbgmGainQ8[3] = 256;
+ 	audio->masterVolume = GB_AUDIO_VOLUME_MAX;
+ 	audio->nr52 = nr52;
+ 	audio->style = style;
+@@ -728,42 +732,48 @@ void GBAudioSamplePSG(struct GBAudio* audio, int16_t* left, int16_t* right) {
+ 	int dcOffset = audio->style == GB_AUDIO_GBA ? 0 : -0x8;
+ 	int sampleLeft = dcOffset;
+ 	int sampleRight = dcOffset;
++	// ff-bgm1x: 채널 1~3 은 볼륨 배율(q8)을 곱해 따로 더한다. 배율이 모두 256 이면 원래 계산과 같은 값이 된다
++	int scaledLeft = 0;
++	int scaledRight = 0;
+ 
+ 	if (!audio->forceDisableCh[0]) {
+ 		if (audio->ch1Left) {
+-			sampleLeft += audio->ch1.sample;
++			scaledLeft += audio->ch1.sample * audio->ffbgmGainQ8[0];
+ 		}
+ 
+ 		if (audio->ch1Right) {
+-			sampleRight += audio->ch1.sample;
++			scaledRight += audio->ch1.sample * audio->ffbgmGainQ8[0];
+ 		}
+ 	}
+ 
+ 	if (!audio->forceDisableCh[1]) {
+ 		if (audio->ch2Left) {
+-			sampleLeft +=  audio->ch2.sample;
++			scaledLeft += audio->ch2.sample * audio->ffbgmGainQ8[1];
+ 		}
+ 
+ 		if (audio->ch2Right) {
+-			sampleRight += audio->ch2.sample;
++			scaledRight += audio->ch2.sample * audio->ffbgmGainQ8[1];
+ 		}
+ 	}
+ 
+ 	if (!audio->forceDisableCh[2]) {
+ 		if (audio->ch3Left) {
+-			sampleLeft += audio->ch3.sample;
++			scaledLeft += audio->ch3.sample * audio->ffbgmGainQ8[2];
+ 		}
+ 
+ 		if (audio->ch3Right) {
+-			sampleRight += audio->ch3.sample;
++			scaledRight += audio->ch3.sample * audio->ffbgmGainQ8[2];
+ 		}
+ 	}
+ 
+-	sampleLeft <<= 3;
+-	sampleRight <<= 3;
++	sampleLeft = (sampleLeft << 3) + ((scaledLeft << 3) >> 8);
++	sampleRight = (sampleRight << 3) + ((scaledRight << 3) >> 8);
+ 
+ 	if (!audio->forceDisableCh[3]) {
+ 		int16_t sample = audio->style == GB_AUDIO_GBA ? (audio->ch4.sample << 3) : _coalesceNoiseChannel(&audio->ch4);
++		if (audio->ffbgmGainQ8[3] != 256) {
++			sample = (int16_t) ((sample * audio->ffbgmGainQ8[3]) >> 8);
++		}
+ 		if (audio->ch4Left) {
+ 			sampleLeft += sample;
+ 		}

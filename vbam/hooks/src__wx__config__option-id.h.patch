@@ -1,0 +1,16 @@
+diff --git a/src/wx/config/option-id.h b/src/wx/config/option-id.h
+index d73f662..fa87b8b 100644
+--- a/src/wx/config/option-id.h
++++ b/src/wx/config/option-id.h
+@@ -141,6 +141,11 @@ enum class OptionID {
+     kSoundDSoundHWAccel,
+     kSoundUpmix,
+     kSoundVolume,
++    kSoundFfbgmBgm1x,
++    kSoundFfbgmFfCutscenes,
++    kSoundFfbgmSfx1x,
++    kSoundFfbgmSfxVolume,
++    kSoundFfbgmRamSongs,
+     kLocale,
+     kExternalTranslations,
+ 

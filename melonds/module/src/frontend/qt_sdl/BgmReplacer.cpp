@@ -1,0 +1,1355 @@
+// ff-bgm1x: 배속과 관계없이 BGM 을 1배속으로 유지한다 (자체 재생기 방식). 설명은 BgmReplacer.h
+#include "BgmReplacer.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include "CRC32.h"
+#include "EmuInstance.h"
+#include "NDS.h"
+#include "NDSCart.h"
+#include "Platform.h"
+
+using namespace melonDS;
+
+namespace
+{
+
+// ARM9 -> ARM7 사운드 명령 번호 (실제 게임의 명령 기록으로 확인한 것)
+enum : u32
+{
+    Cmd_StartSeq = 0,
+    Cmd_StopSeq = 1,
+    Cmd_PrepareSeq = 2,
+    Cmd_StartPreparedSeq = 3,
+    Cmd_PauseSeq = 4,
+    Cmd_SkipSeq = 5,
+    Cmd_PlayerParam = 6,
+    Cmd_TrackParam = 7,
+    Cmd_MuteTrack = 8,
+    Cmd_AllocatableChannel = 9,
+    Cmd_PlayerLocalVar = 10,
+    Cmd_SurroundDecay = 22,
+    Cmd_OutputSelector = 25,
+    Cmd_InvalidateSeq = 30,
+    Cmd_InvalidateWave = 32,
+};
+
+constexpr u32 kPxiTagSound = 7;
+constexpr u32 kFaderOffset = 6;       // 플레이어 구조체 안의 페이더(s16) 위치
+constexpr s32 kFaderMute = -10000;    // 드라이버가 최소 음량으로 잘라 쓰는 값보다 충분히 작은 값
+constexpr u32 kNodeSize = 24;         // {u32 next, u32 id, u32 arg[4]}
+constexpr size_t kRingFrames = 16384;  // 자체 재생기 출력 버퍼 (프레임)
+constexpr float kJingleSeconds = 12.0f;
+constexpr double kRepeatWindow = 2.0;  // 같은 효과음이 게임 시간으로 이 안에 다시 나오면 '되풀이' 로 본다 (초)  // 반복 없는 곡이 이보다 짧으면 팡파레로 본다
+
+enum { Kind_Leave = 0, Kind_Music, Kind_Jingle, Kind_LongOneShot, Kind_Sfx };
+
+u32 rd32(const u8* p)
+{
+    u32 v;
+    memcpy(&v, p, 4);
+    return v;
+}
+
+bool readVarLen(const u8* d, u32 size, u32& p, u32& value)
+{
+    value = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        if (p >= size) return false;
+        const u8 b = d[p++];
+        value = (value << 7) | (b & 0x7F);
+        if (!(b & 0x80)) return true;
+    }
+    return true;
+}
+
+// 트랙 하나를 따라가며 반복(앞으로 되돌아가는 점프)이 있는지 본다.
+// 반복이 없으면 ticks 에 트랙의 길이(틱)를, tempo 에 처음 나온 템포를 넣는다 (호출과 횟수 반복은 따라간다)
+bool scanTrackLoops(const u8* d, u32 size, u32 base, u32 start, u32& ticks, int& tempo)
+{
+    u32 p = base + start;
+    bool noteWait = true;
+    u32 callStack[3], loopPos[3];
+    int loopLeft[3];
+    int calls = 0, loops = 0;
+    ticks = 0;
+    for (int steps = 0; steps < 200000 && p < size; steps++)
+    {
+        const u32 at = p;
+        const u8 cmd = d[p++];
+        u32 v = 0;
+        if (cmd == 0xFF) return false;
+        if (cmd == 0x94)
+        {
+            if (p + 3 > size) return false;
+            const u32 target = d[p] | (d[p + 1] << 8) | (d[p + 2] << 16);
+            if (base + target <= at) return true;
+            p = base + target;  // 앞으로 건너뛰는 점프는 따라간다
+            continue;
+        }
+        if (cmd == 0xA2) continue;  // if: 다음 명령에 붙는 접두
+        if (cmd == 0xA0 || cmd == 0xA1)
+        {
+            // random / var: 하위 명령 뒤에, 마지막 인자 대신 (min,max) 또는 변수 번호가 온다
+            if (p >= size) return false;
+            const u8 sub = d[p++];
+            const bool extra = sub < 0x80 || (sub >= 0xB0 && sub <= 0xBD);
+            p += (cmd == 0xA0 ? 4 : 1) + (extra ? 1 : 0);
+            continue;
+        }
+        if (cmd < 0x80)
+        {
+            p++;
+            if (!readVarLen(d, size, p, v)) return false;
+            if (noteWait) ticks += v;
+        }
+        else if (cmd == 0x80)
+        {
+            if (!readVarLen(d, size, p, v)) return false;
+            ticks += v;
+        }
+        else if (cmd == 0x81)
+        {
+            if (!readVarLen(d, size, p, v)) return false;
+        }
+        else if (cmd == 0x93) p += 4;
+        else if (cmd == 0x95)
+        {
+            if (p + 3 > size) return false;
+            const u32 target = d[p] | (d[p + 1] << 8) | (d[p + 2] << 16);
+            p += 3;
+            if (calls < 3)
+            {
+                callStack[calls++] = p;
+                p = base + target;
+            }
+        }
+        else if (cmd >= 0xB0 && cmd <= 0xBD) p += 3;
+        else if (cmd == 0xC7)
+        {
+            if (p >= size) return false;
+            noteWait = d[p++] & 1;
+        }
+        else if (cmd == 0xD4)
+        {
+            if (p >= size) return false;
+            const int count = d[p++];
+            if (count == 0) return true;  // 끝없이 되풀이
+            if (loops < 3)
+            {
+                loopPos[loops] = p;
+                loopLeft[loops++] = count;
+            }
+        }
+        else if (cmd >= 0xC0 && cmd <= 0xD7) p += 1;
+        else if (cmd == 0xE1)
+        {
+            if (p + 2 > size) return false;
+            if (tempo == 0) tempo = d[p] | (d[p + 1] << 8);
+            p += 2;
+        }
+        else if (cmd >= 0xE0 && cmd <= 0xE3) p += 2;
+        else if (cmd == 0xFC)
+        {
+            if (loops > 0)
+            {
+                if (--loopLeft[loops - 1] > 0)
+                    p = loopPos[loops - 1];
+                else
+                    loops--;
+            }
+        }
+        else if (cmd == 0xFD)
+        {
+            if (calls == 0) return false;
+            p = callStack[--calls];
+        }
+        else if (cmd == 0xFE) p += 2;
+        else return false;  // 모르는 명령
+    }
+    return false;
+}
+
+// 시퀀스 데이터 d(크기 size) 의 start 위치부터 연주할 때의 트랙 수, 반복 여부, (반복이 없을 때) 대략의 길이.
+// 효과음 묶음(SSAR) 안의 소리처럼 SSEQ 파일 머리가 없는 시퀀스에 쓴다
+bool analyzeSeqAt(const u8* d, u32 size, u32 start, int& tracks, bool& loop, float& seconds)
+{
+    if (start >= size) return false;
+    u32 p = start;
+    std::vector<u32> starts{start};
+    if (d[p] == 0xFE)
+    {
+        p += 3;
+        while (p + 5 <= size && d[p] == 0x93)
+        {
+            starts.push_back(d[p + 2] | (d[p + 3] << 8) | (d[p + 4] << 16));
+            p += 5;
+        }
+        starts[0] = p;
+    }
+    tracks = (int)starts.size();
+    loop = false;
+    u32 longest = 0;
+    int tempo = 0;
+    for (u32 s : starts)
+    {
+        u32 ticks = 0;
+        loop |= scanTrackLoops(d, size, 0, s, ticks, tempo);
+        longest = std::max(longest, ticks);
+    }
+    seconds = (float)longest * 60.0f / (48.0f * (float)(tempo > 0 ? tempo : 120));
+    return true;
+}
+
+// SSEQ 파일에서 트랙 수와 반복 여부, (반복이 없을 때) 대략의 길이를 구한다
+bool analyzeSseq(const u8* f, u32 size, int& tracks, bool& loop, float& seconds)
+{
+    if (size < 0x20 || memcmp(f, "SSEQ", 4) != 0) return false;
+    const u32 base = rd32(f + 0x18);
+    if (base >= size) return false;
+    u32 p = base;
+    std::vector<u32> starts{0};
+    if (f[p] == 0xFE)
+    {
+        p += 3;
+        while (p + 5 <= size && f[p] == 0x93)
+        {
+            starts.push_back(f[p + 2] | (f[p + 3] << 8) | (f[p + 4] << 16));
+            p += 5;
+        }
+        starts[0] = p - base;
+    }
+    tracks = (int)starts.size();
+    loop = false;
+    u32 longest = 0;
+    int tempo = 0;
+    for (u32 s : starts)
+    {
+        u32 ticks = 0;
+        loop |= scanTrackLoops(f, size, base, s, ticks, tempo);
+        longest = std::max(longest, ticks);
+    }
+    // 4분음표 = 48틱, 템포 = 분당 4분음표 수
+    seconds = (float)longest * 60.0f / (48.0f * (float)(tempo > 0 ? tempo : 120));
+    return true;
+}
+
+} // namespace
+
+BgmReplacer::BgmReplacer(EmuInstance* inst) : inst(inst)
+{
+    ring.resize(kRingFrames * 2);
+    userGain.fill(1.0f);
+}
+
+BgmReplacer::~BgmReplacer()
+{
+}
+
+void BgmReplacer::setEnabled(bool on)
+{
+    enabled = on;
+    wanted = on;
+    if (!on)
+    {
+        // 자체 재생기의 소리를 바로 멈춘다. 원본의 음악 플레이어는 게임이 다음 음량 명령을 보낼 때
+        // 원래 음량으로 돌아온다 (그때까지는 무음)
+        if (inst->nds && lastNds == inst->nds && findDriverPlayers())
+        {
+            for (int p = 0; p < 16; p++)
+                if (players[p].music && players[p].muted)
+                    inst->nds->ARM7Write16(driverPlayers + 0x24 * p + 6, (u16)players[p].fader);
+        }
+        for (Player& p : players) p.music = p.cutscene = false;
+        cutsceneNow = false;
+        orphan = {};
+        sfxOrphan = {};
+        sfxStopAt = {};
+        synth.reset();
+        std::lock_guard lock(ringMutex);
+        ringCount = 0;
+    }
+    if (on && inst->nds && lastNds == inst->nds && lastFrame > 60)
+    {
+        resetTracking();
+        recoverFromDriver();
+    }
+}
+
+void BgmReplacer::resetTracking()
+{
+    players = {};
+    cutsceneNow = false;
+    orphan = {};
+    sfxOrphan = {};
+    sfxStopAt = {};
+    sfxRepeat.clear();
+    strmCutUntil = 0;
+    strmLast = nullptr;
+    strm.play(nullptr);
+    synth.reset();
+    std::lock_guard lock(ringMutex);
+    ringCount = 0;
+}
+
+void BgmReplacer::indexCart()
+{
+    NDS* nds = inst->nds;
+    const auto* cart = nds ? nds->NDSCartSlot.GetCart() : nullptr;
+    const u32 checksum = cart ? cart->Checksum() : 0;
+    if (cartIndexed && checksum == cartChecksum) return;
+    cartIndexed = true;
+    cartChecksum = checksum;
+    oldCmdLayout = false;
+    seqIndex.clear();
+    groupIsMusic.clear();
+    strm.play(nullptr);
+    strmCutUntil = 0;
+    if (!cart)
+    {
+        cat.index(nullptr, 0);
+        return;
+    }
+
+    const u8* rom = cart->GetROM();
+    const u32 romlen = cart->GetROMLength();
+    // 롬 소리 목록과 이 게임의 사용자 분류 (실행 파일 옆 ff-bgm1x-sounds\<게임 코드>.txt)
+    cat.setStorageDir(Platform::GetLocalFilePath("ff-bgm1x-sounds"));
+    cat.index(rom, romlen);
+    cat.load();
+    strmLast = nullptr;
+    strmFileOf = nullptr;
+    static const u8 magic[6] = {'S', 'D', 'A', 'T', 0xFF, 0xFE};
+    std::vector<int> groupTotal, groupBig;
+    int archives = 0;
+
+    for (const u8* it = rom;;)
+    {
+        it = std::search(it, rom + romlen, magic, magic + 6);
+        if (it == rom + romlen) break;
+        const u8* sdat = it;
+        it += 4;
+        const u32 left = (u32)(rom + romlen - sdat);
+        if (left < 0x40) break;
+        const u32 symbOff = rd32(sdat + 0x10), symbSize = rd32(sdat + 0x14);
+        const u32 infoOff = rd32(sdat + 0x18), fatOff = rd32(sdat + 0x20);
+        // 압축 데이터 안에서 우연히 같은 글자가 나온 곳은 건너뛴다
+        if (infoOff + 0x40 > left || fatOff + 0x10 > left || memcmp(sdat + infoOff, "INFO", 4) != 0)
+            continue;
+        const u8* info = sdat + infoOff;
+        const u8* fat = sdat + fatOff;
+        const u32 seqRec = rd32(info + 8);
+        if (infoOff + seqRec + 4 > left) continue;
+        const u32 count = rd32(info + seqRec);
+        const u32 fatCount = rd32(fat + 8);
+        archives++;
+
+        std::unordered_map<u32, int> playerGroup;  // 이 아카이브의 플레이어 번호 -> 묶음 번호
+        for (u32 i = 0; i < count && i < 0x10000; i++)
+        {
+            if (infoOff + seqRec + 8 + 4 * i > left) break;
+            const u32 e = rd32(info + seqRec + 4 + 4 * i);
+            if (!e || infoOff + e + 12 > left) continue;
+            const u32 fileId = info[e] | (info[e + 1] << 8);
+            const u32 player = info[e + 9];
+            if (fileId >= fatCount || fatOff + 12 + 16 * fileId + 8 > left) continue;
+            const u32 foff = rd32(fat + 12 + 16 * fileId), fsize = rd32(fat + 12 + 16 * fileId + 4);
+            if (foff >= left || fsize > left - foff || fsize < 0x20) continue;
+
+            SeqInfo si;
+            if (!analyzeSseq(sdat + foff, fsize, si.tracks, si.loop, si.seconds)) continue;
+            auto g = playerGroup.find(player);
+            if (g == playerGroup.end())
+            {
+                g = playerGroup.emplace(player, (int)groupTotal.size()).first;
+                groupTotal.push_back(0);
+                groupBig.push_back(0);
+            }
+            si.group = g->second;
+            groupTotal[si.group]++;
+            if (si.tracks >= 4) groupBig[si.group]++;
+
+            // 이름표(SYMB)가 있으면 기록용으로 이름을 둔다
+            if (symbSize && symbOff + 12 <= left)
+            {
+                const u8* symb = sdat + symbOff;
+                const u32 soff = rd32(symb + 8);
+                if (symbOff + soff + 8 + 4 * i <= left && i < rd32(symb + soff))
+                {
+                    const u32 no = rd32(symb + soff + 4 + 4 * i);
+                    if (no && symbOff + no < left)
+                    {
+                        const char* s = (const char*)symb + no;
+                        si.name.assign(s, strnlen(s, std::min<u32>(64, left - symbOff - no)));
+                    }
+                }
+            }
+            seqIndex.emplace(CRC32(sdat + foff, (int)fsize), std::move(si));
+        }
+    }
+
+    // 묶음 안 곡의 과반이 트랙 4개 이상이면 그 묶음 전체를 음악으로 본다
+    int music = 0;
+    for (size_t g = 0; g < groupTotal.size(); g++)
+    {
+        groupIsMusic.push_back(groupBig[g] * 2 > groupTotal[g]);
+        music += groupIsMusic.back();
+    }
+}
+
+// 시퀀스의 종류: 그대로 둘 소리 / 음악(반복 곡) / 팡파레(반복 없는 짧은 곡) / 반복 없는 긴 곡(그대로 둔다)
+int BgmReplacer::classify(u32 seqBase, std::string& name, u32 seqOffset, bool* oneShotHold, std::string* keyOut)
+{
+    if (keyOut) keyOut->clear();
+    NDS* nds = inst->nds;
+    name = "?";
+    if (oneShotHold) *oneShotHold = false;
+    if ((seqBase >> 24) != 0x02) return Kind_Leave;
+    const u32 ramsize = nds->MainRAMMask + 1;
+    const u32 off = (seqBase - 0x1C) & nds->MainRAMMask;
+    if (off + 0x20 > ramsize) return Kind_Leave;
+    const u8* f = &nds->MainRAM[off];
+    if (memcmp(f, "SSEQ", 4) != 0)
+    {
+        // 효과음 묶음(SSAR) 안의 소리: 기본은 원본 그대로. 사용자가 분류를 정했으면 그대로 따른다
+        if (seqOffset == kNoOffset) return Kind_Leave;
+        const u32 base = seqBase & nds->MainRAMMask;
+        const u32 avail = std::min<u32>(ramsize - base, 0x100000);
+        int seqNo = -1;
+        const SoundCatalog::SsarArc* arc = cat.findSsar(&nds->MainRAM[base], avail, seqOffset, seqNo);
+        if (!arc || seqNo < 0) return Kind_Leave;
+        const SoundCatalog::SsarSeq& sq = arc->seqs[seqNo];
+        name = (arc->name.empty() ? "SSAR" : arc->name) + " / " + (sq.name.empty() ? "#" + std::to_string(seqNo) : sq.name);
+        int tracks = 0;
+        bool loop = false;
+        float seconds = 0;
+        analyzeSeqAt(&nds->MainRAM[base], avail, seqOffset, tracks, loop, seconds);
+        lastSeconds = seconds;
+        const std::string key = SoundCatalog::ssarKey(*arc, seqNo);
+        if (keyOut) *keyOut = key;
+        lastAutoKind = Kind_Leave;
+        lastKeyType = SoundCatalog::Type_Ssar;
+        int kind = cat.noteSeen(key, SoundCatalog::Type_Ssar, name, Kind_Leave);
+        if (kind == Kind_Sfx && !sfx1x) kind = Kind_Leave;
+        // 묶음 소리는 길이 0 인 음 하나로 된 것이 많다 (트랙이 끝나도 파형 끝까지 울려야 원본과 같다)
+        if (oneShotHold) *oneShotHold = kind != Kind_Leave;
+        return kind;
+    }
+    const u32 size = rd32(f + 8);
+    if (size < 0x20 || size > 0x100000 || off + size > ramsize) return Kind_Leave;
+
+    bool music, loop = false;
+    float seconds = 0;
+    const u32 crc = CRC32(f, (int)size);
+    auto it = seqIndex.find(crc);
+    if (it != seqIndex.end())
+    {
+        name = it->second.name.empty() ? "(이름 없음)" : it->second.name;
+        music = it->second.group >= 0 && groupIsMusic[it->second.group];
+        loop = it->second.loop;
+        seconds = it->second.seconds;
+    }
+    else
+    {
+        // 롬의 아카이브에서 찾지 못한 시퀀스: 트랙 수로만 판단한다
+        int tracks = 0;
+        name = "(아카이브에 없음)";
+        music = analyzeSseq(f, size, tracks, loop, seconds) && tracks >= 4;
+    }
+    lastSeconds = seconds;
+    // 자동 판단. 음악이 아닌 반복 없는 소리 = 효과음. 단, 울음소리(SEQ_PV...)와 길이를 읽지 못한 시퀀스는 원본대로 둔다:
+    // 울음소리는 게임이 시작 직전에 트랙 설정(음 높이 등)을 바꿔 틀어서 자체 재생기로는 같은 소리가 나지 않는다
+    const bool cry = name.compare(0, 6, "SEQ_PV") == 0;
+    int kind;
+    if (!music)
+        kind = (!loop && !cry && seconds > 0) ? Kind_Sfx : Kind_Leave;
+    else if (loop)
+        kind = Kind_Music;
+    else
+        kind = seconds <= kJingleSeconds ? Kind_Jingle : Kind_LongOneShot;
+    // 사용자 분류가 있으면 그것을 쓴다 (롬 목록에 있는 시퀀스만)
+    if (const SoundCatalog::SeqEntry* e = cat.findSeq(crc))
+    {
+        const std::string key = SoundCatalog::seqKey(*e);
+        if (keyOut) *keyOut = key;
+        lastAutoKind = kind;
+        lastKeyType = SoundCatalog::Type_Seq;
+        kind = cat.noteSeen(key, SoundCatalog::Type_Seq, name, kind);
+    }
+    if (kind == Kind_Sfx && !sfx1x) kind = Kind_Leave;
+    return kind;
+}
+
+int BgmReplacer::allocSynth()
+{
+    for (int id = 0; id < 16; id++)
+    {
+        bool used = (orphan[id] || sfxOrphan[id]) && synth.playerActive(id);
+        for (const Player& pl : players) used |= pl.music && pl.synthId == id;
+        if (used) continue;
+        orphan[id] = sfxOrphan[id] = false;
+        return id;
+    }
+    return -1;
+}
+
+// 자체 재생기에서 아직 연주 중인 팡파레인지
+bool BgmReplacer::jingleActive(int id) const
+{
+    if (id < 0 || !synth.playerActive(id)) return false;
+    if (orphan[id]) return true;
+    for (const Player& pl : players)
+        if (pl.music && pl.jingle && pl.started && pl.synthId == id) return true;
+    return false;
+}
+
+// 팡파레를 시작한 뒤로 게임 안에서 흐른 시간과, 자체 재생기가 실제로 연주한 시간.
+// 1배속에서는 둘이 같고, 배속 중에는 게임 쪽이 앞서 간다
+double BgmReplacer::jingleGameSeconds(int id) const
+{
+    return (double)(lastFrame - jingleFrame[id]) / 59.8261;
+}
+
+double BgmReplacer::jingleSynthSeconds(int id) const
+{
+    return (double)(synth.renderedFrames() - jingleSample[id]) / (double)std::max(inst->audioFreq, 1);
+}
+
+// 음악을 시작하거나 이어 가려는데, 게임에서는 이미 더 진행된(또는 끝난) 팡파레가 자체 재생기에서는
+// 아직 그만큼 나오지 않았으면: 팡파레가 그 지점까지 나올 때까지 미룬다. 1배속에서는 미뤄지지 않는다
+bool BgmReplacer::holdForJingle(Player& pl)
+{
+    int worst = -1;
+    double worstLag = 0.1;
+    for (int id = 0; id < 16; id++)
+    {
+        if (!jingleActive(id)) continue;
+        const double lag = jingleGameSeconds(id) - jingleSynthSeconds(id);
+        if (lag > worstLag)
+        {
+            worst = id;
+            worstLag = lag;
+        }
+    }
+    if (worst < 0) return false;
+    pl.holdId = worst;
+    pl.holdUntil = jingleGameSeconds(worst);
+    return true;
+}
+
+// 같은 곡인지 가리는 이름: 소리 분류 이름표, 없으면 시퀀스 데이터 주소
+std::string BgmReplacer::musicIdent(const Player& pl) const
+{
+    if (!pl.key.empty()) return pl.key;
+    return pl.seqBase ? "@" + std::to_string(pl.seqBase) : std::string();
+}
+
+void BgmReplacer::startMusic(int p)
+{
+    Player& pl = players[p];
+    if (pl.sfx)
+    {
+        // 같은 효과음을 게임이 짧은 간격으로 되풀이하면(낮은 체력 경고음, 발소리 등) 그 간격도 1배속으로 맞춘다:
+        // 앞의 소리를 1배속으로 낸 뒤로 실제로 흐른 시간이, 게임 안에서 되풀이한 간격보다 짧으면 이번 것은 내지 않는다.
+        // 원본 쪽은 이미 무음이라, 배속 중에는 게임이 되풀이한 횟수보다 적게 울린다. 1배속에서는 모두 낸다
+        {
+            SfxRepeat& r = sfxRepeat[pl.seqBase];
+            const auto now = std::chrono::steady_clock::now();
+            const double gameGap = (double)(lastFrame - r.lastTrigFrame) / 59.8261;
+            const bool repeat = r.played && lastFrame >= r.lastTrigFrame && gameGap <= kRepeatWindow;
+            r.lastTrigFrame = lastFrame;
+            if (repeat && std::chrono::duration<double>(now - r.lastPlay).count() < gameGap * 0.9)
+                return;  // 내지 않는다 (started 는 false 로 남아, 정지 명령도 따로 처리하지 않는다)
+            r.played = true;
+            r.lastPlay = now;
+        }
+        // 같은 효과음이 아직 울리고 있으면 끊고 새로 낸다 (배속 중에 겹쳐 쌓이지 않게)
+        for (Player& other : players)
+            if (&other != &pl && other.music && other.sfx && other.started && other.seqBase == pl.seqBase)
+                synth.stop(other.synthId);
+        for (int id = 0; id < 16; id++)
+        {
+            if (sfxOrphan[id] && sfxOrphanSeq[id] == pl.seqBase)
+            {
+                synth.stop(id);
+                sfxStopAt[id] = 0;
+            }
+        }
+        pl.sfxFrame = lastFrame;
+        pl.sfxSample = synth.renderedFrames();
+        synth.start(pl.synthId);
+        pl.started = true;
+        return;
+    }
+    if (pl.jingle)
+    {
+        // 새 팡파레가 나올 때, 게임에서는 진작 지나간 앞의 팡파레가 아직 울리고 있으면 멈춘다 (배속 중에 겹치지 않게)
+        for (int id = 0; id < 16; id++)
+        {
+            if (id == pl.synthId || !jingleActive(id)) continue;
+            if (jingleGameSeconds(id) - jingleSynthSeconds(id) < 0.25) continue;
+            synth.stop(id);
+            orphan[id] = false;
+        }
+        jingleFrame[pl.synthId] = lastFrame;
+        jingleSample[pl.synthId] = synth.renderedFrames();
+        jingleBeforeMusic = lastMusic;
+    }
+    else
+    {
+        const std::string ident = musicIdent(pl);
+        // 팡파레 전에 나오던 곡으로 돌아가는 것이면: 배속 중 1배속 팡파레가 아직 나오고 있을 때
+        // 팡파레를 끝까지 낸 뒤 이 곡을 처음부터 낸다 (1배속으로 할 때 들리는 순서)
+        if (!ident.empty() && ident == jingleBeforeMusic)
+        {
+            for (int id = 0; id < 16; id++)
+            {
+                if (!jingleActive(id) || jingleGameSeconds(id) - jingleSynthSeconds(id) < 0.1) continue;
+                pl.holdStart = true;
+                pl.holdId = id;
+                pl.holdUntil = 1e30;  // 팡파레가 끝날 때까지
+                lastMusic = ident;
+                return;
+            }
+        }
+        lastMusic = ident;
+        // 다른 곡이 시작된다 = 게임의 장면이 넘어갔다. 게임에서는 이미 지나간 팡파레가 아직 울리고 있으면 끊고
+        // 새 곡을 바로 낸다 (멈췄던 곡이 이어지는 경우에도 팡파레를 끝까지 기다린다)
+        for (int id = 0; id < 16; id++)
+        {
+            if (!jingleActive(id) || jingleGameSeconds(id) - jingleSynthSeconds(id) < 0.1) continue;
+            synth.stop(id);
+            orphan[id] = false;
+        }
+    }
+    synth.start(pl.synthId);
+    pl.started = true;
+}
+
+// 게임이 이 자리(플레이어)를 다른 소리에 다시 쓴다: 하던 연주를 정리한다
+void BgmReplacer::detach(int p)
+{
+    Player& pl = players[p];
+    if (!pl.music) return;
+    // 원본에서는 이미 끝난 팡파레가 자체 재생기에서는 아직 나오고 있을 수 있다 (배속 중). 끝까지 두고 본다
+    if (pl.sfx && pl.started && synth.playerActive(pl.synthId))
+    {
+        sfxOrphan[pl.synthId] = true;
+        sfxOrphanSeq[pl.synthId] = pl.seqBase;
+    }
+    else if (pl.jingle && pl.started && synth.playerActive(pl.synthId))
+        orphan[pl.synthId] = true;
+    else
+        synth.stop(pl.synthId);
+    pl.music = false;
+}
+
+void BgmReplacer::releaseHeld()
+{
+    for (int p = 0; p < 16; p++)
+    {
+        Player& pl = players[p];
+        if (!pl.music || !(pl.holdStart || pl.holdResume)) continue;
+        if (jingleActive(pl.holdId) && jingleSynthSeconds(pl.holdId) < pl.holdUntil) continue;
+        if (pl.holdStart)
+        {
+            synth.start(pl.synthId);
+            pl.started = true;
+        }
+        if (pl.holdResume) synth.pause(pl.synthId, false);
+        pl.holdStart = pl.holdResume = false;
+    }
+}
+
+// ARM7 사운드 드라이버의 플레이어 배열을 찾는다. 플레이어 하나는 0x24 바이트:
+//   +0 상태 비트(0 연주 중, 2 일시정지), +1 자기 번호, +4 우선순위, +5 음량, +6 페이더(s16),
+//   +8 트랙 번호 16개, +0x18 템포, +0x20 뱅크 주소
+// 배열(16개) 바로 뒤에 트랙 32개(0x40 바이트씩)가 있고, 트랙의 +0x24 가 시퀀스 데이터의 시작 주소다
+void BgmReplacer::applyUserVolumes()
+{
+    bool checked = false, haveDriver = false;
+    for (int p = 0; p < 16; p++)
+    {
+        Player& pl = players[p];
+        if (pl.key.empty()) continue;
+        const int v = cat.volume(pl.key);
+        if (pl.music)
+        {
+            // 1배속으로 내는 소리: 자체 재생기 출력에 곱하는 값만 바꾼다
+            if (pl.synthId >= 0) userGain[pl.synthId] = SoundCatalog::perceivedGain((float)v);
+            continue;
+        }
+        // 원본 그대로 나오는 소리: 드라이버의 플레이어 페이더를 (게임이 정한 값 + 사용자 볼륨) 으로 바로 쓴다
+        const bool want = v != 100;
+        const int cb = !want ? 0 : v <= 0 ? kFaderMute : (int)std::lround(200.0 * std::log10(SoundCatalog::perceivedGain((float)v)));
+        if (want == pl.userVol && cb == pl.userCb) continue;
+        pl.userVol = want;
+        pl.userCb = cb;
+        if (!checked)
+        {
+            checked = true;
+            haveDriver = findDriverPlayers();
+        }
+        if (!haveDriver) continue;
+        const int f = !want ? pl.fader
+                    : cb <= kFaderMute ? kFaderMute
+                                       : std::clamp((int)pl.fader + cb, (int)kFaderMute, 32767);
+        inst->nds->ARM7Write16(driverPlayers + 0x24 * p + 6, (u16)(s16)f);
+    }
+}
+
+bool BgmReplacer::findDriverPlayers()
+{
+    NDS* nds = inst->nds;
+    auto valid = [&](u32 x, bool needActive) {
+        const u8 flags = nds->ARM7Read8(x);
+        if (needActive && !(flags & 1)) return false;
+        if (nds->ARM7Read8(x + 1) > 15) return false;
+        const u32 bank = nds->ARM7Read32(x + 0x20);
+        if ((bank >> 24) != 0x02) return false;
+        const u32 off = bank & nds->MainRAMMask;
+        if (off + 4 > nds->MainRAMMask + 1 || memcmp(&nds->MainRAM[off], "SBNK", 4) != 0) return false;
+        for (u32 i = 0; i < 16; i++)
+        {
+            const u8 t = nds->ARM7Read8(x + 8 + i);
+            if (t != 0xFF && t >= 32) return false;
+        }
+        return nds->ARM7Read8(x + 8) < 32;
+    };
+    if (driverPlayers)
+    {
+        // 전에 찾은 주소가 아직 맞는지: 연주 중인 플레이어가 하나라도 그 모양이면 된다
+        for (u32 p = 0; p < 16; p++)
+            if (valid(driverPlayers + 0x24 * p, true) && nds->ARM7Read8(driverPlayers + 0x24 * p + 1) == p) return true;
+    }
+    static const u32 ranges[2][2] = {{0x037F8000, 0x03810000}, {0x02380000, 0x023C0000}};
+    for (const auto& r : ranges)
+    {
+        for (u32 x = r[0]; x + 0x24 <= r[1]; x += 4)
+        {
+            if (!valid(x, true)) continue;
+            driverPlayers = x - 0x24 * nds->ARM7Read8(x + 1);
+            return true;
+        }
+    }
+    return false;
+}
+
+// 추적을 처음부터 다시 해야 할 때(상태 불러오기, 기능을 다시 켬): 게임이 지금 연주 중인 곡을 드라이버에서 읽어
+// 음악은 같은 위치부터 자체 재생기로 이어 받고, 연출 곡이면 연출 중으로 표시한다
+void BgmReplacer::recoverFromDriver(const std::array<bool, 16>* skip)
+{
+    NDS* nds = inst->nds;
+    if (!nds || nds->ConsoleType != 0 || !findDriverPlayers()) return;
+    synth.setMemory(nds->MainRAM, nds->MainRAMMask);
+    for (int p = 0; p < 16; p++)
+    {
+        const u32 x = driverPlayers + 0x24 * p;
+        const u8 flags = nds->ARM7Read8(x);
+        if (!(flags & 1) || nds->ARM7Read8(x + 1) != p) continue;
+        const u8 track0 = nds->ARM7Read8(x + 8);
+        if (track0 >= 32) continue;
+        const u32 seqBase = nds->ARM7Read32(driverPlayers + 0x24 * 16 + 0x40 * track0 + 0x24);
+        const u32 bank = nds->ARM7Read32(x + 0x20);
+        if (skip && (*skip)[p]) continue;  // 이어 가는 곡
+
+        Player& pl = players[p];
+        pl = Player();
+        pl.seqBase = seqBase;
+        const int kind = classify(seqBase, pl.name);
+        if (kind == Kind_LongOneShot)
+        {
+            pl.cutscene = true;
+            pl.cutsceneStart = lastFrame;
+            pl.cutsceneEnd = lastFrame + (u32)(lastSeconds * 59.8261f) + 30;
+            continue;
+        }
+        if (kind != Kind_Music && kind != Kind_Jingle) continue;
+        pl.synthId = allocSynth();
+        if (pl.synthId < 0 || !synth.prepare(pl.synthId, seqBase, 0, bank)) continue;
+        pl.music = true;
+        pl.jingle = kind == Kind_Jingle;
+        // 지금까지 진행한 틱 수는 드라이버가 공유 영역에 써 준다
+        u32 ticks = 0;
+        if ((sharedWork >> 24) == 0x02)
+            ticks = rd32(&nds->MainRAM[(sharedWork + 0x40 + 0x24 * p) & nds->MainRAMMask]);
+        if (ticks > 4000000) ticks = 0;
+        synth.skipTicks(pl.synthId, ticks);
+
+        pl.prio = nds->ARM7Read8(x + 4);
+        pl.volume = nds->ARM7Read8(x + 5);
+        const s16 fader = (s16)nds->ARM7Read16(x + 6);
+        // 이미 무음 값이 들어 있으면 게임이 의도한 값은 알 수 없다 (다음 음량 명령 때 맞춰진다)
+        pl.fader = fader <= kFaderMute ? 0 : fader;
+        nds->ARM7Write16(x + 6, (u16)kFaderMute);
+        pl.muted = true;
+        synth.setPlayerPrio(pl.synthId, pl.prio);
+        synth.setPlayerVolume(pl.synthId, pl.volume);
+        synth.setPlayerFader(pl.synthId, pl.fader);
+        if (pl.jingle)
+        {
+            synth.snapshotMemory(pl.synthId);
+            jingleFrame[pl.synthId] = lastFrame;
+            jingleSample[pl.synthId] = synth.renderedFrames();
+        }
+        synth.start(pl.synthId);
+        pl.started = true;
+        if (flags & 4) synth.pause(pl.synthId, true);
+    }
+}
+
+// 상태를 불러온 뒤: 같은 플레이어에서 같은 반복 곡이 계속 나오고 있으면 자체 재생기의 연주를 끊지 않고 그대로 둔다
+// (GBA 판과 같은 동작). 그 밖의 곡은 처음부터 다시 추적한다 (드라이버가 연주 중인 곡을 그 위치부터 이어 받음)
+void BgmReplacer::reloadKeepingMusic()
+{
+    NDS* nds = inst->nds;
+    const std::array<Player, 16> prev = players;
+    std::array<bool, 16> keep{};
+    std::array<bool, 16> keepSynth{};
+    if (findDriverPlayers())
+    {
+        for (int p = 0; p < 16; p++)
+        {
+            const Player& pl = prev[p];
+            if (!pl.music || !pl.started || pl.sfx || pl.jingle || pl.synthId < 0 || !synth.playerActive(pl.synthId)) continue;
+            const u32 x = driverPlayers + 0x24 * p;
+            const u8 flags = nds->ARM7Read8(x);
+            if (!(flags & 1) || nds->ARM7Read8(x + 1) != p) continue;
+            const u8 track0 = nds->ARM7Read8(x + 8);
+            if (track0 >= 32) continue;
+            if (nds->ARM7Read32(driverPlayers + 0x24 * 16 + 0x40 * track0 + 0x24) != pl.seqBase) continue;
+            keep[p] = true;
+            keepSynth[pl.synthId & 15] = true;
+        }
+    }
+
+    // 이어 가지 않는 것은 모두 정리한다 (resetTracking 과 같되, 이어 갈 자체 재생기 플레이어와 출력 버퍼는 둔다)
+    bool any = false;
+    for (int id = 0; id < 16; id++)
+    {
+        if (keepSynth[id]) any = true;
+        else synth.stop(id);
+    }
+    players = {};
+    cutsceneNow = false;
+    orphan = {};
+    sfxOrphan = {};
+    sfxStopAt = {};
+    sfxRepeat.clear();
+    if (!any)
+    {
+        synth.reset();
+        std::lock_guard lock(ringMutex);
+        ringCount = 0;
+    }
+    for (int p = 0; p < 16; p++)
+    {
+        if (!keep[p]) continue;
+        Player& pl = players[p];
+        pl = prev[p];
+        pl.holdStart = pl.holdResume = false;
+        const u32 x = driverPlayers + 0x24 * p;
+        // 상태에 들어 있던 페이더가 무음이 아니면(기능을 끄고 저장한 상태 등) 다시 무음으로: 원본이 같이 들리지 않게
+        nds->ARM7Write16(x + 6, (u16)kFaderMute);
+        pl.muted = true;
+        synth.pause(pl.synthId, (nds->ARM7Read8(x) & 4) != 0);
+    }
+    recoverFromDriver(&keep);
+}
+
+void BgmReplacer::fifoHook(NDS& nds, u32 word)
+{
+    auto* inst = static_cast<EmuInstance*>(nds.UserData);
+    if (inst && inst->bgmReplacer && inst->nds == &nds) inst->bgmReplacer->onSoundFifo(word);
+}
+
+void BgmReplacer::cartHook(NDS& nds, u32 addr, u32 len)
+{
+    auto* inst = static_cast<EmuInstance*>(nds.UserData);
+    if (inst && inst->bgmReplacer && inst->nds == &nds) inst->bgmReplacer->onCartRead(addr);
+}
+
+void BgmReplacer::onCartRead(u32 addr)
+{
+    // 기능이 꺼져 있어도 분류 창이 열려 있으면(수집 중) 목록에는 모은다
+    if (!enabled && !wasCollecting) return;
+    const SoundCatalog::StrmEntry* e = cat.findStrmData(addr);
+    if (!e) return;
+    // 게임은 STRM 이 나오는 동안 몇 프레임마다 다음 부분을 읽는다 (8kHz 모노도 0.2초 안에 다시 읽음).
+    // 같은 STRM 을 이어 읽는 동안은 목록·분류를 다시 찾지 않는다 (성능)
+    if (e != strmLast || lastFrame - strmLastRead > 30)
+    {
+        strmLast = e;
+        strmLastKey = SoundCatalog::strmKey(*e);
+        strmLastKind = cat.noteSeen(strmLastKey, SoundCatalog::Type_Strm, e->name.empty() ? strmLastKey : e->name,
+                                    Kind_LongOneShot);
+    }
+    strmLastRead = lastFrame;
+    if (strmLastKind == Kind_LongOneShot) strmCutUntil = lastFrame + 30;
+}
+
+void BgmReplacer::noteNowPlaying(u32 frame)
+{
+    NDS* nds = inst->nds;
+    // 드라이버가 공유 영역에 써 주는 '연주 중인 플레이어' 비트 (모르면 우리가 추적 중인 곡만)
+    u32 status = 0;
+    const bool haveStatus = (sharedWork >> 24) == 0x02;
+    if (haveStatus) status = rd32(&nds->MainRAM[(sharedWork + 4) & nds->MainRAMMask]);
+    for (int p = 0; p < 16; p++)
+    {
+        const Player& pl = players[p];
+        if (pl.key.empty()) continue;
+        const bool playing = haveStatus ? (status & (1u << p)) != 0 : (pl.music || pl.cutscene);
+        if (playing) cat.noteSeen(pl.key, pl.keyType, pl.name, pl.autoKind);
+    }
+    if (strmLast && frame - strmLastRead < 30)
+        cat.noteSeen(strmLastKey, SoundCatalog::Type_Strm, strmLast->name.empty() ? strmLastKey : strmLast->name,
+                     Kind_LongOneShot);
+}
+
+// STRM 처리 (프레임마다). 사용자가 BGM·팡파레·효과음으로 정한 STRM 은 원본 스트림 채널을 출력에서 빼고 1배속으로 낸다
+void BgmReplacer::updateStrm(u32 frame)
+{
+    NDS* nds = inst->nds;
+    const bool reading = strmLast && frame - strmLastRead < 30;
+    if (reading)
+    {
+        // 창에서 분류를 바꾸면 바로 따른다 (STRM 이 나오는 동안 프레임마다 한 번만 찾는다)
+        const int user = cat.userKind(strmLastKey);
+        strmLastKind = user == SoundCatalog::Kind_Auto ? Kind_LongOneShot : user;
+    }
+    const bool replace = enabled && reading &&
+                         (strmLastKind == Kind_Music || strmLastKind == Kind_Jingle || strmLastKind == Kind_Sfx);
+    if (replace && strmFileOf != strmLast)
+    {
+        // 파일을 롬에서 읽어 둔다. 바로 앞 파일은 짧게 줄어드는 동안 아직 읽히므로 버퍼를 번갈아 쓴다
+        strmBufNo ^= 1;
+        std::vector<u8>& buf = strmBuf[strmBufNo];
+        if (cat.readRom(strmLast->fileOff, strmLast->fileSize, buf) &&
+            NitroStrm::parse(buf.data(), (u32)buf.size(), 0, (u32)buf.size(), strmFile[strmBufNo]))
+            strmFileOf = strmLast;
+        else
+            strmFileOf = nullptr;
+    }
+    const NitroStrm::File* want = replace && strmFileOf == strmLast ? &strmFile[strmBufNo] : nullptr;
+    strm.play(want);
+    const u16 chans = strmChannels ? strmChannels : 0xC0;
+    nds->SPU.SetFfbgmMuteMask(want ? chans : 0);
+    // 원본 그대로 나오는 스트림(연출 등): 소리 분류 창의 볼륨을 원본 스트림 채널에 곱한다
+    const int userVol = enabled && reading && !want ? cat.volume(strmLastKey) : 100;
+    nds->SPU.SetFfbgmGain(chans, userVol * 256 / 100);
+    if (!want) return;
+    // 게임이 그 채널에 정한 음량·팬을 그대로 쓴다 (페이드도 따라간다). 스트림의 n 번째 채널 = 잡은 채널 중 n 번째
+    int n = 0;
+    for (int i = 0; i < 16 && n < 2; i++)
+    {
+        if (!(chans & (1 << i))) continue;
+        const SPUChannel& ch = nds->SPU.GetChannel(i);
+        NitroStrm::Mix m;
+        m.volume = ch.Volume;
+        m.shift = ch.VolumeShift;
+        m.pan = ch.Pan;
+        strm.setMix(n++, m);
+    }
+    strm.setMaster(nds->SPU.GetMasterVolume());
+    strm.setGain(SoundCatalog::perceivedGain((float)cat.volume(strmLastKey)));
+}
+
+void BgmReplacer::onSoundFifo(u32 word)
+{
+    // PXI FIFO 값 = (데이터 << 6) | 태그. 사운드의 데이터는 명령 연결 목록의 주소다
+    if ((word & 0x1F) != kPxiTagSound) return;
+    // 기능이 꺼져 있으면 아무것도 바꾸지 않는다. 단, 분류 창이 열려 있으면(수집 중) 나온 소리를 목록에는 모은다
+    if (!enabled && !wasCollecting) return;
+    NDS* nds = inst->nds;
+    if (nds->ConsoleType != 0) return;
+    synth.setMemory(nds->MainRAM, nds->MainRAMMask);
+
+    u32 addr = word >> 6;
+    for (int n = 0; n < 256 && (addr >> 24) == 0x02; n++)
+    {
+        const u32 off = addr & nds->MainRAMMask;
+        if (off + kNodeSize > nds->MainRAMMask + 1) break;
+        u8* node = &nds->MainRAM[off];
+        Command c{rd32(node + 4), {rd32(node + 8), rd32(node + 12), rd32(node + 16), rd32(node + 20)}};
+        addr = rd32(node);
+        // 일부 게임은 명령 번호가 다르다 (초기 SDK 때문인지는 확인하지 않았다): 3번 이후가 모두 3씩 앞당겨져 있어
+        // 플레이어 값 설정이 6번이 아니라 3번으로 온다. 지금 SDK 의 3번(준비해 둔 곡 시작)은 인수가 모두 0 이라,
+        // "3번인데 (플레이어, 4·5·6, 값, 1·2바이트) 모양" 이면 옛 방식으로 보고 번호를 지금 방식으로 바꿔 읽는다.
+        // 옛 방식의 2번은 무엇인지 확인하지 못해 무시한다
+        if (!oldCmdLayout && c.id == 3 && c.arg[1] >= 4 && c.arg[1] <= 6 && (c.arg[3] == 1 || c.arg[3] == 2))
+            oldCmdLayout = true;
+        if (oldCmdLayout)
+        {
+            if (c.id == 2)
+                c.id = 0xFFFFFFFF;
+            else if (c.id >= 3)
+                c.id += 3;
+        }
+        if (!enabled)
+        {
+            if (c.id == Cmd_StartSeq || c.id == Cmd_PrepareSeq)
+            {
+                std::string name;
+                classify(c.arg[1], name, c.arg[2]);  // 목록에 넣기만 한다
+            }
+            continue;
+        }
+        const int p = c.arg[0] & 0xF;
+        Player& pl = players[p];
+
+        switch (c.id)
+        {
+        case Cmd_StartSeq:
+        case Cmd_PrepareSeq:
+        {
+            detach(p);  // 이 플레이어가 하던 연주는 끝난다
+            pl = Player();
+            bool oneShotHold = false;
+            std::string key;
+            const int kind = classify(c.arg[1], pl.name, c.arg[2], &oneShotHold, &key);
+            pl.key = key;
+            pl.keyType = lastKeyType;
+            pl.autoKind = lastAutoKind;
+            if (kind == Kind_Music || kind == Kind_Jingle || kind == Kind_Sfx)
+            {
+                pl.synthId = allocSynth();
+                pl.music = pl.synthId >= 0 && synth.prepare(pl.synthId, c.arg[1], c.arg[2], c.arg[3]);
+                if (pl.synthId >= 0)
+                {
+                    synth.setHoldOneShots(pl.synthId, oneShotHold);
+                    userGain[pl.synthId] = key.empty() ? 1.0f : SoundCatalog::perceivedGain((float)cat.volume(key));
+                }
+                pl.jingle = kind == Kind_Jingle;
+                pl.sfx = kind == Kind_Sfx;
+                // 같은 소리인지 가리는 값: 시퀀스가 실제로 시작하는 주소. 효과음 묶음(SSAR)은 모든 소리가 같은
+                // 데이터 주소(arg1)를 쓰고 시작 위치(arg2)만 달라서, 더해야 소리마다 다른 값이 된다
+                pl.seqBase = c.arg[1] + c.arg[2];
+                if (pl.music && pl.jingle) synth.snapshotMemory(pl.synthId);
+            }
+            if (kind == Kind_LongOneShot)
+            {
+                pl.cutscene = true;
+                pl.cutsceneStart = lastFrame;
+                pl.cutsceneEnd = lastFrame + (u32)(lastSeconds * 59.8261f) + 30;
+            }
+            if (!pl.music && !key.empty())
+            {
+                // 원본 그대로 나오는 소리(연출, 아무것도 아님 등): 소리 분류 창의 볼륨을 원본 페이더에 더한다
+                const int v = cat.volume(key);
+                if (v != 100)
+                {
+                    pl.userVol = true;
+                    pl.userCb = v <= 0 ? kFaderMute : (int)std::lround(200.0 * std::log10(SoundCatalog::perceivedGain((float)v)));
+                }
+            }
+            if (pl.music && c.id == Cmd_StartSeq) startMusic(p);
+            break;
+        }
+
+        case Cmd_StartPreparedSeq:
+            if (pl.music)
+            {
+                startMusic(p);
+            }
+            break;
+
+        case Cmd_StopSeq:
+            if (pl.music && pl.sfx && pl.started && synth.playerActive(pl.synthId))
+            {
+                // 게임 안에서 울린 시간만큼은 1배속으로 낸 뒤 멈춘다. 배속 중에 바로 끊으면 막 시작한 소리가
+                // 아주 짧게 잘려 "띡" 으로 들린다 (예: 경험치 게이지 소리는 게임이 길이를 정해 멈춘다)
+                const double gameSec = (double)(lastFrame - pl.sfxFrame) / 59.8261;
+                const u64 stopAt = pl.sfxSample + (u64)(gameSec * std::max(inst->audioFreq, 1));
+                if (synth.renderedFrames() < stopAt)
+                {
+                    sfxStopAt[pl.synthId] = stopAt;
+                    sfxOrphan[pl.synthId] = true;
+                    sfxOrphanSeq[pl.synthId] = pl.seqBase;
+                }
+                else
+                    synth.stop(pl.synthId);
+            }
+            else if (pl.music)
+            {
+                synth.stop(pl.synthId);
+            }
+            pl.music = false;
+            pl.cutscene = false;
+            break;
+
+        case Cmd_PauseSeq:
+            if (!pl.music) break;
+            if (c.arg[1])
+            {
+                if (pl.holdStart)
+                {
+                    synth.start(pl.synthId);
+                    pl.started = true;
+                }
+                pl.holdStart = pl.holdResume = false;
+                synth.pause(pl.synthId, true);
+            }
+            else
+            {
+                if (pl.holdStart) break;  // 아직 시작도 미뤄 둔 상태
+                if (!pl.jingle && !pl.sfx && holdForJingle(pl))
+                {
+                    pl.holdResume = true;
+                }
+                else
+                    synth.pause(pl.synthId, false);
+            }
+            break;
+
+        case Cmd_PlayerParam:
+        {
+            // 원본 그대로 나오는 소리도 게임이 정한 값을 기억해 둔다 (창에서 볼륨을 바꿀 때 페이더를 다시 쓰려고)
+            if (!pl.music && pl.key.empty()) break;
+            // 플레이어 구조체: 4 우선순위(u8), 5 음량(u8), 6 페이더(s16). 게임이 의도한 값은 자체 재생기에 준다
+            if (c.arg[1] == 4 && c.arg[3] == 1)
+                pl.prio = c.arg[2] & 0xFF;
+            else if (c.arg[1] == 5 && c.arg[3] == 1)
+                pl.volume = c.arg[2] & 0xFF;
+            else if (c.arg[1] == kFaderOffset && c.arg[3] == 2)
+                pl.fader = (s16)c.arg[2];
+            else
+            {
+                break;
+            }
+            if (!pl.music)
+            {
+                if (!pl.userVol) break;
+                // 원본 그대로 나오는 소리: 게임이 정한 페이더에 사용자 볼륨만큼 더해 넣는다 (곡을 준비할 때 우선순위
+                // 설정이 항상 따라오므로 페이더 명령이 없는 게임도 적용된다). 드라이버가 최대 음량을 넘지 않게 자르므로
+                // 100% 보다 크게 하면 원래 소리 크기에 따라 덜 커질 수 있다
+                const int f = pl.userCb <= kFaderMute ? kFaderMute
+                                                      : std::clamp((int)pl.fader + pl.userCb, (int)kFaderMute, 32767);
+                const u32 rewritten[3] = {4, (u32)pl.prio | ((u32)pl.volume << 8) | ((u32)(u16)(s16)f << 16), 4};
+                memcpy(node + 12, rewritten, sizeof(rewritten));
+                break;
+            }
+            synth.setPlayerPrio(pl.synthId, pl.prio);
+            synth.setPlayerVolume(pl.synthId, pl.volume);
+            synth.setPlayerFader(pl.synthId, pl.fader);
+            // 원본에는 "오프셋 4 부터 4바이트" 를 한 번에 쓰는 명령으로 바꿔 넣는다: 우선순위와 음량은 그대로,
+            // 페이더만 무음. 곡을 준비할 때 우선순위 설정이 항상 따라오므로, 페이더 명령이 없는 게임도 꺼진다
+            const u32 rewritten[3] = {4, (u32)pl.prio | ((u32)pl.volume << 8) | ((u32)(u16)kFaderMute << 16), 4};
+            memcpy(node + 12, rewritten, sizeof(rewritten));
+            pl.muted = true;
+            break;
+        }
+
+        case Cmd_MuteTrack:
+            if (pl.music)
+            {
+                synth.muteTracks(pl.synthId, c.arg[1], c.arg[2] != 0);
+            }
+            break;
+
+        case Cmd_SkipSeq:
+            diag("cmd5 skip p=%d a1=%u a2=%u a3=%u", p, c.arg[1], c.arg[2], c.arg[3]);
+            // 곡을 소리 없이 앞으로 돌린다. 인수는 플레이어 값 설정(6번)과 같은 배치로 본다: 1 = 틱 수
+            if (pl.music) synth.skipTicks(pl.synthId, c.arg[1]);
+            break;
+
+        case Cmd_TrackParam:
+            // 트랙 구조체에 값을 쓰는 명령. 인수: 0 = 플레이어 | 크기 << 24, 1 = 트랙 비트, 2 = 구조체 안의 위치, 3 = 값
+            diag("cmd7 track p=%d a0=%08X a1=%08X a2=%08X a3=%08X", p, c.arg[0], c.arg[1], c.arg[2], c.arg[3]);
+            if (pl.music) synth.setTrackParam(pl.synthId, c.arg[1], c.arg[2], c.arg[0] >> 24, c.arg[3]);
+            break;
+
+        case Cmd_PlayerLocalVar:
+            diag("cmd10 var p=%d a1=%u a2=%d a3=%u", p, c.arg[1], (int)(s16)c.arg[2], c.arg[3]);
+            // 플레이어 변수. 인수는 6번과 같은 배치로 본다: 1 = 변수 번호, 2 = 값
+            if (pl.music) synth.setPlayerVar(pl.synthId, (int)c.arg[1], (s16)c.arg[2]);
+            break;
+
+        case 26:  // 채널 잡기 (스트림이 쓸 하드웨어 채널)
+            strmChannels |= (u16)c.arg[0];
+            break;
+
+        case 27:  // 채널 풀기
+            strmChannels &= (u16)~c.arg[0];
+            break;
+
+        case 29:  // 공유 영역 주소 통지
+            sharedWork = c.arg[0];
+            break;
+
+        default:
+            break;
+        }
+    }
+}
+
+// 기록 (환경 변수 FFBGM_DIAG 에 파일 경로가 있을 때만): 게임이 보낸 명령 중 인수 배치를 아직 보지 못한 것
+void BgmReplacer::diag(const char* fmt, ...)
+{
+    static FILE* f = nullptr;
+    static bool tried = false;
+    if (!tried)
+    {
+        tried = true;
+        if (const char* path = getenv("FFBGM_DIAG")) f = fopen(path, "w");
+    }
+    if (!f) return;
+    fprintf(f, "[%u] ", lastFrame);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fflush(f);
+}
+
+void BgmReplacer::afterMainFrame()
+{
+    NDS* nds = inst->nds;
+    if (!nds) return;
+    if (wanted != enabled) setEnabled(wanted);
+    if (nds->SoundFifoHook != &BgmReplacer::fifoHook) nds->SoundFifoHook = &BgmReplacer::fifoHook;
+    if (nds->CartReadHook != &BgmReplacer::cartHook) nds->CartReadHook = &BgmReplacer::cartHook;
+
+    // 게임 교체, 리셋, 상태 불러오기: 추적하던 내용이 맞지 않게 되므로 처음부터 다시 본다
+    const u32 frame = nds->NumFrames;
+    if (nds != lastNds || frame < lastFrame || frame > lastFrame + 1 || forceReset)
+    {
+        const bool sameGame = nds == lastNds;
+        const bool keep = stateLoaded && sameGame && enabled && nds->ConsoleType == 0;
+        forceReset = false;
+        stateLoaded = false;
+        lastNds = nds;
+        lastFrame = frame;
+        indexCart();
+        if (keep)
+            reloadKeepingMusic();  // 상태 불러오기: 같은 곡은 이어 가고, 나머지는 드라이버에서 이어 받는다
+        else
+        {
+            resetTracking();
+            if (!sameGame) driverPlayers = 0;
+            if (enabled && frame > 60) recoverFromDriver();
+        }
+    }
+    lastFrame = frame;
+    if (enabled) releaseHeld();
+    for (int id = 0; id < 16; id++)
+    {
+        if (sfxStopAt[id] && synth.renderedFrames() >= sfxStopAt[id])
+        {
+            synth.stop(id);
+            sfxStopAt[id] = 0;
+            sfxOrphan[id] = false;
+        }
+    }
+
+    // 연출 곡이 아직 나오는 중인지: 드라이버가 공유 영역에 써 주는 '연주 중인 플레이어' 비트로 확인한다
+    // (주소를 모르면 곡의 길이로 어림한다)
+    bool cut = false;
+    for (int p = 0; p < 16 && enabled; p++)
+    {
+        Player& pl = players[p];
+        if (!pl.cutscene) continue;
+        if ((sharedWork >> 24) == 0x02)
+        {
+            const u32 status = rd32(&nds->MainRAM[(sharedWork + 4) & nds->MainRAMMask]);
+            if (frame > pl.cutsceneStart + 30 && !(status & (1u << p))) pl.cutscene = false;
+        }
+        else if (frame > pl.cutsceneEnd)
+            pl.cutscene = false;
+        cut |= pl.cutscene;
+    }
+    // STRM 을 게임이 아직 읽고 있으면 연출 중
+    if (enabled && strmCutUntil && frame <= strmCutUntil) cut = true;
+    cutsceneNow = cut;
+
+    // 분류 창을 연 순간(수집이 켜짐): 이미 나오고 있던 소리는 시작할 때 목록에 넣지 못했으므로 지금 넣는다
+    const bool collecting = cat.collecting();
+    if (collecting && !wasCollecting) noteNowPlaying(frame);
+    wasCollecting = collecting;
+    // 창에서 볼륨을 바꿨으면 지금 나오는 소리에 바로 적용 (목록이 바뀔 때만 확인)
+    if (enabled)
+    {
+        const u32 ver = cat.seenVersion();
+        if (ver != userVolVer)
+        {
+            userVolVer = ver;
+            applyUserVolumes();
+        }
+    }
+    updateStrm(frame);
+    if (!enabled || nds->ConsoleType != 0 || !(synth.isActive() || strm.isActive())) return;
+
+    // 출력 버퍼가 모자란 만큼만 만든다. 오디오 장치가 소리를 가져가는 속도(실제 시간)에 맞춰지므로
+    // 원본의 배속과 무관하게 1배속이 된다
+    synth.setMemory(nds->MainRAM, nds->MainRAMMask);
+    const int rate = inst->audioFreq;
+    const size_t target = (size_t)rate * 60 / 1000;  // 약 60ms 분량
+    size_t have;
+    {
+        std::lock_guard lock(ringMutex);
+        have = ringCount;
+    }
+    if (have >= target) return;
+    const size_t need = std::min(target - have, kRingFrames - have);
+    renderBuf.resize(need * 2);
+    // 효과음으로 연주 중인 자체 재생기 플레이어에만 효과음 볼륨을 건다
+    const float sfxGain = SoundCatalog::perceivedGain(std::clamp(sfxVolume.load(), 0, 256) * 100.0f / 256.0f);
+    std::array<float, 16> gain;
+    gain.fill(1.0f);
+    for (const Player& pl : players)
+        if (pl.music && pl.sfx && pl.synthId >= 0) gain[pl.synthId & 15] = sfxGain;
+    for (int id = 0; id < 16; id++)
+    {
+        if (sfxOrphan[id]) gain[id] = sfxGain;
+        synth.setPlayerGain(id, gain[id] * userGain[id]);
+    }
+    if (synth.isActive())
+        synth.render(renderBuf.data(), (int)need, rate);
+    else
+        std::fill(renderBuf.begin(), renderBuf.end(), (s16)0);
+    strm.render(renderBuf.data(), (int)need, rate);
+
+    std::lock_guard lock(ringMutex);
+    size_t write = (ringRead + ringCount) % kRingFrames;
+    for (size_t i = 0; i < need && ringCount < kRingFrames; i++)
+    {
+        ring[write * 2] = renderBuf[i * 2];
+        ring[write * 2 + 1] = renderBuf[i * 2 + 1];
+        write = (write + 1) % kRingFrames;
+        ringCount++;
+    }
+}
+
+void BgmReplacer::mixInto(s16* stream, int frames, int volume, int freshFrames)
+{
+    if (frames <= 0) return;
+    // 새로 채워지지 않은 뒷부분에는 지난번 출력(원본 + 그때 더한 BGM)이 남아 있다.
+    // 그때 더한 BGM 만 도로 빼서, 원본 멜론DS 가 내던 값 그대로로 되돌린다
+    if (lastAdded.size() == (size_t)frames * 2)
+    {
+        for (int i = std::max(freshFrames, 0) * 2; i < frames * 2; i++)
+            stream[i] = (s16)std::clamp((s32)stream[i] - lastAdded[i], -32768, 32767);
+    }
+    lastAdded.assign((size_t)frames * 2, 0);
+
+    std::lock_guard lock(ringMutex);
+    for (int i = 0; i < frames && ringCount > 0; i++)
+    {
+        for (int ch = 0; ch < 2; ch++)
+        {
+            const s32 before = stream[i * 2 + ch];
+            const s32 v = std::clamp(before + (((s32)ring[ringRead * 2 + ch] * volume) >> 8), -32768, 32767);
+            stream[i * 2 + ch] = (s16)v;
+            lastAdded[i * 2 + ch] = (s16)(v - before);
+        }
+        ringRead = (ringRead + 1) % kRingFrames;
+        ringCount--;
+    }
+}

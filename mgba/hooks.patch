@@ -1,0 +1,1572 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4cad4b818..ccdfda30e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -962,7 +962,17 @@ endif()
+ 
+ if(BUILD_LIBRETRO)
+ 	file(GLOB RETRO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/libretro/*.c)
++	# ff-bgm1x: Qt 판과 같은 BGM 1배속 코드 (../common 과 qt 의 BgmReplacer/GbDriverBgm)
++	file(GLOB FF_BGM1X_COMMON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/ffbgm-common/*.cpp)
++	list(APPEND RETRO_SRC
++		${CMAKE_CURRENT_SOURCE_DIR}/src/platform/libretro/ff_bgm1x.cpp
++		${CMAKE_CURRENT_SOURCE_DIR}/src/platform/qt/BgmReplacer.cpp
++		${CMAKE_CURRENT_SOURCE_DIR}/src/platform/qt/GbDriverBgm.cpp
++		${CMAKE_CURRENT_SOURCE_DIR}/src/platform/qt/GscPlayer.cpp
++		${FF_BGM1X_COMMON_SRC})
+ 	add_library(${BINARY_NAME}_libretro SHARED ${CORE_SRC} ${RETRO_SRC})
++	target_include_directories(${BINARY_NAME}_libretro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/ffbgm-common)
++	set_target_properties(${BINARY_NAME}_libretro PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+ 	add_dependencies(${BINARY_NAME}_libretro ${BINARY_NAME}-version-info)
+ 	set_target_properties(${BINARY_NAME}_libretro PROPERTIES PREFIX "" COMPILE_DEFINITIONS "__LIBRETRO__;COLOR_16_BIT;COLOR_5_6_5;DISABLE_THREADING;MGBA_STANDALONE;${OS_DEFINES};${FUNCTION_DEFINES};MINIMAL_CORE=2")
+ 	target_link_libraries(${BINARY_NAME}_libretro ${OS_LIB})
+diff --git a/include/mgba/internal/gb/audio.h b/include/mgba/internal/gb/audio.h
+index 5b8993ac5..831a69d18 100644
+--- a/include/mgba/internal/gb/audio.h
++++ b/include/mgba/internal/gb/audio.h
+@@ -208,6 +208,7 @@ struct GBAudio {
+ 
+ 	size_t samples;
+ 	bool forceDisableCh[4];
++	int ffbgmGainQ8[4];  // ff-bgm1x: 채널별 볼륨 배율 (256 = 그대로). 소리 분류 창의 원본 소리 볼륨
+ 	int masterVolume;
+ };
+ 
+diff --git a/src/gb/audio.c b/src/gb/audio.c
+index 64edb9010..02a59dd82 100644
+--- a/src/gb/audio.c
++++ b/src/gb/audio.c
+@@ -67,6 +67,10 @@ void GBAudioInit(struct GBAudio* audio, size_t samples, uint8_t* nr52, enum GBAu
+ 	audio->forceDisableCh[1] = false;
+ 	audio->forceDisableCh[2] = false;
+ 	audio->forceDisableCh[3] = false;
++	audio->ffbgmGainQ8[0] = 256;
++	audio->ffbgmGainQ8[1] = 256;
++	audio->ffbgmGainQ8[2] = 256;
++	audio->ffbgmGainQ8[3] = 256;
+ 	audio->masterVolume = GB_AUDIO_VOLUME_MAX;
+ 	audio->nr52 = nr52;
+ 	audio->style = style;
+@@ -728,42 +732,48 @@ void GBAudioSamplePSG(struct GBAudio* audio, int16_t* left, int16_t* right) {
+ 	int dcOffset = audio->style == GB_AUDIO_GBA ? 0 : -0x8;
+ 	int sampleLeft = dcOffset;
+ 	int sampleRight = dcOffset;
++	// ff-bgm1x: 채널 1~3 은 볼륨 배율(q8)을 곱해 따로 더한다. 배율이 모두 256 이면 원래 계산과 같은 값이 된다
++	int scaledLeft = 0;
++	int scaledRight = 0;
+ 
+ 	if (!audio->forceDisableCh[0]) {
+ 		if (audio->ch1Left) {
+-			sampleLeft += audio->ch1.sample;
++			scaledLeft += audio->ch1.sample * audio->ffbgmGainQ8[0];
+ 		}
+ 
+ 		if (audio->ch1Right) {
+-			sampleRight += audio->ch1.sample;
++			scaledRight += audio->ch1.sample * audio->ffbgmGainQ8[0];
+ 		}
+ 	}
+ 
+ 	if (!audio->forceDisableCh[1]) {
+ 		if (audio->ch2Left) {
+-			sampleLeft +=  audio->ch2.sample;
++			scaledLeft += audio->ch2.sample * audio->ffbgmGainQ8[1];
+ 		}
+ 
+ 		if (audio->ch2Right) {
+-			sampleRight += audio->ch2.sample;
++			scaledRight += audio->ch2.sample * audio->ffbgmGainQ8[1];
+ 		}
+ 	}
+ 
+ 	if (!audio->forceDisableCh[2]) {
+ 		if (audio->ch3Left) {
+-			sampleLeft += audio->ch3.sample;
++			scaledLeft += audio->ch3.sample * audio->ffbgmGainQ8[2];
+ 		}
+ 
+ 		if (audio->ch3Right) {
+-			sampleRight += audio->ch3.sample;
++			scaledRight += audio->ch3.sample * audio->ffbgmGainQ8[2];
+ 		}
+ 	}
+ 
+-	sampleLeft <<= 3;
+-	sampleRight <<= 3;
++	sampleLeft = (sampleLeft << 3) + ((scaledLeft << 3) >> 8);
++	sampleRight = (sampleRight << 3) + ((scaledRight << 3) >> 8);
+ 
+ 	if (!audio->forceDisableCh[3]) {
+ 		int16_t sample = audio->style == GB_AUDIO_GBA ? (audio->ch4.sample << 3) : _coalesceNoiseChannel(&audio->ch4);
++		if (audio->ffbgmGainQ8[3] != 256) {
++			sample = (int16_t) ((sample * audio->ffbgmGainQ8[3]) >> 8);
++		}
+ 		if (audio->ch4Left) {
+ 			sampleLeft += sample;
+ 		}
+diff --git a/src/platform/libretro/libretro.c b/src/platform/libretro/libretro.c
+index db7f003e5..c6f860591 100644
+--- a/src/platform/libretro/libretro.c
++++ b/src/platform/libretro/libretro.c
+@@ -28,6 +28,7 @@
+ #include <mgba-util/vfs.h>
+ 
+ #include "libretro_core_options.h"
++#include "ff_bgm1x.h"
+ 
+ #define GB_SAMPLES 512
+ #define SAMPLE_RATE 32768
+@@ -177,6 +178,815 @@ static void _loadAudioLowPassFilterSettings(void) {
+ 	}
+ }
+ 
++/* ff-bgm1x: 아래 색 보정·프레임 블렌딩 코드는 libretro/mgba (MPL 2.0) 의
++ * src/platform/libretro/libretro.c 에서 가져왔다 (mColor -> color_t 만 바꿈). */
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++
++/* Colour correction */
++#define CC_TARGET_GAMMA   2.2f
++#define CC_RGB_MAX        31.0f
++
++/* > Note: GBC and GBA share almost identical
++ *   colour space, but we maintain independent
++ *   values in case of future adjustments */
++#define GBC_CC_LUM        0.94f
++#define GBC_CC_R          0.82f
++#define GBC_CC_G          0.665f
++#define GBC_CC_B          0.73f
++#define GBC_CC_RG         0.125f
++#define GBC_CC_RB         0.195f
++#define GBC_CC_GR         0.24f
++#define GBC_CC_GB         0.075f
++#define GBC_CC_BR        -0.06f
++#define GBC_CC_BG         0.21f
++#define GBC_CC_GAMMA_ADJ -0.5f
++
++#define GBA_CC_LUM        0.94f
++#define GBA_CC_R          0.82f
++#define GBA_CC_G          0.665f
++#define GBA_CC_B          0.73f
++#define GBA_CC_RG         0.125f
++#define GBA_CC_RB         0.195f
++#define GBA_CC_GR         0.24f
++#define GBA_CC_GB         0.075f
++#define GBA_CC_BR        -0.06f
++#define GBA_CC_BG         0.21f
++#define GBA_CC_GAMMA_ADJ  1.0f
++
++static color_t* ccLUT               = NULL;
++static unsigned ccType             = 0;
++static bool colorCorrectionEnabled = false;
++
++static void _initColorCorrection(void) {
++
++	/* Constants */
++	static const float displayGammaInv = 1.0f / CC_TARGET_GAMMA;
++	static const float rgbMaxInv = 1.0f / CC_RGB_MAX;
++
++	/* Variables */
++	enum GBModel model = GB_MODEL_AUTODETECT;
++	float ccLum;
++	float ccR;
++	float ccG;
++	float ccB;
++	float ccRG;
++	float ccRB;
++	float ccGR;
++	float ccGB;
++	float ccBR;
++	float ccBG;
++	float adjustedGamma;
++	size_t color;
++
++	/* Set colour correction parameters */
++	colorCorrectionEnabled = false;
++	switch (ccType) {
++		case 1:
++			model = GB_MODEL_AGB;
++			break;
++		case 2:
++			model = GB_MODEL_CGB;
++			break;
++		case 3:
++			{
++				/* Autodetect
++				 * (Note: This is somewhat clumsy due to the
++				 *  M_CORE_GBA & M_CORE_GB defines... */
++#ifdef M_CORE_GBA
++				if (core->platform(core) == mPLATFORM_GBA) {
++					model = GB_MODEL_AGB;
++				}
++#endif
++
++#ifdef M_CORE_GB
++				if (model != GB_MODEL_AGB) {
++					if (core->platform(core) == mPLATFORM_GB) {
++
++						const char* modelName = mCoreConfigGetValue(&core->config, "gb.model");
++						struct GB* gb = core->board;
++
++						if (modelName) {
++							gb->model = GBNameToModel(modelName);
++						} else {
++							GBDetectModel(gb);
++						}
++
++						if (gb->model == GB_MODEL_CGB) {
++							model = GB_MODEL_CGB;
++						}
++					}
++				}
++#endif
++			}
++			break;
++		default:
++			return;
++	}
++
++	switch (model) {
++		case GB_MODEL_AGB:
++			ccLum = GBA_CC_LUM;
++			ccR   = GBA_CC_R;
++			ccG   = GBA_CC_G;
++			ccB   = GBA_CC_B;
++			ccRG  = GBA_CC_RG;
++			ccRB  = GBA_CC_RB;
++			ccGR  = GBA_CC_GR;
++			ccGB  = GBA_CC_GB;
++			ccBR  = GBA_CC_BR;
++			ccBG  = GBA_CC_BG;
++			adjustedGamma = CC_TARGET_GAMMA + GBA_CC_GAMMA_ADJ;
++			break;
++		case GB_MODEL_CGB:
++			ccLum = GBC_CC_LUM;
++			ccR   = GBC_CC_R;
++			ccG   = GBC_CC_G;
++			ccB   = GBC_CC_B;
++			ccRG  = GBC_CC_RG;
++			ccRB  = GBC_CC_RB;
++			ccGR  = GBC_CC_GR;
++			ccGB  = GBC_CC_GB;
++			ccBR  = GBC_CC_BR;
++			ccBG  = GBC_CC_BG;
++			adjustedGamma = CC_TARGET_GAMMA + GBC_CC_GAMMA_ADJ;
++			break;
++		default:
++			return;
++	}
++
++	/* Allocate look-up table buffer, if required */
++	if (!ccLUT) {
++		size_t lutSize = 65536 * sizeof(color_t);
++		ccLUT = malloc(lutSize);
++		if (!ccLUT) {
++			return;
++		}
++		memset(ccLUT, 0xFF, lutSize);
++	}
++
++	/* If we get this far, then colour correction is enabled... */
++	colorCorrectionEnabled = true;
++
++	/* Populate colour correction look-up table
++	 * Note: This is somewhat slow (~100 ms on desktop),
++	 * but using precompiled look-up tables would double
++	 * the memory requirements, and make updating colour
++	 * correction parameters an absolute nightmare...) */
++	for (color = 0; color < 65536; color++) {
++		unsigned rFinal = 0;
++		unsigned gFinal = 0;
++		unsigned bFinal = 0;
++		/* Extract values from RGB565 input */
++		const unsigned r = color >> 11 & 0x1F;
++		const unsigned g = color >>  6 & 0x1F;
++		const unsigned b = color       & 0x1F;
++		/* Perform gamma expansion */
++		float rFloat = pow((float)r * rgbMaxInv, adjustedGamma);
++		float gFloat = pow((float)g * rgbMaxInv, adjustedGamma);
++		float bFloat = pow((float)b * rgbMaxInv, adjustedGamma);
++		/* Perform colour mangling */
++		float rCorrect = ccLum * ((ccR  * rFloat) + (ccGR * gFloat) + (ccBR * bFloat));
++		float gCorrect = ccLum * ((ccRG * rFloat) + (ccG  * gFloat) + (ccBG * bFloat));
++		float bCorrect = ccLum * ((ccRB * rFloat) + (ccGB * gFloat) + (ccB  * bFloat));
++		/* Range check... */
++		rCorrect = rCorrect > 0.0f ? rCorrect : 0.0f;
++		gCorrect = gCorrect > 0.0f ? gCorrect : 0.0f;
++		bCorrect = bCorrect > 0.0f ? bCorrect : 0.0f;
++		/* Perform gamma compression */
++		rCorrect = pow(rCorrect, displayGammaInv);
++		gCorrect = pow(gCorrect, displayGammaInv);
++		bCorrect = pow(bCorrect, displayGammaInv);
++		/* Range check... */
++		rCorrect = rCorrect > 1.0f ? 1.0f : rCorrect;
++		gCorrect = gCorrect > 1.0f ? 1.0f : gCorrect;
++		bCorrect = bCorrect > 1.0f ? 1.0f : bCorrect;
++		/* Convert back to RGB565 */
++		rFinal = (unsigned)((rCorrect * CC_RGB_MAX) + 0.5f) & 0x1F;
++		gFinal = (unsigned)((gCorrect * CC_RGB_MAX) + 0.5f) & 0x1F;
++		bFinal = (unsigned)((bCorrect * CC_RGB_MAX) + 0.5f) & 0x1F;
++		ccLUT[color] = rFinal << 11 | gFinal << 6 | bFinal;
++	}
++}
++
++static void _loadColorCorrectionSettings(void) {
++	struct retro_variable var;
++	unsigned oldCcType = ccType;
++	ccType = 0;
++
++	var.key = "mgba_color_correction";
++	var.value = 0;
++
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		if (strcmp(var.value, "GBA") == 0) {
++			ccType = 1;
++		} else if (strcmp(var.value, "GBC") == 0) {
++			ccType = 2;
++		} else if (strcmp(var.value, "Auto") == 0) {
++			ccType = 3;
++		}
++	}
++
++	if (ccType == 0) {
++		colorCorrectionEnabled = false;
++	} else if (ccType != oldCcType) {
++		_initColorCorrection();
++	}
++}
++
++/* Interframe blending */
++#define LCD_RESPONSE_TIME 0.333f
++/* > 'LCD Ghosting (Fast)' method does not
++ *   correctly interpret the set response time,
++ *   leading to an artificially subdued blur effect.
++ *   We have to compensate for this by increasing
++ *   the response time, hence this 'fake' value */
++#define LCD_RESPONSE_TIME_FAKE 0.5f
++
++enum frame_blend_method
++{
++   FRAME_BLEND_NONE = 0,
++   FRAME_BLEND_MIX,
++   FRAME_BLEND_MIX_SMART,
++   FRAME_BLEND_LCD_GHOSTING,
++   FRAME_BLEND_LCD_GHOSTING_FAST
++};
++
++static enum frame_blend_method frameBlendType = FRAME_BLEND_NONE;
++static bool frameBlendEnabled                 = false;
++static color_t* outputBufferPrev1              = NULL;
++static color_t* outputBufferPrev2              = NULL;
++static color_t* outputBufferPrev3              = NULL;
++static color_t* outputBufferPrev4              = NULL;
++static float* outputBufferAccR                = NULL;
++static float* outputBufferAccG                = NULL;
++static float* outputBufferAccB                = NULL;
++static float frameBlendResponse[4]            = {0.0f};
++static bool frameBlendResponseSet             = false;
++
++static bool _allocateOutputBufferPrev(color_t** buf) {
++	if (!*buf) {
++		*buf = malloc(VIDEO_BUFF_SIZE);
++		if (!*buf) {
++			return false;
++		}
++	}
++	memset(*buf, 0xFFFF, VIDEO_BUFF_SIZE);
++	return true;
++}
++
++static bool _allocateOutputBufferAcc(void) {
++	size_t i;
++	size_t buf_size = VIDEO_WIDTH_MAX * VIDEO_HEIGHT_MAX * sizeof(float);
++
++	if (!outputBufferAccR) {
++		outputBufferAccR = malloc(buf_size);
++		if (!outputBufferAccR) {
++			return false;
++		}
++	}
++
++	if (!outputBufferAccG) {
++		outputBufferAccG = malloc(buf_size);
++		if (!outputBufferAccG) {
++			return false;
++		}
++	}
++
++	if (!outputBufferAccB) {
++		outputBufferAccB = malloc(buf_size);
++		if (!outputBufferAccB) {
++			return false;
++		}
++	}
++
++	/* Cannot use memset() on arrays of floats... */
++	for (i = 0; i < (VIDEO_WIDTH_MAX * VIDEO_HEIGHT_MAX); i++) {
++		outputBufferAccR[i] = 1.0f;
++		outputBufferAccG[i] = 1.0f;
++		outputBufferAccB[i] = 1.0f;
++	}
++	return true;
++}
++
++static void _initFrameBlend(void) {
++
++	frameBlendEnabled = false;
++
++	/* Allocate interframe blending buffers, as required
++	 * NOTE: In all cases, any used buffers are 'reset'
++	 * (filled with 0xFF) to avoid drawing garbage on
++	 * the next frame */
++	switch (frameBlendType) {
++		case FRAME_BLEND_MIX:
++			/* Simple 50:50 blending requires a single buffer */
++			if (!_allocateOutputBufferPrev(&outputBufferPrev1)) {
++				return;
++			}
++			break;
++		case FRAME_BLEND_MIX_SMART:
++			/* Smart 50:50 blending requires three buffers */
++			if (!_allocateOutputBufferPrev(&outputBufferPrev1)) {
++				return;
++			}
++			if (!_allocateOutputBufferPrev(&outputBufferPrev2)) {
++				return;
++			}
++			if (!_allocateOutputBufferPrev(&outputBufferPrev3)) {
++				return;
++			}
++			break;
++		case FRAME_BLEND_LCD_GHOSTING:
++			/* 'Accurate' LCD ghosting requires four buffers */
++			if (!_allocateOutputBufferPrev(&outputBufferPrev1)) {
++				return;
++			}
++			if (!_allocateOutputBufferPrev(&outputBufferPrev2)) {
++				return;
++			}
++			if (!_allocateOutputBufferPrev(&outputBufferPrev3)) {
++				return;
++			}
++			if (!_allocateOutputBufferPrev(&outputBufferPrev4)) {
++				return;
++			}
++			break;
++		case FRAME_BLEND_LCD_GHOSTING_FAST:
++			/* 'Fast' LCD ghosting requires three (RGB)
++			 * 'accumulator' buffers */
++			if (!_allocateOutputBufferAcc()) {
++				return;
++			}
++			break;
++		case FRAME_BLEND_NONE:
++		default:
++			/* Error condition - cannot happen
++			 * > Just leave frameBlendEnabled set to false */
++			return;
++	}
++
++	/* Set LCD ghosting response time factors,
++	 * if required */
++	if ((frameBlendType == FRAME_BLEND_LCD_GHOSTING) &&
++	    !frameBlendResponseSet) {
++
++		/* For the default response time of 0.333,
++		 * only four previous samples are required
++		 * since the response factor for the fifth
++		 * is:
++		 *    pow(LCD_RESPONSE_TIME, 5.0f) -> 0.00409
++		 * ...which is less than half a percent, and
++		 * therefore irrelevant.
++		 * If the response time were significantly
++		 * increased, we may need to rethink this
++		 * (but more samples == greater performance
++		 * overheads) */
++		frameBlendResponse[0] = LCD_RESPONSE_TIME;
++		frameBlendResponse[1] = pow(LCD_RESPONSE_TIME, 2.0f);
++		frameBlendResponse[2] = pow(LCD_RESPONSE_TIME, 3.0f);
++		frameBlendResponse[3] = pow(LCD_RESPONSE_TIME, 4.0f);
++
++		frameBlendResponseSet = true;
++	}
++
++	/* If we get this far, then interframe blending is enabled... */
++	frameBlendEnabled = true;
++}
++
++static void _loadFrameBlendSettings(void) {
++
++	struct retro_variable var;
++	enum frame_blend_method oldFrameBlendType = frameBlendType;
++	frameBlendType = FRAME_BLEND_NONE;
++
++	var.key = "mgba_interframe_blending";
++	var.value = 0;
++
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		if (strcmp(var.value, "mix") == 0) {
++			frameBlendType = FRAME_BLEND_MIX;
++		} else if (strcmp(var.value, "mix_smart") == 0) {
++			frameBlendType = FRAME_BLEND_MIX_SMART;
++		} else if (strcmp(var.value, "lcd_ghosting") == 0) {
++			frameBlendType = FRAME_BLEND_LCD_GHOSTING;
++		} else if (strcmp(var.value, "lcd_ghosting_fast") == 0) {
++			frameBlendType = FRAME_BLEND_LCD_GHOSTING_FAST;
++		}
++	}
++
++	if (frameBlendType == FRAME_BLEND_NONE) {
++		frameBlendEnabled = false;
++	} else if (frameBlendType != oldFrameBlendType) {
++		_initFrameBlend();
++	}
++}
++
++/* General post processing buffers/functions */
++static color_t* ppOutputBuffer = NULL;
++
++static void (*videoPostProcess)(unsigned width, unsigned height) = NULL;
++
++/* > Note: The individual post processing functions
++ *   are somewhat WET (Write Everything Twice), in that
++ *   we duplicate the entire nested for loop.
++ *   This code is performance-critical, so we want to
++ *   minimise logic in the inner loops where possible  */
++static void videoPostProcessCc(unsigned width, unsigned height) {
++
++	color_t *src = outputBuffer;
++	color_t *dst = ppOutputBuffer;
++	size_t x, y;
++
++	for (y = 0; y < height; y++) {
++		for (x = 0; x < width; x++) {
++			*(dst + x) = *(ccLUT + *(src + x));
++		}
++		src += VIDEO_WIDTH_MAX;
++		dst += VIDEO_WIDTH_MAX;
++	}
++}
++
++static void videoPostProcessMix(unsigned width, unsigned height) {
++
++	color_t *srcCurr = outputBuffer;
++	color_t *srcPrev = outputBufferPrev1;
++	color_t *dst     = ppOutputBuffer;
++	size_t x, y;
++
++	for (y = 0; y < height; y++) {
++		for (x = 0; x < width; x++) {
++
++			/* Get colours from current + previous frames */
++			color_t rgbCurr = *(srcCurr + x);
++			color_t rgbPrev = *(srcPrev + x);
++
++			/* Store colours for next frame */
++			*(srcPrev + x) = rgbCurr;
++
++			/* Mix colours
++			 * > "Mixing Packed RGB Pixels Efficiently"
++			 *   http://blargg.8bitalley.com/info/rgb_mixing.html */
++			color_t rgbMix  = (rgbCurr + rgbPrev + ((rgbCurr ^ rgbPrev) & 0x821)) >> 1;
++
++			/* Assign colours for current frame */
++			*(dst + x)      = colorCorrectionEnabled ?
++					*(ccLUT + rgbMix) : rgbMix;
++		}
++		srcCurr += VIDEO_WIDTH_MAX;
++		srcPrev += VIDEO_WIDTH_MAX;
++		dst     += VIDEO_WIDTH_MAX;
++	}
++}
++
++static void videoPostProcessMixSmart(unsigned width, unsigned height) {
++
++	color_t *srcCurr  = outputBuffer;
++	color_t *srcPrev1 = outputBufferPrev1;
++	color_t *srcPrev2 = outputBufferPrev2;
++	color_t *srcPrev3 = outputBufferPrev3;
++	color_t *dst      = ppOutputBuffer;
++	size_t x, y;
++
++	for (y = 0; y < height; y++) {
++		for (x = 0; x < width; x++) {
++
++			/* Get colours from current + previous frames */
++			color_t rgbCurr  = *(srcCurr + x);
++			color_t rgbPrev1 = *(srcPrev1 + x);
++			color_t rgbPrev2 = *(srcPrev2 + x);
++			color_t rgbPrev3 = *(srcPrev3 + x);
++
++			/* Store colours for next frame */
++			*(srcPrev1 + x) = rgbCurr;
++			*(srcPrev2 + x) = rgbPrev1;
++			*(srcPrev3 + x) = rgbPrev2;
++
++			/* Determine whether mixing is required
++			 * i.e. whether alternate frames have the same pixel colour,
++			 * but adjacent frames do not */
++			if (((rgbCurr == rgbPrev2) || (rgbPrev1 == rgbPrev3)) &&
++				 (rgbCurr != rgbPrev1) &&
++				 (rgbCurr != rgbPrev3) &&
++				 (rgbPrev1 != rgbPrev2)) {
++
++				/* Mix colours
++				 * > "Mixing Packed RGB Pixels Efficiently"
++				 *   http://blargg.8bitalley.com/info/rgb_mixing.html */
++				color_t rgbMix = (rgbCurr + rgbPrev1 + ((rgbCurr ^ rgbPrev1) & 0x821)) >> 1;
++
++				/* Assign colours for current frame */
++				*(dst + x) = colorCorrectionEnabled ?
++						*(ccLUT + rgbMix) : rgbMix;
++
++			} else {
++				/* Just use colours for current frame */
++				*(dst + x) = colorCorrectionEnabled ?
++						*(ccLUT + rgbCurr) :	rgbCurr;
++			}
++		}
++		srcCurr  += VIDEO_WIDTH_MAX;
++		srcPrev1 += VIDEO_WIDTH_MAX;
++		srcPrev2 += VIDEO_WIDTH_MAX;
++		srcPrev3 += VIDEO_WIDTH_MAX;
++		dst      += VIDEO_WIDTH_MAX;
++	}
++}
++
++static void videoPostProcessLcdGhost(unsigned width, unsigned height) {
++
++	color_t *srcCurr  = outputBuffer;
++	color_t *srcPrev1 = outputBufferPrev1;
++	color_t *srcPrev2 = outputBufferPrev2;
++	color_t *srcPrev3 = outputBufferPrev3;
++	color_t *srcPrev4 = outputBufferPrev4;
++	color_t *dst      = ppOutputBuffer;
++	float *response  = frameBlendResponse;
++	size_t x, y;
++
++	for (y = 0; y < height; y++) {
++		for (x = 0; x < width; x++) {
++
++			/* Get colours from current + previous frames */
++			color_t rgbCurr  = *(srcCurr + x);
++			color_t rgbPrev1 = *(srcPrev1 + x);
++			color_t rgbPrev2 = *(srcPrev2 + x);
++			color_t rgbPrev3 = *(srcPrev3 + x);
++			color_t rgbPrev4 = *(srcPrev4 + x);
++
++			/* Store colours for next frame */
++			*(srcPrev1 + x) = rgbCurr;
++			*(srcPrev2 + x) = rgbPrev1;
++			*(srcPrev3 + x) = rgbPrev2;
++			*(srcPrev4 + x) = rgbPrev3;
++
++			/* Unpack colours and convert to float */
++			float rCurr = (float)(rgbCurr >> 11 & 0x1F);
++			float gCurr = (float)(rgbCurr >>  6 & 0x1F);
++			float bCurr = (float)(rgbCurr       & 0x1F);
++
++			float rPrev1 = (float)(rgbPrev1 >> 11 & 0x1F);
++			float gPrev1 = (float)(rgbPrev1 >>  6 & 0x1F);
++			float bPrev1 = (float)(rgbPrev1       & 0x1F);
++
++			float rPrev2 = (float)(rgbPrev2 >> 11 & 0x1F);
++			float gPrev2 = (float)(rgbPrev2 >>  6 & 0x1F);
++			float bPrev2 = (float)(rgbPrev2       & 0x1F);
++
++			float rPrev3 = (float)(rgbPrev3 >> 11 & 0x1F);
++			float gPrev3 = (float)(rgbPrev3 >>  6 & 0x1F);
++			float bPrev3 = (float)(rgbPrev3       & 0x1F);
++
++			float rPrev4 = (float)(rgbPrev4 >> 11 & 0x1F);
++			float gPrev4 = (float)(rgbPrev4 >>  6 & 0x1F);
++			float bPrev4 = (float)(rgbPrev4       & 0x1F);
++
++			/* Mix colours for current frame and convert back to color_t
++			 * > Response time effect implemented via an exponential
++			 *   drop-off algorithm, taken from the 'Gameboy Classic Shader'
++			 *   by Harlequin:
++			 *      https://github.com/libretro/glsl-shaders/blob/master/handheld/shaders/gameboy/shader-files/gb-pass0.glsl */
++			rCurr += (rPrev1 - rCurr) * *response;
++			rCurr += (rPrev2 - rCurr) * *(response + 1);
++			rCurr += (rPrev3 - rCurr) * *(response + 2);
++			rCurr += (rPrev4 - rCurr) * *(response + 3);
++			color_t rMix = (color_t)(rCurr + 0.5f) & 0x1F;
++
++			gCurr += (gPrev1 - gCurr) * *response;
++			gCurr += (gPrev2 - gCurr) * *(response + 1);
++			gCurr += (gPrev3 - gCurr) * *(response + 2);
++			gCurr += (gPrev4 - gCurr) * *(response + 3);
++			color_t gMix = (color_t)(gCurr + 0.5f) & 0x1F;
++
++			bCurr += (bPrev1 - bCurr) * *response;
++			bCurr += (bPrev2 - bCurr) * *(response + 1);
++			bCurr += (bPrev3 - bCurr) * *(response + 2);
++			bCurr += (bPrev4 - bCurr) * *(response + 3);
++			color_t bMix = (color_t)(bCurr + 0.5f) & 0x1F;
++
++			/* Repack colours for current frame */
++			*(dst + x) = colorCorrectionEnabled ?
++					*(ccLUT + (rMix << 11 | gMix << 6 | bMix)) :
++							rMix << 11 | gMix << 6 | bMix;
++		}
++		srcCurr  += VIDEO_WIDTH_MAX;
++		srcPrev1 += VIDEO_WIDTH_MAX;
++		srcPrev2 += VIDEO_WIDTH_MAX;
++		srcPrev3 += VIDEO_WIDTH_MAX;
++		srcPrev4 += VIDEO_WIDTH_MAX;
++		dst      += VIDEO_WIDTH_MAX;
++	}
++}
++
++static void videoPostProcessLcdGhostFast(unsigned width, unsigned height) {
++
++	color_t *srcCurr = outputBuffer;
++	float *srcPrevR = outputBufferAccR;
++	float *srcPrevG = outputBufferAccG;
++	float *srcPrevB = outputBufferAccB;
++	color_t *dst     = ppOutputBuffer;
++	size_t x, y;
++
++	for (y = 0; y < height; y++) {
++		for (x = 0; x < width; x++) {
++
++			/* Get colours from current + previous frames */
++			color_t rgbCurr = *(srcCurr + x);
++			float rPrev    = *(srcPrevR + x);
++			float gPrev    = *(srcPrevG + x);
++			float bPrev    = *(srcPrevB + x);
++
++			/* Unpack current colours and convert to float */
++			float rCurr = (float)(rgbCurr >> 11 & 0x1F);
++			float gCurr = (float)(rgbCurr >>  6 & 0x1F);
++			float bCurr = (float)(rgbCurr       & 0x1F);
++
++			/* Mix colours for current frame */
++			float rMix = (rCurr * (1.0f - LCD_RESPONSE_TIME_FAKE)) + (LCD_RESPONSE_TIME_FAKE * rPrev);
++			float gMix = (gCurr * (1.0f - LCD_RESPONSE_TIME_FAKE)) + (LCD_RESPONSE_TIME_FAKE * gPrev);
++			float bMix = (bCurr * (1.0f - LCD_RESPONSE_TIME_FAKE)) + (LCD_RESPONSE_TIME_FAKE * bPrev);
++
++			/* Store colours for next frame */
++			*(srcPrevR + x) = rMix;
++			*(srcPrevG + x) = gMix;
++			*(srcPrevB + x) = bMix;
++
++			/* Convert and repack current frame colours */
++			color_t rgbMix =   ((color_t)(rMix + 0.5f) & 0x1F) << 11
++								  | ((color_t)(gMix + 0.5f) & 0x1F) << 6
++								  | ((color_t)(bMix + 0.5f) & 0x1F);
++
++			/* Assign colours for current frame */
++			*(dst + x) = colorCorrectionEnabled ?
++					*(ccLUT + rgbMix) : rgbMix;
++		}
++		srcCurr  += VIDEO_WIDTH_MAX;
++		srcPrevR += VIDEO_WIDTH_MAX;
++		srcPrevG += VIDEO_WIDTH_MAX;
++		srcPrevB += VIDEO_WIDTH_MAX;
++		dst      += VIDEO_WIDTH_MAX;
++	}
++}
++
++static void _initPostProcessing(void) {
++
++	/* Early return if all post processing elements
++	 * are disabled */
++	videoPostProcess = NULL;
++	if (!colorCorrectionEnabled && !frameBlendEnabled) {
++		return;
++	}
++
++	/* Allocate output buffer, if required */
++	if (!ppOutputBuffer) {
++#ifdef _3DS
++		ppOutputBuffer = linearMemAlign(VIDEO_BUFF_SIZE, 0x80);
++#else
++		ppOutputBuffer = malloc(VIDEO_BUFF_SIZE);
++#endif
++		if (!ppOutputBuffer) {
++			return;
++		}
++		memset(ppOutputBuffer, 0xFFFF, VIDEO_BUFF_SIZE);
++	}
++
++	/* Assign post processing function */
++	if (frameBlendEnabled) {
++		switch (frameBlendType) {
++			case FRAME_BLEND_MIX:
++				videoPostProcess = videoPostProcessMix;
++				return;
++			case FRAME_BLEND_MIX_SMART:
++				videoPostProcess = videoPostProcessMixSmart;
++				return;
++			case FRAME_BLEND_LCD_GHOSTING:
++				videoPostProcess = videoPostProcessLcdGhost;
++				return;
++			case FRAME_BLEND_LCD_GHOSTING_FAST:
++				videoPostProcess = videoPostProcessLcdGhostFast;
++				return;
++			case FRAME_BLEND_NONE:
++			default:
++				/* Cannot happen */
++				videoPostProcess = colorCorrectionEnabled ?
++						videoPostProcessCc : NULL;
++				return;
++		}
++	} else if (colorCorrectionEnabled) {
++		videoPostProcess = videoPostProcessCc;
++	}
++}
++
++static void _loadPostProcessingSettings(void) {
++
++	/* Load settings and initialise individual
++	 * post processing elements */
++	_loadColorCorrectionSettings();
++	_loadFrameBlendSettings();
++
++	/* Initialise post processing buffers/functions
++	 * based on configured options */
++	_initPostProcessing();
++}
++
++static void _deinitPostProcessing(void) {
++
++	ccType                 = 0;
++	frameBlendType         = FRAME_BLEND_NONE;
++	colorCorrectionEnabled = false;
++	frameBlendEnabled      = false;
++	videoPostProcess       = NULL;
++
++	/* Free all allocated buffers */
++	if (ppOutputBuffer) {
++#ifdef _3DS
++		linearFree(ppOutputBuffer);
++#else
++		free(ppOutputBuffer);
++#endif
++		ppOutputBuffer = NULL;
++	}
++
++	/* > Colour correction */
++	if (ccLUT) {
++		free(ccLUT);
++		ccLUT = NULL;
++	}
++
++	/* > Interframe blending */
++	if (outputBufferPrev1) {
++		free(outputBufferPrev1);
++		outputBufferPrev1 = NULL;
++	}
++
++	if (outputBufferPrev2) {
++		free(outputBufferPrev2);
++		outputBufferPrev2 = NULL;
++	}
++
++	if (outputBufferPrev3) {
++		free(outputBufferPrev3);
++		outputBufferPrev3 = NULL;
++	}
++
++	if (outputBufferPrev4) {
++		free(outputBufferPrev4);
++		outputBufferPrev4 = NULL;
++	}
++
++	if (outputBufferAccR) {
++		free(outputBufferAccR);
++		outputBufferAccR = NULL;
++	}
++
++	if (outputBufferAccG) {
++		free(outputBufferAccG);
++		outputBufferAccG = NULL;
++	}
++
++	if (outputBufferAccB) {
++		free(outputBufferAccB);
++		outputBufferAccB = NULL;
++	}
++}
++
++#endif
++
++/* ff-bgm1x: 코어 옵션을 BgmReplacer 에 전달 */
++static void _loadBgm1xSettings(void) {
++	struct retro_variable var;
++	bool enabled = true;
++	bool ffCutscenes = false;
++	bool sfx1x = true;
++	int sfxVolume = 0x100;
++	bool ramSongs = false;
++
++	var.key = "mgba_ff_bgm1x";
++	var.value = 0;
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		enabled = strcmp(var.value, "disabled") != 0;
++	}
++	var.key = "mgba_ff_bgm1x_cutscenes";
++	var.value = 0;
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		ffCutscenes = strcmp(var.value, "enabled") == 0;
++	}
++	var.key = "mgba_ff_bgm1x_sfx";
++	var.value = 0;
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		sfx1x = strcmp(var.value, "disabled") != 0;
++	}
++	var.key = "mgba_ff_bgm1x_sfx_volume";
++	var.value = 0;
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		sfxVolume = (strtol(var.value, NULL, 10) * 0x100) / 100;
++	}
++	var.key = "mgba_ff_bgm1x_ram_songs";
++	var.value = 0;
++	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
++		ramSongs = strcmp(var.value, "enabled") == 0;
++	}
++	ffBgm1xSetOptions(enabled, ffCutscenes, sfx1x, sfxVolume, ramSongs);
++}
++
+ static void _initSensors(void) {
+ 	if (sensorsInitDone) {
+ 		return;
+@@ -564,6 +1374,10 @@ void retro_run(void) {
+ 		}
+ 
+ 		_loadAudioLowPassFilterSettings();
++		_loadBgm1xSettings();
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++		_loadPostProcessingSettings();
++#endif
+ 		var.key = "mgba_frameskip";
+ 		var.value = 0;
+ 		if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+@@ -613,9 +1427,16 @@ void retro_run(void) {
+ 	}
+ 
+ 	core->runFrame(core);
++	ffBgm1xFrame(core);
+ 	unsigned width, height;
+ 	core->desiredVideoDimensions(core, &width, &height);
+-	videoCallback(outputBuffer, width, height, BYTES_PER_PIXEL * 256);
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++	if (videoPostProcess) {
++		videoPostProcess(width, height);
++		videoCallback(ppOutputBuffer, width, height, BYTES_PER_PIXEL * 256);
++	} else
++#endif
++		videoCallback(outputBuffer, width, height, BYTES_PER_PIXEL * 256);
+ 
+ #ifdef M_CORE_GBA
+ 	if (core->platform(core) == mPLATFORM_GBA) {
+@@ -846,6 +1667,7 @@ static void _setupMaps(struct mCore* core) {
+ void retro_reset(void) {
+ 	core->reset(core);
+ 	_setupMaps(core);
++	ffBgm1xReset(core);
+ 
+ 	rumbleUp = 0;
+ 	rumbleDown = 0;
+@@ -996,6 +1818,11 @@ bool retro_load_game(const struct retro_game_info* game) {
+ 
+ 	core->reset(core);
+ 	_setupMaps(core);
++	ffBgm1xAttach(core);
++	_loadBgm1xSettings();
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++	_loadPostProcessingSettings();
++#endif
+ 
+ 	return true;
+ }
+@@ -1004,6 +1831,10 @@ void retro_unload_game(void) {
+ 	if (!core) {
+ 		return;
+ 	}
++	ffBgm1xDetach();
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++	_deinitPostProcessing();
++#endif
+ 	mCoreConfigDeinit(&core->config);
+ 	core->deinit(core);
+ 	mappedMemoryFree(data, dataSize);
+diff --git a/src/platform/libretro/libretro_core_options.h b/src/platform/libretro/libretro_core_options.h
+index 76ca634f9..0e66bce4b 100644
+--- a/src/platform/libretro/libretro_core_options.h
++++ b/src/platform/libretro/libretro_core_options.h
+@@ -168,6 +168,42 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+       },
+       "ON"
+    },
++#if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
++   /* ff-bgm1x: libretro/mgba 에서 가져옴 (색 보정·프레임 블렌딩) */
++   {
++      "mgba_color_correction",
++      "Color Correction",
++      NULL,
++      "Adjusts output colors to match the display of real GBA/GBC hardware.",
++      NULL,
++      "video",
++      {
++         { "OFF",  "disabled" },
++         { "GBA",  "Game Boy Advance" },
++         { "GBC",  "Game Boy Color" },
++         { "Auto", NULL },
++         { NULL, NULL },
++      },
++      "OFF"
++   },
++   {
++      "mgba_interframe_blending",
++      "Interframe Blending",
++      NULL,
++      "Simulates LCD ghosting effects. 'Simple' performs a 50:50 mix of the current and previous frames. 'Smart' attempts to detect screen flickering, and only performs a 50:50 mix on affected pixels. 'LCD Ghosting' mimics natural LCD response times by combining multiple buffered frames. 'Simple' or 'Smart' blending is required when playing games that aggressively exploit LCD ghosting for transparency effects (Wave Race, Chikyuu Kaihou Gun ZAS, F-Zero, the Boktai series...).",
++      NULL,
++      "video",
++      {
++         { "OFF",               "disabled" },
++         { "mix",               "Simple" },
++         { "mix_smart",         "Smart" },
++         { "lcd_ghosting",      "LCD Ghosting (Accurate)" },
++         { "lcd_ghosting_fast", "LCD Ghosting (Fast)" },
++         { NULL, NULL },
++      },
++      "OFF"
++   },
++#endif
+    {
+       "mgba_audio_low_pass_filter",
+       "Audio Filter",
+@@ -303,6 +339,86 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+       },
+       "0"
+    },
++   /* ff-bgm1x: 프론트엔드가 ff_bgm1x_mix 를 불러 줄 때만 동작한다 */
++   {
++      "mgba_ff_bgm1x",
++      "BGM at 1x Speed (Fast Forward)",
++      NULL,
++      "Keeps background music at normal speed while fast forwarding. Requires a frontend that calls ff_bgm1x_mix.",
++      NULL,
++      "audio",
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
++   {
++      "mgba_ff_bgm1x_cutscenes",
++      "Fast Forward During Cutscenes",
++      NULL,
++      "When disabled, fast forward pauses while cutscene music is playing.",
++      NULL,
++      "audio",
++      {
++         { "disabled", NULL },
++         { "enabled",  NULL },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "mgba_ff_bgm1x_sfx",
++      "Sound Effects at 1x Speed",
++      NULL,
++      "Also plays sound effects at normal speed while fast forwarding.",
++      NULL,
++      "audio",
++      {
++         { "enabled",  NULL },
++         { "disabled", NULL },
++         { NULL, NULL },
++      },
++      "enabled"
++   },
++   {
++      "mgba_ff_bgm1x_ram_songs",
++      "Read RAM Songs",
++      NULL,
++      "Lets sounds the game builds in RAM be played at normal speed when you classify them that way (sound classification). Copies only the data the sound uses.",
++      NULL,
++      "audio",
++      {
++         { "disabled", NULL },
++         { "enabled",  NULL },
++         { NULL, NULL },
++      },
++      "disabled"
++   },
++   {
++      "mgba_ff_bgm1x_sfx_volume",
++      "1x Sound Effect Volume",
++      NULL,
++      "Volume of the sound effects played at normal speed (percent).",
++      NULL,
++      "audio",
++      {
++         { "100", NULL },
++         { "0",   NULL },
++         { "10",  NULL },
++         { "20",  NULL },
++         { "30",  NULL },
++         { "40",  NULL },
++         { "50",  NULL },
++         { "60",  NULL },
++         { "70",  NULL },
++         { "80",  NULL },
++         { "90",  NULL },
++         { NULL, NULL },
++      },
++      "100"
++   },
+    { NULL, NULL, NULL, NULL, NULL, NULL, {{0}}, NULL },
+ };
+ 
+diff --git a/src/platform/qt/AudioDevice.cpp b/src/platform/qt/AudioDevice.cpp
+index 74f863444..035634ead 100644
+--- a/src/platform/qt/AudioDevice.cpp
++++ b/src/platform/qt/AudioDevice.cpp
+@@ -5,6 +5,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "AudioDevice.h"
+ 
++#include "BgmReplacer.h"
+ #include "LogController.h"
+ 
+ #include <mgba/core/blip_buf.h>
+@@ -26,6 +27,7 @@ void AudioDevice::setFormat(const QAudioFormat& format) {
+ 		LOG(QT, INFO) << tr("Can't set format of context-less audio device");
+ 		return;
+ 	}
++	m_sampleRate = format.sampleRate();
+ 	double fauxClock = GBAAudioCalculateRatio(1, m_context->impl->sync.fpsTarget, 1);
+ 	mCoreSyncLockAudio(&m_context->impl->sync);
+ 	blip_set_rates(m_context->core->getAudioChannel(m_context->core, 0),
+@@ -55,6 +57,7 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 0), &reinterpret_cast<mStereoSample*>(data)->left, available, true);
+ 	blip_read_samples(m_context->core->getAudioChannel(m_context->core, 1), &reinterpret_cast<mStereoSample*>(data)->right, available, true);
+ 	mCoreSyncConsumeAudio(&m_context->impl->sync);
++	BgmReplacer::mixActive(reinterpret_cast<int16_t*>(data), available, m_sampleRate);
+ 	return available * sizeof(mStereoSample);
+ }
+ 
+diff --git a/src/platform/qt/AudioDevice.h b/src/platform/qt/AudioDevice.h
+index 0794b3743..657b5cd08 100644
+--- a/src/platform/qt/AudioDevice.h
++++ b/src/platform/qt/AudioDevice.h
+@@ -27,6 +27,7 @@ protected:
+ 
+ private:
+ 	mCoreThread* m_context;
++	int m_sampleRate = 48000;
+ };
+ 
+ }
+diff --git a/src/platform/qt/CMakeLists.txt b/src/platform/qt/CMakeLists.txt
+index 19ab3516d..3d8d3582e 100644
+--- a/src/platform/qt/CMakeLists.txt
++++ b/src/platform/qt/CMakeLists.txt
+@@ -74,7 +74,27 @@ if(QT_TYPE STREQUAL STATIC_LIBRARY)
+ 	list(APPEND QT_DEFINES QT_STATIC)
+ endif()
+ 
++# ff-bgm1x: MP2K BGM 재생기 (C++17 로 따로 빌드)
++# 소스 트리 밖 파일은 오브젝트 경로에 한글 절대경로가 들어가 빌드가 깨지므로 빌드 폴더로 복사해 쓴다
++set(GBA_BGM_DIR ${CMAKE_SOURCE_DIR}/src/ffbgm-common)
++set(GBA_BGM_COPY ${CMAKE_CURRENT_BINARY_DIR}/gbabgm)
++set(GBA_BGM_SRC)
++foreach(f rom.h rom.cpp mp2k_engine.h mp2k_engine.cpp bgm_mirror.h bgm_mirror.cpp sound_catalog.h sound_catalog.cpp winutil.h)
++	configure_file(${GBA_BGM_DIR}/${f} ${GBA_BGM_COPY}/${f} COPYONLY)
++	if(f MATCHES "[.]cpp$")
++		list(APPEND GBA_BGM_SRC ${GBA_BGM_COPY}/${f})
++	endif()
++endforeach()
++add_library(gbabgm STATIC ${GBA_BGM_SRC})
++set_target_properties(gbabgm PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON AUTOMOC OFF)
++include_directories(${GBA_BGM_COPY})
++
+ set(SOURCE_FILES
++	BgmReplacer.cpp
++	FfSoundCatalogDialog.cpp
++	FfSoundPreview.cpp
++	GbDriverBgm.cpp
++	GscPlayer.cpp
+ 	AboutScreen.cpp
+ 	AbstractUpdater.cpp
+ 	Action.cpp
+@@ -249,6 +269,11 @@ if(USE_DISCORD_RPC)
+ 	list(APPEND SOURCE_FILES DiscordCoordinator.cpp)
+ endif()
+ 
++# ff-bgm1x: 정적 libepoxy 를 실행 파일에 넣을 때 필요한 초기화 (EpoxyStaticInit.cpp 참고)
++if(WIN32 AND USE_EPOXY AND EPOXY_LIBRARIES MATCHES "libepoxy[.]a$")
++	list(APPEND SOURCE_FILES EpoxyStaticInit.cpp)
++endif()
++
+ if(ENABLE_SCRIPTING)
+ 	list(APPEND SOURCE_FILES
+ 		scripting/ScriptingController.cpp
+@@ -419,7 +444,7 @@ if(QT_STATIC)
+ 		list(APPEND QT_LIBRARIES ${QT}::FontDatabaseSupport ${QT}::XcbQpa ${QT}::QWaylandIntegrationPlugin)
+ 	endif()
+ endif()
+-target_link_libraries(${BINARY_NAME}-qt ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
++target_link_libraries(${BINARY_NAME}-qt gbabgm ${PLATFORM_LIBRARY} ${BINARY_NAME} ${QT_LIBRARIES})
+ set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}" PARENT_SCOPE)
+ 
+ if(UNIX AND NOT APPLE)
+diff --git a/src/platform/qt/CoreController.cpp b/src/platform/qt/CoreController.cpp
+index f6281d51d..a03340edc 100644
+--- a/src/platform/qt/CoreController.cpp
++++ b/src/platform/qt/CoreController.cpp
+@@ -44,6 +44,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 	m_threadContext.core = core;
+ 	m_threadContext.userData = this;
+ 	updateROMInfo();
++	m_bgm.reset(new BgmReplacer(core));
+ 
+ #ifdef M_CORE_GBA
+ 	GBASIODolphinCreate(&m_dolphin);
+@@ -91,6 +92,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 
+ 		controller->m_resetActions.clear();
+ 		controller->m_frameCounter = -1;
++		controller->m_bgm->onReset(context->core);
+ 
+ 		if (!controller->m_hwaccel) {
+ 			context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
+@@ -115,6 +117,15 @@ CoreController::CoreController(mCore* core, QObject* parent)
+ 		}
+ 		++controller->m_autosaveCounter;
+ 
++		controller->m_bgm->onFrame(context->core);
++		// ff-bgm1x: 연출 곡이 나오는 동안은 배속을 멈춘다 ("연출 중에도 배속" 이 꺼져 있을 때)
++		const bool hold = controller->m_bgm->speedHold();
++		if (hold != controller->m_bgmSpeedHold) {
++			controller->m_bgmSpeedHold = hold;
++			if (controller->m_fastForward || controller->m_fastForwardForced) {
++				controller->updateFastForward();
++			}
++		}
+ 		controller->finishFrame();
+ 	};
+ 
+@@ -288,6 +299,12 @@ void CoreController::loadConfig(ConfigController* config) {
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "volume");
+ 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "mute");
+ 	m_preload = config->getOption("preload").toInt();
++	m_bgm->setEnabled(config->getOption("bgmReplace", 1).toInt());
++	m_bgm->setFastForwardCutscenes(config->getOption("bgmFfCutscenes", 0).toInt());
++	m_bgm->setSfx1x(config->getOption("bgmSfx1x", 1).toInt());
++	m_bgm->setRamSongs(config->getOption("bgmRamSongs", 0).toInt());
++	m_bgm->setSfxVolume(config->getOption("bgmSfxMute", 0).toInt() ? 0 : config->getOption("bgmSfxVolume", 0x100).toInt());
++	m_bgm->setOutputVolume(config->getOption("volume", 0x100).toInt(), config->getOption("mute", 0).toInt());
+ 
+ 	QSize sizeBefore = screenDimensions();
+ 	m_activeBuffer.resize(256 * 224 * sizeof(color_t));
+@@ -1085,12 +1102,13 @@ void CoreController::setBattleChipFlavor(int flavor) {
+ 
+ void CoreController::setAVStream(mAVStream* stream) {
+ 	Interrupter interrupter(this);
+-	m_threadContext.core->setAVStream(m_threadContext.core, stream);
++	m_threadContext.core->setAVStream(m_threadContext.core, m_bgm->wrapStream(stream, m_threadContext.core));
+ }
+ 
+ void CoreController::clearAVStream() {
+ 	Interrupter interrupter(this);
+ 	m_threadContext.core->setAVStream(m_threadContext.core, nullptr);
++	m_bgm->unwrapStream();
+ }
+ 
+ void CoreController::clearOverride() {
+@@ -1241,7 +1259,7 @@ void CoreController::updatePlayerSave() {
+ void CoreController::updateFastForward() {
+ 	// If we have "Fast forward" checked in the menu (m_fastForwardForced)
+ 	// or are holding the fast forward button (m_fastForward):
+-	if (m_fastForward || m_fastForwardForced) {
++	if ((m_fastForward || m_fastForwardForced) && !m_bgmSpeedHold) {
+ 		if (m_fastForwardVolume >= 0) {
+ 			m_threadContext.core->opts.volume = m_fastForwardVolume;
+ 		}
+diff --git a/src/platform/qt/CoreController.h b/src/platform/qt/CoreController.h
+index e2cd03c12..d6f8d21f0 100644
+--- a/src/platform/qt/CoreController.h
++++ b/src/platform/qt/CoreController.h
+@@ -12,6 +12,7 @@
+ #include <QObject>
+ #include <QSize>
+ 
++#include "BgmReplacer.h"
+ #include "VFileDevice.h"
+ 
+ #include <functional>
+@@ -259,6 +260,11 @@ private:
+ 
+ 	std::unique_ptr<mCacheSet> m_cacheSet;
+ 	std::unique_ptr<Override> m_override;
++	std::unique_ptr<BgmReplacer> m_bgm;
++public:
++	BgmReplacer* bgmReplacer() { return m_bgm.get(); }  // ff-bgm1x: 소리 분류 창
++private:
++	bool m_bgmSpeedHold = false;  // ff-bgm1x: 연출 중이라 배속을 멈춘 상태
+ 
+ 	uint64_t m_frameCounter;
+ 	QList<std::function<void()>> m_resetActions;
+diff --git a/src/platform/qt/SettingsView.cpp b/src/platform/qt/SettingsView.cpp
+index a5acc6739..996a7536d 100644
+--- a/src/platform/qt/SettingsView.cpp
++++ b/src/platform/qt/SettingsView.cpp
+@@ -474,6 +474,8 @@ void SettingsView::updateConfig() {
+ 	saveSetting("volume", m_ui.volume);
+ 	saveSetting("mute", m_ui.mute);
+ 	saveSetting("fastForwardVolume", m_ui.volumeFf);
++	saveSetting("bgmSfxVolume", m_ui.sfxVolume);
++	saveSetting("bgmSfxMute", m_ui.sfxMute);
+ 	saveSetting("fastForwardMute", m_ui.muteFf);
+ 	saveSetting("rewindEnable", m_ui.rewind);
+ 	saveSetting("rewindBufferCapacity", m_ui.rewindCapacity);
+@@ -701,6 +703,8 @@ void SettingsView::reloadConfig() {
+ 	loadSetting("volume", m_ui.volume, 0x100);
+ 	loadSetting("mute", m_ui.mute, false);
+ 	loadSetting("fastForwardVolume", m_ui.volumeFf, m_ui.volume->value());
++	loadSetting("bgmSfxVolume", m_ui.sfxVolume, 0x100);
++	loadSetting("bgmSfxMute", m_ui.sfxMute, false);
+ 	loadSetting("fastForwardMute", m_ui.muteFf, m_ui.mute->isChecked());
+ 	loadSetting("rewindEnable", m_ui.rewind);
+ 	loadSetting("rewindBufferCapacity", m_ui.rewindCapacity);
+diff --git a/src/platform/qt/SettingsView.ui b/src/platform/qt/SettingsView.ui
+index 6e8e8226b..12d7b933f 100644
+--- a/src/platform/qt/SettingsView.ui
++++ b/src/platform/qt/SettingsView.ui
+@@ -319,14 +319,54 @@
+             </item>
+            </layout>
+           </item>
+-          <item row="7" column="0">
++          <item row="6" column="0">
++           <widget class="QLabel" name="labelSfxVolume">
++            <property name="text">
++             <string notr="true">효과음 볼륨:</string>
++            </property>
++           </widget>
++          </item>
++          <item row="6" column="1">
++           <layout class="QHBoxLayout" name="horizontalLayoutSfxVolume">
++            <item>
++             <widget class="QSlider" name="sfxVolume">
++              <property name="minimumSize">
++               <size>
++                <width>128</width>
++                <height>0</height>
++               </size>
++              </property>
++              <property name="maximum">
++               <number>256</number>
++              </property>
++              <property name="pageStep">
++               <number>16</number>
++              </property>
++              <property name="value">
++               <number>256</number>
++              </property>
++              <property name="orientation">
++               <enum>Qt::Horizontal</enum>
++              </property>
++             </widget>
++            </item>
++            <item>
++             <widget class="QCheckBox" name="sfxMute">
++              <property name="text">
++               <string>Mute</string>
++              </property>
++             </widget>
++            </item>
++           </layout>
++          </item>
++          <item row="8" column="0">
+            <widget class="QLabel" name="label_43">
+             <property name="text">
+              <string>Audio in multiplayer:</string>
+             </property>
+            </widget>
+           </item>
+-          <item row="7" column="1">
++          <item row="8" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioAll">
+             <property name="text">
+              <string>All windows</string>
+@@ -339,7 +379,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="8" column="1">
++          <item row="9" column="1">
+            <widget class="QRadioButton" name="multiplayerAudio1">
+             <property name="text">
+              <string>Player 1 window only</string>
+@@ -349,7 +389,7 @@
+             </attribute>
+            </widget>
+           </item>
+-          <item row="9" column="1">
++          <item row="10" column="1">
+            <widget class="QRadioButton" name="multiplayerAudioActive">
+             <property name="text">
+              <string>Currently active player window</string>
+@@ -366,7 +406,7 @@
+             </property>
+            </widget>
+           </item>
+-          <item row="6" column="0" colspan="2">
++          <item row="7" column="0" colspan="2">
+            <widget class="Line" name="line_5">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+diff --git a/src/platform/qt/Window.cpp b/src/platform/qt/Window.cpp
+index 54a69ecf8..1195a74a5 100644
+--- a/src/platform/qt/Window.cpp
++++ b/src/platform/qt/Window.cpp
+@@ -4,6 +4,7 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "Window.h"
++#include "FfSoundCatalogDialog.h"
+ 
+ #include <QKeyEvent>
+ #include <QKeySequence>
+@@ -797,6 +798,7 @@ void Window::hideEvent(QHideEvent* event) {
+ }
+ 
+ void Window::closeEvent(QCloseEvent* event) {
++	FfSoundCatalogDialog::closeIfOpen();  // ff-bgm1x: 소리 분류 창을 먼저 닫는다
+ 	emit shutdown();
+ 	m_config->setQtOption("windowPos", pos(), m_playerId > 0 ? QString("player%0").arg(m_playerId) : QString());
+ 	m_config->setQtOption("maximized", isMaximized());
+@@ -1613,6 +1615,69 @@ void Window::setupMenu(QMenuBar* menubar) {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 배속 중에도 BGM 을 1배속으로 재생 (기본값 켜짐)
++	if (m_config->getOption("bgmReplace").isNull()) {
++		m_config->setOption("bgmReplace", 1);
++	}
++	ConfigOption* bgmReplace = m_config->addOption("bgmReplace");
++	Action* bgmReplaceAction = bgmReplace->addBoolean(QString::fromUtf8("BGM 1배속 유지"), &m_actions, "av");
++	bgmReplaceAction->setActive(m_config->getOption("bgmReplace").toInt());
++	bgmReplace->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: 연출(반복 없는 긴 곡)이 나오는 동안에도 배속할지 (기본값 꺼짐: 연출은 1배속)
++	if (m_config->getOption("bgmFfCutscenes").isNull()) {
++		m_config->setOption("bgmFfCutscenes", 0);
++	}
++	ConfigOption* bgmFfCutscenes = m_config->addOption("bgmFfCutscenes");
++	Action* bgmFfCutscenesAction = bgmFfCutscenes->addBoolean(QString::fromUtf8("연출 중에도 배속"), &m_actions, "av");
++	bgmFfCutscenesAction->setActive(m_config->getOption("bgmFfCutscenes").toInt());
++	bgmFfCutscenes->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: GBA 게임의 효과음도 1배속으로 (기본값 켜짐)
++	if (m_config->getOption("bgmSfx1x").isNull()) {
++		m_config->setOption("bgmSfx1x", 1);
++	}
++	ConfigOption* bgmSfx1x = m_config->addOption("bgmSfx1x");
++	Action* bgmSfx1xAction = bgmSfx1x->addBoolean(QString::fromUtf8("효과음 1배속"), &m_actions, "av");
++	bgmSfx1xAction->setActive(m_config->getOption("bgmSfx1x").toInt());
++	bgmSfx1x->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: RAM 곡 읽기 (기본값 꺼짐). 켜면 울음소리처럼 게임이 RAM 에 만든 곡도, 소리 분류 창에서
++	// 1배속으로 정했을 때 그 순간의 RAM 을 복사해 1배속으로 낸다
++	if (m_config->getOption("bgmRamSongs").isNull()) {
++		m_config->setOption("bgmRamSongs", 0);
++	}
++	ConfigOption* bgmRamSongs = m_config->addOption("bgmRamSongs");
++	Action* bgmRamSongsAction = bgmRamSongs->addBoolean(QString::fromUtf8("RAM 곡 읽기"), &m_actions, "av");
++	bgmRamSongsAction->setActive(m_config->getOption("bgmRamSongs").toInt());
++	bgmRamSongs->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
++	// ff-bgm1x: 소리 분류 창 (단축키는 설정 > 단축키에서 직접 지정, 기본 없음)
++	m_actions.addAction(QString::fromUtf8("소리 분류..."), "ffbgmSoundCatalog", [this]() {
++		FfSoundCatalogDialog::Hooks hooks;
++		hooks.bgm = [this]() -> BgmReplacer* {
++			return m_controller ? m_controller->bgmReplacer() : nullptr;
++		};
++		hooks.isRunning = [this]() {
++			return m_controller && !m_controller->isPaused();
++		};
++		hooks.pause = [this]() {
++			if (m_controller) m_controller->setPaused(true);
++		};
++		hooks.resume = [this]() {
++			if (m_controller) m_controller->setPaused(false);
++		};
++		FfSoundCatalogDialog::open(this, std::move(hooks));
++	}, "av");
++
+ 	m_actions.addMenu(tr("FPS target"),"target", "av");
+ 	ConfigOption* fpsTargetOption = m_config->addOption("fpsTarget");
+ 	QMap<double, Action*> fpsTargets;
+@@ -1836,6 +1901,16 @@ void Window::setupOptions() {
+ 		reloadConfig();
+ 	}, this);
+ 
++	// ff-bgm1x: 효과음 볼륨
++	ConfigOption* sfxVolume = m_config->addOption("bgmSfxVolume");
++	sfxVolume->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++	ConfigOption* sfxMute = m_config->addOption("bgmSfxMute");
++	sfxMute->connect([this](const QVariant&) {
++		reloadConfig();
++	}, this);
++
+ 	ConfigOption* muteFf = m_config->addOption("fastForwardMute");
+ 	muteFf->connect([this](const QVariant&) {
+ 		reloadConfig();
+diff --git a/src/platform/sdl/sdl-audio.c b/src/platform/sdl/sdl-audio.c
+index f1666aa4e..14400f30f 100644
+--- a/src/platform/sdl/sdl-audio.c
++++ b/src/platform/sdl/sdl-audio.c
+@@ -18,6 +18,8 @@ mLOG_DEFINE_CATEGORY(SDL_AUDIO, "SDL Audio", "platform.sdl.audio");
+ 
+ static void _mSDLAudioCallback(void* context, Uint8* data, int len);
+ 
++void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate) = NULL;
++
+ bool mSDLInitAudio(struct mSDLAudio* context, struct mCoreThread* threadContext) {
+ #if defined(_WIN32) && SDL_VERSION_ATLEAST(2, 0, 8)
+ 	if (!getenv("SDL_AUDIODRIVER")) {
+@@ -127,6 +129,9 @@ static void _mSDLAudioCallback(void* context, Uint8* data, int len) {
+ 	if (audioContext->sync) {
+ 		mCoreSyncConsumeAudio(audioContext->sync);
+ 	}
++	if (mSDLAudioPostMix && audioContext->obtainedSpec.channels == 2) {
++		mSDLAudioPostMix((int16_t*) data, available, audioContext->obtainedSpec.freq);
++	}
+ 	if (available < len) {
+ 		memset(((short*) data) + audioContext->obtainedSpec.channels * available, 0, (len - available) * audioContext->obtainedSpec.channels * sizeof(short));
+ 	}
+diff --git a/src/platform/sdl/sdl-audio.h b/src/platform/sdl/sdl-audio.h
+index 2ae920af4..5c556a55d 100644
+--- a/src/platform/sdl/sdl-audio.h
++++ b/src/platform/sdl/sdl-audio.h
+@@ -46,6 +46,9 @@ void mSDLDeinitAudio(struct mSDLAudio* context);
+ void mSDLPauseAudio(struct mSDLAudio* context);
+ void mSDLResumeAudio(struct mSDLAudio* context);
+ 
++// ff-bgm1x: 실시간 출력(스테레오 int16)에 덧붙여 섞을 훅. NULL 이면 사용하지 않는다.
++extern void (*mSDLAudioPostMix)(int16_t* samples, int frames, int sampleRate);
++
+ CXX_GUARD_END
+ 
+ #endif

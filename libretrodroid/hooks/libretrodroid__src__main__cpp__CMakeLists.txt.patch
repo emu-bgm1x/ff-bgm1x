@@ -1,0 +1,13 @@
+diff --git a/libretrodroid/src/main/cpp/CMakeLists.txt b/libretrodroid/src/main/cpp/CMakeLists.txt
+index 5a845df..e0f1222 100644
+--- a/libretrodroid/src/main/cpp/CMakeLists.txt
++++ b/libretrodroid/src/main/cpp/CMakeLists.txt
+@@ -64,6 +64,8 @@ add_library(libretrodroid SHARED
+         rumble.cpp
+         rumblestate.h
+         rumblestate.cpp
++        sensors.h
++        sensors.cpp
+         utils/javautils.h
+         utils/javautils.cpp
+         utils/utils.cpp

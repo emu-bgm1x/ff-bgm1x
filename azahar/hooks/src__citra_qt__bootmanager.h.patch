@@ -1,0 +1,20 @@
+diff --git a/src/citra_qt/bootmanager.h b/src/citra_qt/bootmanager.h
+index 9bd922e..d4f9bfa 100644
+--- a/src/citra_qt/bootmanager.h
++++ b/src/citra_qt/bootmanager.h
+@@ -4,6 +4,7 @@
+ 
+ #pragma once
+ 
++#include "audio_core/hle/bgm_replacer.h"
+ #include <atomic>
+ #include <condition_variable>
+ #include <memory>
+@@ -54,6 +55,7 @@ public:
+      * @note This function is thread-safe
+      */
+     void SetRunning(bool running) {
++        AudioCore::HLE::BgmReplacer::Instance().SetEmulationRunning(running);  // ff-bgm1x
+         std::unique_lock lock{running_mutex};
+         this->running = running;
+         lock.unlock();

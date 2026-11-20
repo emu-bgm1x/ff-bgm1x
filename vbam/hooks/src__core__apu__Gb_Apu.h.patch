@@ -1,0 +1,28 @@
+diff --git a/src/core/apu/Gb_Apu.h b/src/core/apu/Gb_Apu.h
+index 8fe53e6..b89ff05 100644
+--- a/src/core/apu/Gb_Apu.h
++++ b/src/core/apu/Gb_Apu.h
+@@ -59,6 +59,9 @@ class Gb_Apu
+         // Sets overall volume, where 1.0 is normal.
+         void volume(double);
+ 
++        // ff-bgm1x: per-oscillator volume multiplier (1.0 = unchanged)
++        void osc_gain(int osc, double gain);
++
+         // If true, reduces clicking by disabling DAC biasing. Note that this reduces
+         // emulation accuracy, since the clicks are authentic.
+         void reduce_clicks(bool reduce = true);
+@@ -132,8 +135,11 @@ class Gb_Apu
+         uint8_t regs[regs_size]; // last values written to registers
+ 
+         // large objects after everything else
+-        Gb_Osc::Good_Synth good_synth;
+-        Gb_Osc::Med_Synth med_synth;
++        // ff-bgm1x: one synth pair per oscillator so each channel can have its own volume
++        Gb_Osc::Good_Synth good_synth[osc_count];
++        Gb_Osc::Med_Synth med_synth[osc_count];
++        double osc_gain_[osc_count];
++        int synth_iv_;
+ 
+         void reset_lengths();
+         void reset_regs();

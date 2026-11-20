@@ -1,0 +1,40 @@
+diff --git a/libgambatte/src/sound.cpp b/libgambatte/src/sound.cpp
+index ecd6832..e1449cd 100644
+--- a/libgambatte/src/sound.cpp
++++ b/libgambatte/src/sound.cpp
+@@ -98,10 +98,11 @@ namespace gambatte
+    {
+       uint_least32_t *const buf = buffer_ + bufferPos_;
+       std::memset(buf, 0, cycles * sizeof(uint_least32_t));
+-      ch1_.update(buf, soVol_, cycles);
+-      ch2_.update(buf, soVol_, cycles);
+-      ch3_.update(buf, soVol_, cycles);
+-      ch4_.update(buf, soVol_, cycles);
++      /* ff-bgm1x: 채널별 볼륨 (기본 256 = 그대로) */
++      ch1_.update(buf, ffbgmGain_[0] == 256 ? soVol_ : soVol_ * ffbgmGain_[0] >> 8, cycles);
++      ch2_.update(buf, ffbgmGain_[1] == 256 ? soVol_ : soVol_ * ffbgmGain_[1] >> 8, cycles);
++      ch3_.update(buf, ffbgmGain_[2] == 256 ? soVol_ : soVol_ * ffbgmGain_[2] >> 8, cycles);
++      ch4_.update(buf, ffbgmGain_[3] == 256 ? soVol_ : soVol_ * ffbgmGain_[3] >> 8, cycles);
+    }
+ 
+    void PSG::generateSamples(unsigned long const cycleCounter, bool const doubleSpeed)
+@@ -185,8 +186,18 @@ namespace gambatte
+             +  ((nr50 >> 4 & 0x7) + 1) * so2Mul) * 64;
+    }
+ 
+-   void PSG::mapSo(const unsigned nr51)
++   void PSG::setFfbgmMuteMask(const unsigned mask)
+    {
++      if (mask == ffbgmMute_)
++         return;
++      ffbgmMute_ = mask;
++      mapSo(lastNr51_);
++   }
++
++   void PSG::mapSo(const unsigned nr51raw)
++   {
++      lastNr51_ = nr51raw;
++      const unsigned nr51 = nr51raw & ~(ffbgmMute_ * 0x11u);
+       const unsigned long tmp = nr51 * so1Mul + (nr51 >> 4) * so2Mul;
+ 
+       ch1_.setSo((tmp      & 0x00010001) * 0xFFFF);

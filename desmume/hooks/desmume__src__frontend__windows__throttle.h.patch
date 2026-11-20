@@ -1,0 +1,12 @@
+diff --git a/desmume/src/frontend/windows/throttle.h b/desmume/src/frontend/windows/throttle.h
+index 82ab654..7488a64 100644
+--- a/desmume/src/frontend/windows/throttle.h
++++ b/desmume/src/frontend/windows/throttle.h
+@@ -19,6 +19,7 @@
+ #define _THROTTLE_H_
+ 
+ extern int FastForward;
++extern int FastForwardSpeed; // ff-bgm1x: fast forward multiplier (0 = unlimited)
+ extern bool FrameLimit;
+ void IncreaseSpeed();
+ void DecreaseSpeed();

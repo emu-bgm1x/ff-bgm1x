@@ -1,0 +1,17 @@
+diff --git a/src/android/app/src/main/res/menu/menu_in_game.xml b/src/android/app/src/main/res/menu/menu_in_game.xml
+index f7e9017..220f669 100644
+--- a/src/android/app/src/main/res/menu/menu_in_game.xml
++++ b/src/android/app/src/main/res/menu/menu_in_game.xml
+@@ -52,6 +52,12 @@
+         android:icon="@drawable/ic_unlocked"
+         android:title="@string/lock_drawer" />
+ 
++    <!-- ff-bgm1x: 소리 분류 (1x Lab 앱에서만 보인다) -->
++    <item
++        android:id="@+id/menu_ff_sound_catalog"
++        android:icon="@drawable/ic_code"
++        android:title="@string/ff_sound_catalog" />
++
+     <item
+         android:id="@+id/menu_cheats"
+         android:icon="@drawable/ic_code"

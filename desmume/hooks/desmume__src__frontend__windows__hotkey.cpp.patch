@@ -1,0 +1,56 @@
+diff --git a/desmume/src/frontend/windows/hotkey.cpp b/desmume/src/frontend/windows/hotkey.cpp
+index 4bdab10..39cfd8b 100644
+--- a/desmume/src/frontend/windows/hotkey.cpp
++++ b/desmume/src/frontend/windows/hotkey.cpp
+@@ -25,6 +25,7 @@
+ #include <Shellapi.h>
+ 
+ #include "hotkey.h"
++#include "../../ffbgm/ffbgm.h"
+ 
+ #include "NDSSystem.h"
+ #include "saves.h"
+@@ -528,6 +529,18 @@ void HK_FrameLimitToggle(int, bool justPressed) {
+ 	WritePrivateProfileInt("FrameLimit", "FrameLimit", FrameLimit, IniName);
+ }
+ 
++void HK_FfbgmBgm1xToggle(int, bool justPressed) {
++	ffbgm_setBgm1x(!ffbgm_bgm1x());
++	WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Bgm1x", ffbgm_bgm1x(), (char*)IniName);
++}
++void HK_FfbgmSoundWindow(int, bool justPressed) {
++	ffbgm_openSoundWindow(MainWindow->getHWnd());
++}
++void HK_FfbgmCutsceneToggle(int, bool justPressed) {
++	ffbgm_setFfCutscenes(!ffbgm_ffCutscenes());
++	WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"FfCutscenes", ffbgm_ffCutscenes(), (char*)IniName);
++}
++
+ void HK_FrameAdvanceKeyDown(int, bool justPressed) { FrameAdvance(true); }
+ void HK_FrameAdvanceKeyUp(int) { FrameAdvance(false); }
+ 
+@@ -696,6 +709,24 @@ void InitCustomKeys (SCustomKeys *keys)
+ 	keys->FrameLimitToggle.page = HOTKEY_PAGE_MAIN;
+ 	keys->FrameLimitToggle.key = NULL;
+ 
++	keys->FfbgmBgm1xToggle.handleKeyDown = HK_FfbgmBgm1xToggle;
++	keys->FfbgmBgm1xToggle.code = "FfbgmBgm1xToggle";
++	keys->FfbgmBgm1xToggle.name = STRW(ID_LABEL_HK_FFBGM);
++	keys->FfbgmBgm1xToggle.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmBgm1xToggle.key = NULL;
++
++	keys->FfbgmCutsceneToggle.handleKeyDown = HK_FfbgmCutsceneToggle;
++	keys->FfbgmCutsceneToggle.code = "FfbgmCutsceneToggle";
++	keys->FfbgmCutsceneToggle.name = STRW(ID_LABEL_HK_FFCUTSCENE);
++	keys->FfbgmCutsceneToggle.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmCutsceneToggle.key = NULL;
++
++	keys->FfbgmSoundWindow.handleKeyDown = HK_FfbgmSoundWindow;
++	keys->FfbgmSoundWindow.code = "FfbgmSoundWindow";
++	keys->FfbgmSoundWindow.name = STRW(ID_LABEL_HK_FFSOUNDWIN);
++	keys->FfbgmSoundWindow.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmSoundWindow.key = NULL;
++
+ 	keys->IncreasePressure.handleKeyDown = HK_IncreasePressure;
+ 	keys->IncreasePressure.code = "IncreasePressure";
+ 	keys->IncreasePressure.name = STRW(ID_LABEL_HK55);

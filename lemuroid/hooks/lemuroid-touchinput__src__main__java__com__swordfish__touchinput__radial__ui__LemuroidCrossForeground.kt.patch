@@ -1,0 +1,18 @@
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidCrossForeground.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidCrossForeground.kt
+index 37f0aef3..9a0bae32 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidCrossForeground.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidCrossForeground.kt
+@@ -21,6 +21,13 @@ fun LemuroidCrossForeground(
+     allowDiagonals: Boolean,
+     directionState: State<Offset>,
+ ) {
++    // ff-bgm1x: 스킨에 십자키 그림이 있으면 누른 방향의 그림을 그린다
++    val skin = com.swordfish.touchinput.radial.custom.LocalFfSkinImages.current
++    val image = skin?.cross(directionState.value)
++    if (image != null) {
++        com.swordfish.touchinput.radial.custom.FfSkinImage(image)
++        return
++    }
+     DefaultCrossForeground(
+         modifier = Modifier.fillMaxSize(),
+         directionState = directionState,

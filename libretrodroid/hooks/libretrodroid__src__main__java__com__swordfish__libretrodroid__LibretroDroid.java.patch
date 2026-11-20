@@ -1,0 +1,27 @@
+diff --git a/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java b/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
+index 50eafa1..c83658d 100644
+--- a/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
++++ b/libretrodroid/src/main/java/com/swordfish/libretrodroid/LibretroDroid.java
+@@ -112,6 +112,8 @@ public class LibretroDroid {
+     public static native void setRumbleEnabled(boolean enabled);
+     public static native void setFrameSpeed(int speed);
+     public static native void setAudioEnabled(boolean enabled);
++    // ff-bgm1x: 센서 축 변환용 화면 회전 (Surface.ROTATION_0..3)
++    public static native void setScreenRotation(int rotation);
+     public static native void setShaderConfig(GLRetroShader shader);
+     public static native void setViewport(float x, float y, float width, float height);
+     public static native void setViewportAlignment(int viewportAlignment);
+@@ -138,6 +140,13 @@ public class LibretroDroid {
+     public static native void onKeyEvent(int port, int action, int keyCode);
+ 
+     public static native void refreshAspectRatio();
++    // ff-bgm1x: 게임 화면 늘이기, 게임 화면 비율 (가로/세로)
++    public static native void setStretch(boolean stretch);
++    public static native float getAspectRatio();
++    // ff-bgm1x 소리 분류: 코어에 문자열 명령 (코어가 지원하지 않으면 "error\t...")
++    public static native String catalogCommand(String cmd);
++    // ff-bgm1x 소리 분류: 재생 소리를 buffer(스테레오 int16, frames*2 칸)에 더한다. 재생 중이 아니면 0
++    public static native int previewRender(short[] buffer, int frames, int sampleRate);
+ 
+     public static native Controller[][] getControllers();
+     public static native void setControllerType(int port, int type);

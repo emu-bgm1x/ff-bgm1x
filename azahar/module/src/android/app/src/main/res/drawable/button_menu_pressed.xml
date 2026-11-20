@@ -1,0 +1,17 @@
+<!-- ff-bgm1x: 화면 메뉴 버튼 (눌림) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="99.27"
+    android:viewportHeight="99.27">
+    <path
+        android:fillAlpha="0.5"
+        android:fillColor="#151515"
+        android:pathData="M49.64,49.64m-49.64,0a49.64,49.64 0,1 1,99.28 0a49.64,49.64 0,1 1,-99.28 0"
+        android:strokeAlpha="0.5" />
+    <path
+        android:fillAlpha="0.75"
+        android:fillColor="#fff"
+        android:pathData="M27,31h45.27v7h-45.27zM27,46.14h45.27v7h-45.27zM27,61.27h45.27v7h-45.27z"
+        android:strokeAlpha="0.75" />
+</vector>

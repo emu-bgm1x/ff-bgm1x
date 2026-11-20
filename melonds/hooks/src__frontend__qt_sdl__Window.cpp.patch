@@ -1,0 +1,74 @@
+diff --git a/src/frontend/qt_sdl/Window.cpp b/src/frontend/qt_sdl/Window.cpp
+index 9b3ab95..7529e17 100755
+--- a/src/frontend/qt_sdl/Window.cpp
++++ b/src/frontend/qt_sdl/Window.cpp
+@@ -77,6 +77,8 @@
+ //#include "main_shaders.h"
+ 
+ #include "EmuInstance.h"
++#include "BgmReplacer.h"  // ff-bgm1x
++#include "SoundCatalogDialog.h"  // ff-bgm1x
+ #include "ArchiveUtil.h"
+ #include "CameraManager.h"
+ #include "Window.h"
+@@ -669,6 +671,42 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
+             actAudioSync = menu->addAction("Audio sync");
+             actAudioSync->setCheckable(true);
+             connect(actAudioSync, &QAction::triggered, this, &MainWindow::onChangeAudioSync);
++
++            // ff-bgm1x
++            menu->addSeparator();
++            actBgm1x = menu->addAction("Keep BGM at 1x speed");
++            actBgm1x->setCheckable(true);
++            connect(actBgm1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->requestEnabled(checked);
++                emuInstance->getLocalConfig().SetBool("Bgm1x", checked);
++                Config::Save();
++            });
++            actFfCutscenes = menu->addAction("Fast forward during cutscenes");
++            actFfCutscenes->setCheckable(true);
++            connect(actFfCutscenes, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setFastForwardCutscenes(checked);
++                emuInstance->getLocalConfig().SetBool("FfCutscenes", checked);
++                Config::Save();
++            });
++            actMenuSounds1x = menu->addAction("Keep sound effects at 1x speed");
++            actMenuSounds1x->setCheckable(true);
++            connect(actMenuSounds1x, &QAction::triggered, this, [this](bool checked)
++            {
++                emuInstance->bgmReplacer->setSfx1x(checked);
++                emuInstance->getLocalConfig().SetBool("MenuSounds1x", checked);
++                Config::Save();
++            });
++            QAction* actSoundCatalog = menu->addAction("Sound classification... (ff-bgm1x)");
++            connect(actSoundCatalog, &QAction::triggered, this, &MainWindow::onOpenSoundCatalog);
++            // 단축키로 바꾼 값도 메뉴를 열 때 반영한다
++            connect(menu, &QMenu::aboutToShow, this, [this]
++            {
++                actBgm1x->setChecked(emuInstance->bgmReplacer->wantEnabled());
++                actFfCutscenes->setChecked(emuInstance->bgmReplacer->fastForwardCutscenes());
++                actMenuSounds1x->setChecked(emuInstance->bgmReplacer->sfxAt1x());
++            });
+         }
+         {
+             QMenu * menu = menubar->addMenu("Help");
+@@ -826,8 +864,17 @@ void MainWindow::saveEnabled(bool enabled)
+     enabledSaved = true;
+ }
+ 
++// ff-bgm1x: 소리 분류 창 (메뉴, 단축키)
++void MainWindow::onOpenSoundCatalog()
++{
++    if (emuInstance) SoundCatalogDialog::openDlg(this, emuInstance);
++}
++
+ void MainWindow::closeEvent(QCloseEvent* event)
+ {
++    // ff-bgm1x: 소리 분류 창이 열려 있으면 먼저 닫는다 (에뮬레이터가 정리된 뒤에 닫히면 사라진 것을 건드린다)
++    SoundCatalogDialog::closeFor(emuInstance);
++
+     if (emuInstance)
+     {
+         if (windowID == 0)

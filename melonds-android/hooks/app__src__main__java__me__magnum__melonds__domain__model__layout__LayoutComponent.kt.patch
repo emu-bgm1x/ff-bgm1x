@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/me/magnum/melonds/domain/model/layout/LayoutComponent.kt b/app/src/main/java/me/magnum/melonds/domain/model/layout/LayoutComponent.kt
+index bfc3e998..6f52d631 100644
+--- a/app/src/main/java/me/magnum/melonds/domain/model/layout/LayoutComponent.kt
++++ b/app/src/main/java/me/magnum/melonds/domain/model/layout/LayoutComponent.kt
+@@ -20,7 +20,9 @@ enum class LayoutComponent(val matchingInputs: List<Input>) {
+     BUTTON_QUICK_SAVE(listOf(Input.QUICK_SAVE)),
+     BUTTON_QUICK_LOAD(listOf(Input.QUICK_LOAD)),
+     BUTTON_REWIND(listOf(Input.REWIND)),
+-    BUTTON_MICROPHONE_TOGGLE(listOf(Input.MICROPHONE));
++    BUTTON_MICROPHONE_TOGGLE(listOf(Input.MICROPHONE)),
++    // ff-bgm1x: 소리 분류 화면 (1x Lab 앱에서만 배치할 수 있다)
++    BUTTON_SOUND_CATALOG(listOf(Input.SOUND_CATALOG));
+ 
+     fun isScreen(): Boolean {
+         return this == TOP_SCREEN || this == BOTTOM_SCREEN

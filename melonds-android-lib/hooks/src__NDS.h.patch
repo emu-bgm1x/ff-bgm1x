@@ -1,0 +1,16 @@
+diff --git a/src/NDS.h b/src/NDS.h
+index 17e656e..503076e 100644
+--- a/src/NDS.h
++++ b/src/NDS.h
+@@ -250,6 +250,11 @@ private:
+ public: // TODO: Encapsulate the rest of these members
+     void* UserData;
+ 
++    // ff-bgm1x: ARM9 이 IPC FIFO 에 값을 쓸 때마다 불린다 (사운드 명령을 지켜보는 용도)
++    void (*SoundFifoHook)(NDS& nds, u32 fifoword) = nullptr;
++    // ff-bgm1x: 게임이 카트에서 롬 데이터를 읽을 때마다 불린다 (스트림(STRM) 곡이 나오는지 알아보는 용도)
++    void (*CartReadHook)(NDS& nds, u32 addr, u32 len) = nullptr;
++
+     int ConsoleType;
+     int CurCPU;
+ 

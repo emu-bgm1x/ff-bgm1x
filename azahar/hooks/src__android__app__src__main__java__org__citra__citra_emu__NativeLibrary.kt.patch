@@ -1,0 +1,25 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+index b72ed24..075d222 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
+@@ -208,6 +208,11 @@ object NativeLibrary {
+      */
+     external fun getRunningTitleId(): Long
+ 
++    // ff-bgm1x 소리 분류 (1x Lab 앱): 문자열 명령, 재생 소리
++    external fun catalogCommand(cmd: String): String
++
++    external fun previewRender(buffer: ShortArray, frames: Int, sampleRate: Int): Int
++
+     /**
+      * Returns the performance stats for the current game
+      */
+@@ -1087,6 +1092,8 @@ object NativeLibrary {
+         const val BUTTON_GPIO14 = 782
+         const val BUTTON_SWAP = 800
+         const val BUTTON_TURBO = 801
++        // ff-bgm1x: 화면 메뉴 버튼 (한 번 누르면 에뮬레이션 메뉴를 연다, 코어에는 의미 없음)
++        const val BUTTON_MENU = 802
+     }
+ 
+     /**

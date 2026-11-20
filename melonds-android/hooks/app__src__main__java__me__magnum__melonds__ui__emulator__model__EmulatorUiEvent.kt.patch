@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
+index 084098ac..89a90b9b 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
+@@ -9,6 +9,7 @@ sealed class EmulatorUiEvent {
+     sealed class OpenScreen : EmulatorUiEvent() {
+         data object SettingsScreen : OpenScreen()
+         data class CheatsScreen(val romInfo: RomInfo) : OpenScreen()
++        data object SoundCatalogScreen : OpenScreen()  // ff-bgm1x
+     }
+     data class ShowPauseMenu(val pauseMenu: PauseMenu) : EmulatorUiEvent()
+     data class ShowRewindWindow(val rewindWindow: RewindWindow, val windowPosition: RewindWindowPosition) : EmulatorUiEvent()

@@ -1,0 +1,20 @@
+diff --git a/desmume/src/addons/slot1comp_protocol.cpp b/desmume/src/addons/slot1comp_protocol.cpp
+index abeaded..c69725c 100644
+--- a/desmume/src/addons/slot1comp_protocol.cpp
++++ b/desmume/src/addons/slot1comp_protocol.cpp
+@@ -16,6 +16,7 @@
+ */
+ 
+ #include "slot1comp_protocol.h"
++#include "../ffbgm/ffbgm.h"  // ff-bgm1x
+ 
+ #include <string.h>
+ 
+@@ -149,6 +150,7 @@ void Slot1Comp_Protocol::write_command_NORMAL(GC_Command theCommand)
+ #endif
+ 			address = (u32)((cmd64 >> 24));
+ 			length = 0x200;
++			ffbgm_onCartRead(address);  // ff-bgm1x: detect streamed songs (STRM)
+ 
+ 			client->slot1client_startOperation(operation);
+ 		}

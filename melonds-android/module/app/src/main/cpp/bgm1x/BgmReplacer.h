@@ -1,0 +1,223 @@
+// ff-bgm1x: 배속과 관계없이 BGM 을 1배속으로 유지한다 (자체 재생기 방식).
+//
+// 게임(ARM9)은 사운드 CPU(ARM7)에 "시퀀스 시작/정지/음량" 같은 명령을 보내고, 연주는 ARM7 의 드라이버가 한다.
+// 1) 그 명령을 지켜보다가 음악 시퀀스가 시작되면, 같은 시퀀스를 자체 재생기(NitroSynth)로 실제 시간에 연주한다.
+// 2) 원본에서는 음악 플레이어의 페이더 명령 값을 무음으로 바꿔, BGM 이 소리 없이 계속 연주되게 한다.
+//    (게임이 곡의 끝이나 페이드를 기다리는 동작은 그대로 유지된다)
+// 3) 그 뒤 게임이 음악 플레이어에 보내는 명령(음량, 정지, 일시정지 등)은 자체 재생기에도 적용한다.
+// 4) 스트림 곡(STRM, 녹음된 소리를 게임이 롬에서 조금씩 읽어 흘려보내는 곡)은 사운드 명령에 곡 번호가 없어서,
+//    게임이 카트에서 읽는 롬 위치로 어느 STRM 이 나오는지 안다. 기본은 연출(나오는 동안 배속 멈춤).
+//    사용자가 BGM 등으로 지정하면 원본 스트림 채널을 출력에서 빼고 같은 파일을 NitroStrm 으로 1배속으로 낸다.
+// 5) 소리마다 사용자가 분류를 정할 수 있다 (SoundCatalog: 롬 소리 목록, 나온 소리 목록, 게임별 파일).
+#ifndef BGMREPLACER_H
+#define BGMREPLACER_H
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "NitroStrm.h"
+#include "NitroSynth.h"
+#include "SoundCatalog.h"
+#include "types.h"
+
+namespace melonDS
+{
+class NDS;
+}
+
+// Android 판: Qt 의 EmuInstance 대신 지금 코어와 오디오 출력 샘플레이트, 소리 분류 파일 폴더를 알려 주는 쪽
+class BgmReplacerHost
+{
+public:
+    virtual ~BgmReplacerHost() = default;
+    virtual melonDS::NDS* bgmNds() = 0;
+    virtual int bgmAudioFreq() = 0;
+    virtual std::string bgmStorageDir() = 0;
+};
+
+class BgmReplacer
+{
+public:
+    explicit BgmReplacer(BgmReplacerHost* host);
+    ~BgmReplacer();
+
+    // 끄면 원본 멜론DS 와 똑같이 동작한다. 바꾼 설정은 다음 곡부터 적용된다.
+    void setEnabled(bool on);
+    bool isEnabled() const { return enabled; }
+    // 메뉴(화면 스레드)에서 바꿀 때: 다음 프레임에 에뮬레이션 스레드가 적용한다
+    void requestEnabled(bool on) { wanted = on; }
+    bool wantEnabled() const { return wanted; }
+
+    // 연출(반복 없는 긴 곡이 나오는 장면) 중인지. 에뮬레이션 스레드 전용
+    bool cutsceneActive() const { return cutsceneNow; }
+    // "연출 중에도 배속": 꺼져 있으면 연출 동안에는 배속을 걸어도 1배속으로 돈다
+    void setFastForwardCutscenes(bool on) { ffCutscenes = on; }
+    bool fastForwardCutscenes() const { return ffCutscenes; }
+    // "효과음도 1배속": 음악이 아닌 반복 없는 시퀀스(SSEQ) 소리를 자체 재생기로 1배속 연주한다 (다음 소리부터 적용).
+    // 효과음 묶음(SSAR)에서 트는 소리는 대상이 아니다
+    void setSfx1x(bool on) { sfx1x = on; }
+    bool sfxAt1x() const { return sfx1x; }
+    // 1배속으로 내는 효과음의 볼륨 (0~256, 256 = 그대로)
+    void setSfxVolume(int volume) { sfxVolume = volume; }
+
+    // 에뮬레이션 스레드: 원본 코어가 프레임 하나를 돌린 뒤
+    void afterMainFrame();
+    // 에뮬레이션 스레드: 상태를 불러온 직후 (프레임 번호가 그대로여도 추적을 다시 하게 한다)
+    void onStateLoaded() { forceReset = true; stateLoaded = true; }
+    // 오디오 스레드: 자체 재생기의 소리를 출력에 더한다
+    // freshFrames: stream 에서 이번에 새로 채워진 앞부분의 길이 (그 뒤는 지난번 출력이 남아 있다)
+    void mixInto(melonDS::s16* stream, int frames, int volume, int freshFrames);
+
+    // 롬 소리 목록과 사용자 분류 (분류 창이 쓴다)
+    SoundCatalog& catalog() { return cat; }
+
+private:
+    struct SeqInfo
+    {
+        int group = -1;  // (사운드 아카이브, 플레이어 번호) 묶음
+        int tracks = 0;
+        bool loop = false;
+        float seconds = 0;  // 반복 없는 곡의 길이 (대략)
+        std::string name;
+    };
+    struct Command
+    {
+        melonDS::u32 id;
+        melonDS::u32 arg[4];
+    };
+    struct Player
+    {
+        bool music = false;  // 음악 시퀀스를 자체 재생기로 연주 중인 플레이어
+        bool muted = false;  // 원본 쪽 소리를 끄는 명령이 들어갔는지
+        // 연출 곡(반복 없는 긴 곡, 대체하지 않는다)을 원본이 연주 중인 플레이어
+        bool cutscene = false;
+        melonDS::u32 cutsceneStart = 0, cutsceneEnd = 0;  // 시작한 프레임, 길이로 어림한 끝 프레임
+        bool sfx = false;     // 효과음: 자체 재생기로 1배속 연주 (음악과 달리 다른 곡을 미루거나 끊지 않는다)
+        melonDS::u32 seqBase = 0;  // 시퀀스 데이터 주소 (같은 효과음인지 가린다)
+        melonDS::u32 sfxFrame = 0;   // 효과음을 시작한 게임 프레임
+        melonDS::u64 sfxSample = 0;  // 그때까지 자체 재생기가 만든 출력 샘플 수
+        bool jingle = false;  // 팡파레(반복 없는 짧은 곡): 배속 중에도 끝까지 연주한다
+        bool started = false;
+        // 뒤처진 팡파레가 따라올 때까지 미뤄 둔 동작 (배속 중)
+        bool holdStart = false, holdResume = false;
+        int holdId = -1;       // 기다리는 팡파레 (자체 재생기 번호)
+        double holdUntil = 0;  // 그 팡파레가 여기(초)까지 연주되면 푼다
+        int synthId = -1;  // 자체 재생기의 플레이어 번호
+        // 게임이 의도한 값 (원본에는 페이더만 무음 값으로 바꿔 넣는다)
+        melonDS::u8 prio = 64, volume = 127;
+        melonDS::s16 fader = 0;
+        std::string name;
+        // 분류 창: 이 자리에서 나오는 소리의 이름표·종류·자동 판단 (창을 연 순간 이미 나오고 있던 소리도 목록에 넣으려고)
+        std::string key;
+        int keyType = 0;
+        // 원본 그대로 나오는 소리에 사용자가 정한 볼륨: 페이더에 더하는 값 (0.1dB 단위)
+        bool userVol = false;
+        int userCb = 0;
+        int autoKind = 0;
+    };
+
+    static void fifoHook(melonDS::NDS& nds, melonDS::u32 word);
+    void onSoundFifo(melonDS::u32 word);
+    static void cartHook(melonDS::NDS& nds, melonDS::u32 addr, melonDS::u32 len);
+    void onCartRead(melonDS::u32 addr);
+    void resetTracking();
+    void indexCart();
+    // seqOffset: 사운드 명령으로 받은 시퀀스 시작 위치 (모르면 kNoOffset). 효과음 묶음(SSAR) 안의 소리를 알아볼 때 쓴다.
+    // oneShotHold: 효과음 묶음 소리처럼 길이 0 인 음을 파형 끝까지 울려야 하는지
+    static constexpr melonDS::u32 kNoOffset = 0xFFFFFFFF;
+    // keyOut: 롬 목록에서 찾은 소리의 이름표 (못 찾으면 비움)
+    int classify(melonDS::u32 seqBase, std::string& name, melonDS::u32 seqOffset = kNoOffset, bool* oneShotHold = nullptr,
+                 std::string* keyOut = nullptr);
+    void updateStrm(melonDS::u32 frame);
+    int allocSynth();
+    bool jingleActive(int id) const;
+    double jingleGameSeconds(int id) const;
+    double jingleSynthSeconds(int id) const;
+    bool holdForJingle(Player& pl);
+    void startMusic(int p);
+    void detach(int p);
+    void releaseHeld();
+    bool findDriverPlayers();
+    void recoverFromDriver(const std::array<bool, 16>* skip = nullptr);
+    void reloadKeepingMusic();
+
+    BgmReplacerHost* host;
+    static std::atomic<BgmReplacer*> active;
+    std::atomic<bool> enabled{true};
+    std::atomic<bool> wanted{true};
+    std::atomic<bool> ffCutscenes{false};
+    std::atomic<bool> sfx1x{true};
+    std::atomic<int> sfxVolume{256};
+    bool cutsceneNow = false;
+    float lastSeconds = 0;  // classify 가 마지막으로 본 곡의 길이
+
+    // 원본 코어 추적과 자체 재생기 (에뮬레이션 스레드 전용)
+    melonDS::NDS* lastNds = nullptr;
+    melonDS::u32 lastFrame = 0;
+    melonDS::u32 cartChecksum = 0;
+    bool cartIndexed = false;
+    bool oldCmdLayout = false;  // 초기 SDK 의 사운드 명령 번호를 쓰는 게임 (onSoundFifo)
+    std::array<Player, 16> players{};
+    std::unordered_map<melonDS::u32, SeqInfo> seqIndex;  // CRC32(SSEQ 파일) -> 정보
+    std::vector<bool> groupIsMusic;
+    // SDAT 안 STRM 파일의 데이터 범위 (롬 위치, 시작 순)
+    SoundCatalog cat;
+    std::array<float, 16> userGain{};  // 자체 재생기 번호별 사용자 볼륨 (분류 창, 1 = 그대로)
+    int lastAutoKind = 0;   // classify 가 사용자 분류를 적용하기 전의 자동 판단
+    int lastKeyType = 0;    // classify 가 찾은 소리의 종류 (SoundCatalog::Type_)
+    bool wasCollecting = false;
+    // 소리 분류 창에서 볼륨을 바꾸면 지금 나오는 소리에도 바로 적용한다
+    melonDS::u32 userVolVer = ~0u;
+    void applyUserVolumes();
+    void noteNowPlaying(melonDS::u32 frame);
+    // STRM: 게임이 마지막으로 읽은 STRM 과 그 분류 (에뮬레이션 스레드)
+    const SoundCatalog::StrmEntry* strmLast = nullptr;
+    std::string strmLastKey;
+    int strmLastKind = 0;
+    melonDS::u32 strmLastRead = 0;  // 그 STRM 을 마지막으로 읽은 게임 프레임
+    melonDS::u32 strmCutUntil = 0;  // 이 게임 프레임까지는 연출 STRM 이 나오는 중으로 본다
+    melonDS::u16 strmChannels = 0;  // 게임이 스트림용으로 잡아 둔 하드웨어 채널 (사운드 명령 26/27)
+    NitroStrm::File strmFile[2];    // 1배속으로 내는 STRM (buf 와 같은 번호)
+    std::vector<melonDS::u8> strmBuf[2];  // 그 파일 내용 (앞 파일이 줄어드는 동안 겹치므로 둘)
+    int strmBufNo = 0;
+    const SoundCatalog::StrmEntry* strmFileOf = nullptr;
+    NitroStrm strm;
+    NitroSynth synth;
+    // 게임이 그 자리를 다른 소리에 다시 쓴 뒤에도 끝까지 연주하게 둔 팡파레 (자체 재생기 번호별)
+    std::array<bool, 16> orphan{};
+    // 게임이 그 자리를 다시 쓴 뒤에도 끝까지 울리게 둔 메뉴 효과음 (자체 재생기 번호별)
+    std::array<bool, 16> sfxOrphan{};
+    std::array<melonDS::u32, 16> sfxOrphanSeq{};
+    // 게임이 멈춘 효과음을, 게임 안에서 울린 시간만큼 1배속으로 낸 뒤 멈출 출력 샘플 위치 (자체 재생기 번호별, 0 = 없음)
+    std::array<melonDS::u64, 16> sfxStopAt{};
+    // 같은 효과음을 게임이 되풀이할 때의 간격 (시퀀스 주소별): 마지막으로 게임이 튼 프레임, 마지막으로 1배속으로 낸 실제 시각
+    struct SfxRepeat
+    {
+        melonDS::u32 lastTrigFrame = 0;
+        std::chrono::steady_clock::time_point lastPlay{};
+        bool played = false;
+    };
+    std::unordered_map<melonDS::u32, SfxRepeat> sfxRepeat;
+    // 팡파레를 시작한 시점 (자체 재생기 번호별): 게임 프레임 번호와 자체 재생기의 출력 샘플 수
+    std::array<melonDS::u32, 16> jingleFrame{};
+    std::array<melonDS::u64, 16> jingleSample{};
+    std::vector<melonDS::s16> renderBuf;
+
+    // 자체 재생기가 만든 소리 (에뮬레이션 스레드가 채우고 오디오 스레드가 꺼낸다)
+    std::mutex ringMutex;
+    std::vector<melonDS::s16> ring;  // 스테레오
+    size_t ringRead = 0, ringCount = 0;  // 프레임 단위
+    std::vector<melonDS::s16> lastAdded;  // 지난번에 출력에 더한 값 (오디오 스레드 전용)
+
+    melonDS::u32 driverPlayers = 0;  // ARM7 드라이버의 플레이어 배열 주소 (찾았을 때)
+    bool forceReset = false;
+    bool stateLoaded = false;  // 상태를 불러온 뒤 첫 프레임: 같은 곡은 이어 간다
+    melonDS::u32 sharedWork = 0;  // 드라이버가 상태를 써 주는 공유 영역의 주소
+};
+
+#endif // BGMREPLACER_H

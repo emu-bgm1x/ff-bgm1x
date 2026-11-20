@@ -1,0 +1,23 @@
+diff --git a/src/citra_qt/configuration/configure_audio.h b/src/citra_qt/configuration/configure_audio.h
+index 11fa7e2..e120d9f 100644
+--- a/src/citra_qt/configuration/configure_audio.h
++++ b/src/citra_qt/configuration/configure_audio.h
+@@ -7,6 +7,9 @@
+ #include <memory>
+ #include <QWidget>
+ 
++class QLabel;
++class QSlider;
++
+ namespace Ui {
+ class ConfigureAudio;
+ }
+@@ -43,4 +46,8 @@ private:
+     ConfigurationShared::CheckState realtime_audio;
+     ConfigurationShared::CheckState simulate_headphones_plugged;
+     std::unique_ptr<Ui::ConfigureAudio> ui;
++    // ff-bgm1x: 효과음 볼륨 (전역 설정에서만)
++    QWidget* sfx_volume_row = nullptr;
++    QSlider* sfx_volume_slider = nullptr;
++    QLabel* sfx_volume_indicator = nullptr;
+ };

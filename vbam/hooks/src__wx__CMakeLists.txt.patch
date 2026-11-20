@@ -1,0 +1,31 @@
+diff --git a/src/wx/CMakeLists.txt b/src/wx/CMakeLists.txt
+index 69c05bb..3fc92ba 100644
+--- a/src/wx/CMakeLists.txt
++++ b/src/wx/CMakeLists.txt
+@@ -416,6 +416,26 @@ endif()
+ 
+ target_sources(visualboyadvance-m PRIVATE ${VBAM_WX_COMMON} ${VBAM_ICON_PATH})
+ 
++# ff-bgm1x: keep BGM and sound effects at 1x speed while fast forwarding
++# (GBA: MP2K player, GB/GBC: own player of a 2nd-generation GB sound engine)
++target_sources(visualboyadvance-m PRIVATE
++    ffbgm/bgm_mirror.cpp
++    ffbgm/mp2k_engine.cpp
++    ffbgm/rom.cpp
++    ffbgm/gb_driver_bgm.cpp
++    ffbgm/gsc_player.cpp
++    ffbgm/vbam_bgm.cpp
++    ffbgm/sound_catalog.cpp
++    ffbgm/sound_dialog.cpp
++)
++# ff-bgm1x 파일의 한글 문자열을 UTF-8 그대로 쓰게 한다 (소리 분류 창의 글자)
++if(MSVC)
++    set_source_files_properties(
++        ffbgm/bgm_mirror.cpp ffbgm/gb_driver_bgm.cpp ffbgm/vbam_bgm.cpp
++        ffbgm/sound_catalog.cpp ffbgm/sound_dialog.cpp
++        PROPERTIES COMPILE_OPTIONS "/utf-8")
++endif()
++
+ if(ENABLE_SDL3)
+     target_include_directories(visualboyadvance-m PRIVATE ${SDL3_INCLUDE_DIRS})
+ else()

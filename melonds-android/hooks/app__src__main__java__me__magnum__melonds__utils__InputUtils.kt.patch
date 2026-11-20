@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/me/magnum/melonds/utils/InputUtils.kt b/app/src/main/java/me/magnum/melonds/utils/InputUtils.kt
+index 0e16f920..9ce8fc34 100644
+--- a/app/src/main/java/me/magnum/melonds/utils/InputUtils.kt
++++ b/app/src/main/java/me/magnum/melonds/utils/InputUtils.kt
+@@ -23,5 +23,6 @@ fun getLayoutComponentName(layoutComponent: LayoutComponent): Int {
+         LayoutComponent.BUTTON_QUICK_SAVE -> R.string.input_quick_save
+         LayoutComponent.BUTTON_QUICK_LOAD -> R.string.input_quick_load
+         LayoutComponent.BUTTON_REWIND -> R.string.rewind
++        LayoutComponent.BUTTON_SOUND_CATALOG -> R.string.ff_sound_catalog
+     }
+ }
+\ No newline at end of file

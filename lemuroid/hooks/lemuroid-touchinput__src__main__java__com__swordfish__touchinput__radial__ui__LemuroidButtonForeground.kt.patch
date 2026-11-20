@@ -1,0 +1,23 @@
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidButtonForeground.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidButtonForeground.kt
+index a87efd8f..4ff36fab 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidButtonForeground.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/ui/LemuroidButtonForeground.kt
+@@ -46,6 +46,18 @@ fun LemuroidButtonForeground(
+     iconScale: Float = 0.5f,
+     labelScale: Float = 1.0f,
+ ) {
++    // ff-bgm1x: 스킨에 이 버튼 그림이 있으면 그것을 그린다
++    val skin = com.swordfish.touchinput.radial.custom.LocalFfSkinImages.current
++    if (skin != null) {
++        val context = androidx.compose.ui.platform.LocalContext.current
++        val iconName = icon?.let { runCatching { context.resources.getResourceEntryName(it) }.getOrNull() }
++        val name = com.swordfish.touchinput.radial.custom.FfSkinImages.nameOf(label, iconName)
++        val image = name?.let { skin.button(it, pressed.value) }
++        if (image != null) {
++            com.swordfish.touchinput.radial.custom.FfSkinImage(image)
++            return
++        }
++    }
+     LemuroidButtonForeground(
+         modifier = modifier,
+         pressed = pressed,

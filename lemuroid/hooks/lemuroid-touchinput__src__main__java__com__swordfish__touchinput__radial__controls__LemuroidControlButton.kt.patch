@@ -1,0 +1,22 @@
+diff --git a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
+index 7e1391e7..576b1a5c 100644
+--- a/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
++++ b/lemuroid-touchinput/src/main/java/com/swordfish/touchinput/radial/controls/LemuroidControlButton.kt
+@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.padding
+ import androidx.compose.runtime.Composable
+ import androidx.compose.ui.Modifier
+ import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
++import com.swordfish.touchinput.radial.custom.CustomLayoutKeys
++import com.swordfish.touchinput.radial.custom.customLayoutElement
+ import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
+ import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
+ import gg.padkit.PadKitScope
+@@ -21,7 +23,7 @@ fun LemuroidControlButton(
+ ) {
+     val theme = LocalLemuroidPadTheme.current
+     ControlButton(
+-        modifier = modifier.padding(theme.padding),
++        modifier = modifier.customLayoutElement(CustomLayoutKeys.of(id)).padding(theme.padding),
+         id = id,
+         foreground = { LemuroidButtonForeground(pressed = it, icon = icon, label = label) },
+         background = { LemuroidControlBackground() },

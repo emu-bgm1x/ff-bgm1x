@@ -1,0 +1,311 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+index 63430da..35fea3f 100644
+--- a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
+@@ -67,8 +67,11 @@ import org.citra.citra_emu.databinding.FragmentEmulationBinding
+ import org.citra.citra_emu.display.PortraitScreenLayout
+ import org.citra.citra_emu.display.ScreenAdjustmentUtil
+ import org.citra.citra_emu.display.ScreenLayout
++import org.citra.citra_emu.display.ScreenLayoutEditor
+ import org.citra.citra_emu.display.SecondaryDisplayLayout
+ import org.citra.citra_emu.features.hotkeys.Hotkey
++import org.citra.citra_emu.features.hotkeys.HotkeyUtility
++import org.citra.citra_emu.overlay.FfCustomButtons
+ import org.citra.citra_emu.features.settings.model.BooleanSetting
+ import org.citra.citra_emu.features.settings.model.IntSetting
+ import org.citra.citra_emu.features.settings.model.SettingsViewModel
+@@ -93,6 +96,86 @@ class EmulationFragment :
+     private val preferences: SharedPreferences
+         get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
+ 
++    // ff-bgm1x: 화면 배치 편집기의 스킨 zip 고르기
++    private var skinCallback: ((android.net.Uri) -> Unit)? = null
++    // 고르기를 시작한 때의 방향·버튼 층 크기 (파일 고르기 화면이 세로로 열려 돌아온 순간의 값은 틀릴 수 있다)
++    private var skinPickPortrait: Boolean? = null
++    private var skinPickWidth = 0
++    private var skinPickHeight = 0
++    /** 스킨 zip 고르기 결과 (액티비티의 ffSkinPicker 가 부른다) */
++    fun onSkinPicked(uri: android.net.Uri?) {
++        val cb = skinCallback
++        skinCallback = null
++        if (uri == null) {
++            clearSkinPick()
++            return
++        }
++        // 파일 고르기에서 돌아오며 화면이 다시 만들어졌으면 편집기가 없다: 편집기 없이 바로 적용한다
++        if (cb != null) {
++            clearSkinPick()
++            cb(uri)
++        } else {
++            applySkinWithoutEditor(uri)
++        }
++    }
++
++    private fun clearSkinPick() {
++        skinPickPortrait = null
++        skinPickWidth = 0
++        skinPickHeight = 0
++        preferences.edit().remove(PREF_SKIN_PICK_ORIENTATION).remove(PREF_SKIN_PICK_W).remove(PREF_SKIN_PICK_H).apply()
++    }
++
++    private fun applySkinWithoutEditor(uri: android.net.Uri) {
++        val overlay = _binding?.surfaceInputOverlay ?: return
++        overlay.post {
++            // 화면이 다시 만들어져 이 변수들이 비었으면, 고르기를 시작할 때 저장해 둔 값을 쓴다
++            val savedOrientation = preferences.getInt(PREF_SKIN_PICK_ORIENTATION, 0)
++            val pickPortrait = skinPickPortrait ?: if (savedOrientation != 0) savedOrientation == 1 else null
++            val pickW = if (skinPickWidth > 0) skinPickWidth else preferences.getInt(PREF_SKIN_PICK_W, 0)
++            val pickH = if (skinPickHeight > 0) skinPickHeight else preferences.getInt(PREF_SKIN_PICK_H, 0)
++            clearSkinPick()
++            val portrait = pickPortrait ?: (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
++            val w = if (pickPortrait != null && pickW > 0) pickW else overlay.width
++            val h = if (pickPortrait != null && pickH > 0) pickH else overlay.height
++            val ctx = CitraApplication.appContext
++            Thread {
++                val result = runCatching { org.citra.citra_emu.display.FfSkin.prepare(ctx, uri, portrait, w, h) }
++                overlay.post {
++                    val b = _binding ?: return@post
++                    result.onFailure {
++                        Toast.makeText(ctx, "스킨: " + (it.message ?: it.javaClass.simpleName), Toast.LENGTH_LONG).show()
++                    }.onSuccess { p ->
++                        val top = p.top
++                        val bottom = p.bottom
++                        if (top == null || bottom == null) {
++                            // 편집기 없이는 화면 자리를 맞출 수 없으니 버튼 그림만 바꾼다
++                            org.citra.citra_emu.display.FfSkin.save(
++                                preferences, p.dir, portrait, null, android.graphics.RectF(), android.graphics.RectF()
++                            )
++                            overlay.refreshControls()
++                            overlay.invalidate()
++                            val why = if (p.background == null) "배경 그림이 없는 스킨이라" else "배경에서 화면 자리를 찾지 못해"
++                            Toast.makeText(ctx, "스킨: $why 버튼 그림만 바꿨습니다", Toast.LENGTH_LONG).show()
++                            return@onSuccess
++                        }
++                        org.citra.citra_emu.display.FfSkin.save(preferences, p.dir, portrait, p.background, top, bottom)
++                        // 버튼 층 좌표 -> 게임 화면 층 좌표
++                        val dx = b.surfaceEmulation.left - overlay.left
++                        val dy = b.surfaceEmulation.top - overlay.top
++                        fun arr(r: android.graphics.RectF) = intArrayOf(
++                            Math.round(r.left - dx), Math.round(r.top - dy), Math.round(r.width()), Math.round(r.height())
++                        )
++                        screenAdjustmentUtil.applyCustomLayout(portrait, arr(top), arr(bottom))
++                        overlay.refreshControls()
++                        overlay.invalidate()
++                        Toast.makeText(ctx, "스킨: " + p.background?.name, Toast.LENGTH_SHORT).show()
++                    }
++                }
++            }.start()
++        }
++    }
++
+     private lateinit var emulationState: EmulationState
+     private var perfStatsUpdater: Runnable? = null
+ 
+@@ -211,6 +294,8 @@ class EmulationFragment :
+         _binding = FragmentEmulationBinding.inflate(inflater)
+         binding.inGameMenu.menu.findItem(R.id.menu_secondary_screen_layout).isVisible =
+             emulationActivity.secondaryDisplayManager.availableDisplays.isNotEmpty()
++        binding.inGameMenu.menu.findItem(R.id.menu_ff_sound_catalog).isVisible =
++            org.citra.citra_emu.BuildConfig.FF_LAB
+         binding.inGameMenu.menu.findItem(R.id.menu_landscape_screen_layout).isVisible =
+             CitraApplication.appContext.resources.configuration.orientation !=
+             Configuration.ORIENTATION_PORTRAIT
+@@ -233,6 +318,29 @@ class EmulationFragment :
+             binding.doneControlConfig.visibility = View.GONE
+             binding.surfaceInputOverlay.setIsInEditMode(false)
+         }
++        // ff-bgm1x: 화면 메뉴 버튼은 한 번 누르면 메뉴(서랍)를 연다
++        binding.surfaceInputOverlay.onMenuButtonPressed = {
++            binding.drawerLayout.post { binding.drawerLayout.open() }
++        }
++        // ff-bgm1x: 사용자가 만든 기능 버튼
++        val customHotkeys = HotkeyUtility(screenAdjustmentUtil, requireContext())
++        binding.surfaceInputOverlay.onCustomFunction = { function ->
++            when (function) {
++                FfCustomButtons.Function.NONE -> {}
++                FfCustomButtons.Function.MENU -> binding.drawerLayout.post { binding.drawerLayout.open() }
++                FfCustomButtons.Function.SWAP_SCREEN -> customHotkeys.handleHotkey(Hotkey.SWAP_SCREEN.button)
++                FfCustomButtons.Function.CYCLE_LAYOUT -> customHotkeys.handleHotkey(Hotkey.CYCLE_LAYOUT.button)
++                FfCustomButtons.Function.PAUSE_OR_RESUME -> customHotkeys.handleHotkey(Hotkey.PAUSE_OR_RESUME.button)
++                FfCustomButtons.Function.QUICKSAVE -> customHotkeys.handleHotkey(Hotkey.QUICKSAVE.button)
++                FfCustomButtons.Function.QUICKLOAD -> customHotkeys.handleHotkey(Hotkey.QUICKLOAD.button)
++                FfCustomButtons.Function.TURBO -> customHotkeys.handleHotkey(Hotkey.TURBO_LIMIT.button)
++                FfCustomButtons.Function.CLOSE_GAME -> customHotkeys.handleHotkey(Hotkey.CLOSE_GAME.button)
++                FfCustomButtons.Function.BGM_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_BGM_1X, R.string.ff_func_bgm_1x)
++                FfCustomButtons.Function.VOICES_1X -> toggleFfOption(BooleanSetting.FF_BGM1X_VOICES_1X, R.string.ff_func_voices_1x)
++                FfCustomButtons.Function.FF_CUTSCENES -> toggleFfOption(BooleanSetting.FF_BGM1X_FF_CUTSCENES, R.string.ff_func_ff_cutscenes)
++                FfCustomButtons.Function.SOUND_CATALOG -> openFfSoundCatalog()
++            }
++        }
+ 
+         // Show/hide the "Stats" overlay
+         updateShowPerformanceOverlay()
+@@ -263,7 +371,11 @@ class EmulationFragment :
+             }
+ 
+             override fun onDrawerClosed(drawerView: View) {
+-                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++                // ff-bgm1x: 배치 편집기가 열려 있으면 서랍을 잠가 둔다 (왼쪽 끝을 끄는 동작과 겹치지 않게)
++                binding.drawerLayout.setDrawerLockMode(
++                    if (closeLayoutEditor != null) DrawerLayout.LOCK_MODE_LOCKED_CLOSED
++                    else EmulationMenuSettings.drawerLockMode
++                )
+                 binding.surfaceInputOverlay.isClickable = true
+                 binding.surfaceInputOverlay.isFocusable = true
+                 binding.surfaceInputOverlay.isFocusableInTouchMode = true
+@@ -393,6 +505,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_ff_sound_catalog -> {
++                    openFfSoundCatalog()
++                    true
++                }
++
+                 R.id.menu_cheats -> {
+                     val action = EmulationNavigationDirections
+                         .actionGlobalCheatsActivity(NativeLibrary.getRunningTitleId())
+@@ -443,6 +560,12 @@ class EmulationFragment :
+                         return
+                     }
+ 
++                    // ff-bgm1x: 배치 편집기가 열려 있으면 뒤로 = 저장하지 않고 닫기
++                    closeLayoutEditor?.let {
++                        it()
++                        return
++                    }
++
+                     if (binding.drawerLayout.isOpen) {
+                         binding.drawerLayout.close()
+                     } else {
+@@ -1024,6 +1147,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_screen_layout_edit_custom -> {
++                    showScreenLayoutEditor(false)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1083,6 +1211,11 @@ class EmulationFragment :
+                     true
+                 }
+ 
++                R.id.menu_portrait_layout_edit_custom -> {
++                    showScreenLayoutEditor(true)
++                    true
++                }
++
+                 else -> true
+             }
+         }
+@@ -1254,9 +1387,85 @@ class EmulationFragment :
+         }
+     }
+ 
++    // ff-bgm1x: 위·아래 화면 사용자 배치를 게임 화면 위에서 끌어서 정하는 편집기
++    // ff-bgm1x: 1배속 옵션을 켜고 끄고, 설정 파일에 저장해 바로 적용한다
++    // ff-bgm1x: 소리 분류 화면 (1x Lab 앱). 화면이 열려 있는 동안 게임은 멈춘다
++    private fun openFfSoundCatalog() {
++        if (!org.citra.citra_emu.BuildConfig.FF_LAB) return
++        binding.drawerLayout.close()
++        startActivity(
++            android.content.Intent(requireContext(), org.citra.citra_emu.activities.FfSoundCatalogActivity::class.java)
++        )
++    }
++
++    private fun toggleFfOption(setting: BooleanSetting, nameRes: Int) {
++        setting.boolean = !setting.boolean
++        settings.saveSetting(setting, SettingsFile.FILE_NAME_CONFIG)
++        NativeLibrary.reloadSettings()
++        val state = getString(if (setting.boolean) R.string.ff_func_state_on else R.string.ff_func_state_off)
++        Toast.makeText(requireContext(), "${getString(nameRes)}: $state", Toast.LENGTH_SHORT).show()
++    }
++
++    // ff-bgm1x: 배치 편집기가 열려 있을 때 닫는 함수 (닫혀 있으면 null)
++    private var closeLayoutEditor: (() -> Unit)? = null
++
++    fun isLayoutEditorOpen(): Boolean = closeLayoutEditor != null
++
++    private fun showScreenLayoutEditor(portrait: Boolean) {
++        binding.drawerLayout.close()
++        val parent = binding.surfaceEmulation.parent as ViewGroup
++        val (top, bottom) = screenAdjustmentUtil.customLayout(portrait)
++        var editor: View? = null
++        // 편집기가 버튼을 사각형으로 그리므로 편집하는 동안 실제 버튼은 숨긴다
++        val overlay = binding.surfaceInputOverlay
++        val overlayVisibility = overlay.visibility
++        // 편집기는 버튼 층과 같은 자리(노치 여백 안쪽)에 둔다. 화면 좌표는 게임 화면 층 기준이라 그 차이를 넘긴다
++        val screenOffsetX = binding.surfaceEmulation.left - overlay.left
++        val screenOffsetY = binding.surfaceEmulation.top - overlay.top
++        editor = ScreenLayoutEditor(
++            requireContext(),
++            top,
++            bottom,
++            overlay,
++            screenOffsetX,
++            screenOffsetY,
++            onSave = { t, b -> screenAdjustmentUtil.applyCustomLayout(portrait, t, b) },
++            onPickSkin = { callback ->
++                skinCallback = callback
++                skinPickPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
++                skinPickWidth = overlay.width
++                skinPickHeight = overlay.height
++                preferences.edit()
++                    .putInt(PREF_SKIN_PICK_ORIENTATION, if (skinPickPortrait == true) 1 else 2)
++                    .putInt(PREF_SKIN_PICK_W, skinPickWidth)
++                    .putInt(PREF_SKIN_PICK_H, skinPickHeight)
++                    .commit()
++                (requireActivity() as EmulationActivity).ffSkinPicker.launch(
++                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")
++                )
++            },
++            onClose = {
++                editor?.let { parent.removeView(it) }
++                overlay.visibility = overlayVisibility
++                closeLayoutEditor = null
++                binding.drawerLayout.setDrawerLockMode(EmulationMenuSettings.drawerLockMode)
++            }
++        )
++        overlay.visibility = View.INVISIBLE
++        closeLayoutEditor = { (editor as ScreenLayoutEditor).close() }
++        binding.drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
++        val overlayParams = overlay.layoutParams as ViewGroup.MarginLayoutParams
++        parent.addView(
++            editor,
++            ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
++                setMargins(overlayParams.leftMargin, overlayParams.topMargin, overlayParams.rightMargin, overlayParams.bottomMargin)
++            }
++        )
++    }
++
+     private fun showToggleControlsDialog() {
+         val editor = preferences.edit()
+-        val enabledButtons = BooleanArray(17)
++        val enabledButtons = BooleanArray(18)  // ff-bgm1x: 17 = 메뉴 버튼 (기본 켜짐)
+         enabledButtons.forEachIndexed { i: Int, _: Boolean ->
+             // Buttons that are disabled by default
+             var defaultValue = true
+@@ -1469,7 +1678,7 @@ class EmulationFragment :
+ 
+         val editor = preferences.edit()
+         // TODO: This code sucks balls. We need to do this differently. -OS
+-        for (i in 0 until 17) {
++        for (i in 0 until 18) {  // ff-bgm1x: 17 = 메뉴 버튼
+             var defaultValue = true
+             when (i) {
+                 6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
+@@ -1815,5 +2024,10 @@ class EmulationFragment :
+ 
+     companion object {
+         private val perfStatsUpdateHandler = Handler(Looper.myLooper()!!)
++
++        // ff-bgm1x: 스킨 고르기를 시작한 때의 방향(1 = 세로, 2 = 가로)·버튼 층 크기 (화면이 다시 만들어져도 남게 저장)
++        private const val PREF_SKIN_PICK_ORIENTATION = "ffSkinPickOrientation"
++        private const val PREF_SKIN_PICK_W = "ffSkinPickW"
++        private const val PREF_SKIN_PICK_H = "ffSkinPickH"
+     }
+ }

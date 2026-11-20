@@ -1,0 +1,20 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
+index afe7129f..41f334ba 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
+@@ -453,6 +453,7 @@ class EmulatorViewModel @Inject constructor(
+                         }
+                     }
+                     RomPauseMenuOption.VIEW_ACHIEVEMENTS -> _uiEvent.tryEmit(EmulatorUiEvent.ShowAchievementList)
++                    RomPauseMenuOption.SOUNDS -> _uiEvent.tryEmit(EmulatorUiEvent.OpenScreen.SoundCatalogScreen)
+                     RomPauseMenuOption.RESET -> resetEmulator()
+                     RomPauseMenuOption.EXIT -> exitEmulator(force = false)
+                 }
+@@ -1000,6 +1001,7 @@ class EmulatorViewModel @Inject constructor(
+             RomPauseMenuOption.LOAD_STATE -> emulatorSession.areSaveStateLoadsAllowed()
+             RomPauseMenuOption.CHEATS -> emulatorSession.areCheatsEnabled()
+             RomPauseMenuOption.VIEW_ACHIEVEMENTS -> emulatorSession.areRetroAchievementsEnabled()
++            RomPauseMenuOption.SOUNDS -> me.magnum.melonds.BuildConfig.FF_LAB
+             else -> true
+         }
+     }

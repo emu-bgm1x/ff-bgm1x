@@ -1,0 +1,22 @@
+diff --git a/src/frontend/qt_sdl/Window.h b/src/frontend/qt_sdl/Window.h
+index 678be7c..904daf7 100755
+--- a/src/frontend/qt_sdl/Window.h
++++ b/src/frontend/qt_sdl/Window.h
+@@ -240,6 +240,7 @@ private slots:
+ 
+     void onFullscreenToggled();
+     void onScreenEmphasisToggled();
++    void onOpenSoundCatalog();  // ff-bgm1x
+ 
+ private:
+     virtual void closeEvent(QCloseEvent* event) override;
+@@ -351,6 +352,9 @@ public:
+     QAction* actShowOSD;
+     QAction* actLimitFramerate;
+     QAction* actAudioSync;
++    QAction* actBgm1x;  // ff-bgm1x
++    QAction* actFfCutscenes;  // ff-bgm1x
++    QAction* actMenuSounds1x;  // ff-bgm1x
+ 
+     QAction* actAbout;
+ };

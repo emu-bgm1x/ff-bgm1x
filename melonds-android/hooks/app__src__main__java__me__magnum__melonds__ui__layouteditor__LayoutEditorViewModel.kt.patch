@@ -1,0 +1,130 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
+index ec726f10..48ff7902 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
+@@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
+ import androidx.lifecycle.ViewModel
+ import androidx.lifecycle.viewModelScope
+ import dagger.hilt.android.lifecycle.HiltViewModel
++import kotlinx.coroutines.flow.MutableSharedFlow
+ import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.asSharedFlow
+ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.flow.distinctUntilChangedBy
+ import kotlinx.coroutines.flow.filterNotNull
+@@ -31,6 +33,15 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutBackgroundProperties
+ import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
+ import java.util.UUID
+ import javax.inject.Inject
++import android.content.Context
++import android.net.Uri
++import android.provider.OpenableColumns
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import me.magnum.melonds.domain.model.Background
++import me.magnum.melonds.domain.model.Rect
++import me.magnum.melonds.domain.model.layout.LayoutComponent
++import me.magnum.melonds.ui.layouteditor.skin.FfSkinPack
+ 
+ @HiltViewModel
+ class LayoutEditorViewModel @Inject constructor(
+@@ -52,6 +63,10 @@ class LayoutEditorViewModel @Inject constructor(
+     private val _secondaryScreenBackground = MutableStateFlow<RuntimeBackground?>(null)
+     val secondaryScreenBackground = _secondaryScreenBackground.asStateFlow()
+ 
++    // ff-bgm1x: 스킨 적용 결과 알림 (화면에 짧게 띄운다)
++    private val _skinMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
++    val skinMessages = _skinMessages.asSharedFlow()
++
+     private val _currentLayout = MutableStateFlow<CurrentLayoutState?>(null)
+     val currentLayout = _currentLayout.asStateFlow()
+ 
+@@ -347,6 +362,88 @@ class LayoutEditorViewModel @Inject constructor(
+         }
+     }
+ 
++    /**
++     * ff-bgm1x: 스킨(zip)을 지금 화면(방향·크기)에 적용한다. 화면비가 가장 가까운 배경을 배경으로 넣고(늘려 채움),
++     * 배경에 그려진 화면 자리로 위·아래 화면을 옮긴다. 다른 버튼은 그대로 둔다.
++     */
++    // ff-bgm1x: 스킨 고르기를 시작한 때의 레이아웃 (파일 고르기 화면이 세로로 열려 돌아오는 사이 방향이 바뀔 수 있다)
++    private var skinTargetVariant: UILayoutVariant? = null
++
++    fun rememberSkinTarget() {
++        skinTargetVariant = currentLayoutVariant
++    }
++
++    fun applySkin(context: Context, uri: Uri) {
++        val variant = skinTargetVariant ?: currentLayoutVariant ?: return
++        skinTargetVariant = null
++        val layout = _currentLayoutConfiguration.value?.layoutVariants?.get(variant) ?: _currentLayout.value?.layout ?: return
++        viewModelScope.launch {
++            val result = withContext(Dispatchers.IO) {
++                runCatching {
++                    val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
++                        if (it.moveToFirst()) it.getString(0) else null
++                    } ?: "skin.zip"
++                    val pack = FfSkinPack.import(context.applicationContext, uri, name)
++                    val portrait = variant.orientation == Orientation.PORTRAIT
++                    val bg = pack.pickBackground(portrait, variant.uiSize.x, variant.uiSize.y)
++                    val detected = bg?.let { FfSkinPack.detectScreens(it.file, 2, listOf(4f / 3f)) }
++                    Triple(pack, bg, detected)
++                }
++            }
++            val (pack, bg, detected) = result.getOrElse {
++                _skinMessages.tryEmit("Skin: " + (it.message ?: it.javaClass.simpleName))
++                return@launch
++            }
++            // 배경 그림이 없는 스킨은 투명한 배경에 버튼 그림만 잇는다
++            val bgFile = bg?.file ?: FfSkinPack.blankBackground(pack.dir)
++            val backgroundId = UUID.randomUUID()
++            backgroundsRepository.addBackground(Background(backgroundId, pack.name + " " + bgFile.nameWithoutExtension, Uri.fromFile(bgFile)))
++            me.magnum.melonds.ui.layouteditor.skin.FfSkinButtons.register(context, backgroundId, pack.dir, bgFile)
++
++            // 화면 자리를 찾았으면 화면을 옮기고, 못 찾았으면(또는 배경이 없으면) 지금 자리에 둔다
++            val components = if (detected == null) {
++                layout.mainScreenLayout.components ?: emptyList()
++            } else {
++                val (imageSize, screens) = detected
++                val sx = variant.uiSize.x.toFloat() / imageSize.first
++                val sy = variant.uiSize.y.toFloat() / imageSize.second
++                fun map(r: android.graphics.Rect) = Rect(
++                    (r.left * sx).toInt(), (r.top * sy).toInt(), (r.width() * sx).toInt(), (r.height() * sy).toInt(),
++                )
++                val top = map(screens[0])
++                val bottom = map(screens[1])
++                (layout.mainScreenLayout.components ?: emptyList()).map {
++                    when (it.component) {
++                        LayoutComponent.TOP_SCREEN -> it.copy(rect = top)
++                        LayoutComponent.BOTTOM_SCREEN -> it.copy(rect = bottom)
++                        else -> it
++                    }
++                }
++            }
++            _currentLayoutConfiguration.update { config ->
++                config?.copy(
++                    layoutVariants = config.layoutVariants.toMutableMap().apply {
++                        val current = this[variant] ?: layout
++                        this[variant] = current.copy(
++                            mainScreenLayout = current.mainScreenLayout.copy(
++                                backgroundId = backgroundId,
++                                backgroundMode = BackgroundMode.STRETCH,
++                                components = components,
++                            ),
++                        )
++                    },
++                )
++            }
++            _skinMessages.tryEmit(
++                when {
++                    bg == null -> "Skin: no background in this skin, only the buttons were changed"
++                    detected == null -> "Skin: screen areas not found. Drag each screen onto the background's screen area and tap it once to snap"
++                    else -> "Skin applied: " + bg.file.name
++                },
++            )
++        }
++    }
++
+     fun currentLayoutHasName(): Boolean {
+         return !_currentLayoutConfiguration.value?.name.isNullOrEmpty()
+     }

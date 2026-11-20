@@ -1,0 +1,12 @@
+diff --git a/src/NDS.cpp b/src/NDS.cpp
+index f45051e..aed2ad5 100644
+--- a/src/NDS.cpp
++++ b/src/NDS.cpp
+@@ -3577,6 +3577,7 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
+                 IPCFIFO9.Write(val);
+                 if ((IPCFIFOCnt7 & 0x0400) && wasempty)
+                     SetIRQ(1, IRQ_IPCRecv);
++                if (SoundFifoHook) SoundFifoHook(*this, val);  // ff-bgm1x
+             }
+         }
+         return;

@@ -1,0 +1,25 @@
+diff --git a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
+index 7985ccc6..ceb4f146 100644
+--- a/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
++++ b/lemuroid-app/src/main/java/com/swordfish/lemuroid/app/mobile/feature/settings/SettingsManager.kt
+@@ -58,6 +58,20 @@ class SettingsManager(private val context: Context, sharedPreferences: Lazy<Shar
+ 
+     suspend fun allowDirectGameLoad() = booleanPreference(R.string.pref_key_allow_direct_game_load, true)
+ 
++    // ff-bgm1x: 빨리 감기 기본 배수 (게임별 값이 없을 때)
++    suspend fun fastForwardSpeed() =
++        stringPreference(R.string.pref_key_fast_forward_speed, DEFAULT_FAST_FORWARD_SPEED.toString())
++            .toIntOrNull() ?: DEFAULT_FAST_FORWARD_SPEED
++
++    // ff-bgm1x: 게임 화면 방향 기본값 (auto = 휴대폰 회전을 따라감)
++    suspend fun screenOrientation() = stringPreference(R.string.pref_key_screen_orientation, SCREEN_ORIENTATIONS.first())
++
++    companion object {
++        const val DEFAULT_FAST_FORWARD_SPEED = 2
++        val FAST_FORWARD_SPEEDS = (2..16).toList()
++        val SCREEN_ORIENTATIONS = listOf("auto", "landscape", "portrait")
++    }
++
+     private suspend fun booleanPreference(
+         keyId: Int,
+         default: Boolean,

@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/RuntimeLayoutView.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/RuntimeLayoutView.kt
+index c4da8634..ac90dbd7 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/RuntimeLayoutView.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/RuntimeLayoutView.kt
+@@ -108,6 +108,7 @@ class RuntimeLayoutView(context: Context, attrs: AttributeSet? = null) : LayoutV
+             getLayoutComponentView(LayoutComponent.BUTTON_QUICK_SAVE)?.view?.setOnTouchListener(SingleButtonInputHandler(it, Input.QUICK_SAVE, enableHapticFeedback, touchVibrator))
+             getLayoutComponentView(LayoutComponent.BUTTON_QUICK_LOAD)?.view?.setOnTouchListener(SingleButtonInputHandler(it, Input.QUICK_LOAD, enableHapticFeedback, touchVibrator))
+             getLayoutComponentView(LayoutComponent.BUTTON_REWIND)?.view?.setOnTouchListener(SingleButtonInputHandler(it, Input.REWIND, enableHapticFeedback, touchVibrator))
++            getLayoutComponentView(LayoutComponent.BUTTON_SOUND_CATALOG)?.view?.setOnTouchListener(SingleButtonInputHandler(it, Input.SOUND_CATALOG, enableHapticFeedback, touchVibrator))
+         }
+ 
+         getLayoutComponentViews().forEach {

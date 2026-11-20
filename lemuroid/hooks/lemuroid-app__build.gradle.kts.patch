@@ -1,0 +1,70 @@
+diff --git a/lemuroid-app/build.gradle.kts b/lemuroid-app/build.gradle.kts
+index 741cef46..6dd315a4 100644
+--- a/lemuroid-app/build.gradle.kts
++++ b/lemuroid-app/build.gradle.kts
+@@ -13,6 +13,11 @@ android {
+         versionCode = 252
+         versionName = "1.17.0" // Always remember to update Cores Tag!
+         applicationId = "com.swordfish.lemuroid"
++        // ff-bgm1x: 실제 코어 파일을 묶으므로 크기를 줄이려고 ABI 하나만 넣는다.
++        // 기본 arm64-v8a, 32비트 기기용은 -PffbgmAbi=armeabi-v7a 로 따로 빌드한다
++        ndk {
++            abiFilters += listOf((project.findProperty("ffbgmAbi") as String?) ?: "arm64-v8a")
++        }
+     }
+     flavorDimensions += listOf("opensource", "cores")
+ 
+@@ -72,6 +77,15 @@ android {
+             // Stripping created some issues with some libretro cores such as ppsspp
+             keepDebugSymbols += setOf("*/*/*_libretro_android.so")
+             useLegacyPackaging = true
++            // ff-bgm1x 시험용: -PffbgmGbTest=true 면 GB·GBA 코어(mgba, vbam, gambatte)만 넣는다
++            if ((project.findProperty("ffbgmGbTest") as String?) == "true") {
++                excludes +=
++                    listOf(
++                        "citra", "desmume", "dosbox_pure", "fbneo", "fceumm", "genesis_plus_gx", "handy",
++                        "mame2003_plus", "mednafen_ngp", "mednafen_pce_fast", "mednafen_wswan", "melonds",
++                        "mupen64plus_next_gles3", "pcsx_rearmed", "ppsspp", "prosystem", "snes9x", "stella",
++                    ).map { "**/lib${it}_libretro_android.so" }
++            }
+         }
+         resources {
+             excludes += setOf("META-INF/DEPENDENCIES", "META-INF/library_release.kotlin_module")
+@@ -94,14 +108,33 @@ android {
+     buildTypes {
+         getByName("release") {
+             isMinifyEnabled = true
+-            signingConfig = signingConfigs["release"]
+             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
+-            resValue("string", "lemuroid_name", "Lemuroid")
++            // ff-bgm1x 시험용(-PffbgmGbTest=true): 따로 설치되는 앱, 디버그 키 서명, 소리 분류 켬
++            if ((project.findProperty("ffbgmGbTest") as String?) == "true") {
++                applicationIdSuffix = ".gbtest"
++                signingConfig = signingConfigs["debug"]
++                resValue("string", "lemuroid_name", "Lemuroid GB Test")
++                buildConfigField("boolean", "FF_LAB", "true")
++            } else {
++                signingConfig = signingConfigs["release"]
++                resValue("string", "lemuroid_name", "Lemuroid")
++                buildConfigField("boolean", "FF_LAB", "false")
++            }
+         }
+         getByName("debug") {
+-            applicationIdSuffix = ".debug"
++            // ff-bgm1x: -PffbgmLab=true 면 소리 분류가 들어간 별도 앱 (기존 앱과 따로 설치된다)
++            val ffbgmLab = (project.findProperty("ffbgmLab") as String?) == "true"
++            applicationIdSuffix = if (ffbgmLab) ".debug.sound" else ".debug"
+             versionNameSuffix = "-DEBUG"
+-            resValue("string", "lemuroid_name", "LemuroiDebug")
++            // ff-bgm1x: 64비트·32비트 APK 를 앱 이름으로 구분한다
++            val ffbgm32 = ((project.findProperty("ffbgmAbi") as String?) ?: "arm64-v8a") == "armeabi-v7a"
++            val ffbgmBits = if (ffbgm32) "32bit" else "64bit"
++            resValue(
++                "string",
++                "lemuroid_name",
++                if (ffbgmLab) (if (ffbgm32) "Lemuroid 1x Lab 32" else "Lemuroid 1x Lab") else "LemuroiDebug $ffbgmBits",
++            )
++            buildConfigField("boolean", "FF_LAB", ffbgmLab.toString())
+         }
+     }
+ 

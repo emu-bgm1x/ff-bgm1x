@@ -1,0 +1,244 @@
+diff --git a/src/audio_core/hle/source.cpp b/src/audio_core/hle/source.cpp
+index 4728526..86e364f 100755
+--- a/src/audio_core/hle/source.cpp
++++ b/src/audio_core/hle/source.cpp
+@@ -5,6 +5,7 @@
+ #include <algorithm>
+ #include <array>
+ #include "audio_core/codec.h"
++#include "audio_core/hle/bgm_replacer.h"
+ #include "audio_core/hle/common.h"
+ #include "audio_core/hle/source.h"
+ #include "audio_core/interpolate.h"
+@@ -18,6 +19,16 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+                                   const s16_le (&adpcm_coeffs)[16]) {
+     ParseConfig(config, adpcm_coeffs);
+ 
++    // ff-bgm1x: 새 소리를 시작했으면 효과음 미러 방식을 정한다
++    if (mirror_new && state.enabled) {
++        mirror_new = false;
++        sfx_first = true;  // 소리 분류: 이 소리의 첫 버퍼를 볼 것
++        sfx_gain = 1.0f;
++        sfx_cutscene = false;
++        if (mirror_mode) BgmReplacer::Instance().MirrorEnd(source_id);
++        mirror_mode = BgmReplacer::Instance().MirrorBegin(source_id);
++    }
++
+     if (state.enabled) {
+         GenerateFrame();
+     }
+@@ -28,6 +39,54 @@ SourceStatus::Status Source::Tick(SourceConfiguration::Configuration& config,
+ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const std::array<float, 4>& gains = state.gain.at(intermediate_mix_id);
+     if (!state.enabled) {
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        if (bgm_replaced) {
++            bgm_replaced = false;
++            BgmReplacer::Instance().OnSourceIdle(source_id);
++        }
++        if (mirror_mode) {
++            mirror_mode = 0;
++            if (BgmReplacer::Diag()) LOG_INFO(Audio_DSP, "ff-diag voice-off src={}", source_id);
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
++        return;
++    }
++
++    // ff-bgm1x: 1배속으로 대체 재생 중인 BGM 음성은 원본 믹스에 넣지 않고 볼륨만 알려 준다
++    if (bgm_replaced && BgmReplacer::Instance().IsEnabled()) {
++        if (intermediate_mix_id == 0) {
++            BgmReplacer::Instance().UpdateSourceGain(source_id, state.gain);
++        }
++        if (mirror_mode) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        }
++        state.gain_ramp_start.at(intermediate_mix_id) = gains;
++        state.gain_ramp_active.at(intermediate_mix_id) = false;
++        return;
++    }
++
++    // ff-bgm1x: 효과음 음성 미러. 배속 중에 시작한 소리는 이 음성의 출력(볼륨 포함)을 녹음해 1배속으로 내고,
++    // 느린 속도에서 시작한 소리는 앞당겨 해독한 버퍼를 지금 볼륨·재생 배율로 낸다. 어느 쪽이든 원본 믹스에서는 뺀다
++    // (믹스 0 을 처리할 때 세 믹스의 볼륨을 한꺼번에 넘긴다)
++    // 소리 분류 창에서 연출로 정한 소리가 나오는 동안은 배속을 멈춘다
++    if (intermediate_mix_id == 0 && sfx_cutscene) BgmReplacer::Instance().HoldCutscene();
++    if (intermediate_mix_id == 0 && mirror_mode) {
++        // 소리 분류 창에서 정한 볼륨은 1배속으로 내는 소리에만 곱한다
++        auto gain = state.gain;
++        if (sfx_gain != 1.0f) {
++            for (auto& mix : gain) {
++                for (float& g : mix) g *= sfx_gain;
++            }
++        }
++        const bool alive =
++            mirror_mode == 1
++                ? BgmReplacer::Instance().MirrorFeed(source_id, current_frame, gain)
++                : BgmReplacer::Instance().MirrorAheadUpdate(source_id, gain, state.rate_multiplier);
++        if (!alive) mirror_mode = 0;  // 메뉴에서 꺼짐 등: 원본으로 돌아간다
++    }
++    if (mirror_mode) {
+         state.gain_ramp_start.at(intermediate_mix_id) = gains;
+         state.gain_ramp_active.at(intermediate_mix_id) = false;
+         return;
+@@ -36,17 +95,23 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+     const bool ramp_active = state.gain_ramp_active.at(intermediate_mix_id);
+     const std::array<float, 4>& ramp_start = state.gain_ramp_start.at(intermediate_mix_id);
+     constexpr float ramp_scale = 1.0f / static_cast<float>(samples_per_frame - 1);
++    // ff-bgm1x: 소리 분류 창에서 정한 볼륨 (원본 그대로 나오는 소리에도 적용, 지정이 없으면 1)
++    const float user_scale = sfx_gain * stream_gain;
+ 
+     for (std::size_t samplei = 0; samplei < samples_per_frame; samplei++) {
+         const float progress = static_cast<float>(samplei) * ramp_scale;
+         const float gain0 =
+-            ramp_active ? ramp_start[0] + (gains[0] - ramp_start[0]) * progress : gains[0];
++            (ramp_active ? ramp_start[0] + (gains[0] - ramp_start[0]) * progress : gains[0]) *
++            user_scale;
+         const float gain1 =
+-            ramp_active ? ramp_start[1] + (gains[1] - ramp_start[1]) * progress : gains[1];
++            (ramp_active ? ramp_start[1] + (gains[1] - ramp_start[1]) * progress : gains[1]) *
++            user_scale;
+         const float gain2 =
+-            ramp_active ? ramp_start[2] + (gains[2] - ramp_start[2]) * progress : gains[2];
++            (ramp_active ? ramp_start[2] + (gains[2] - ramp_start[2]) * progress : gains[2]) *
++            user_scale;
+         const float gain3 =
+-            ramp_active ? ramp_start[3] + (gains[3] - ramp_start[3]) * progress : gains[3];
++            (ramp_active ? ramp_start[3] + (gains[3] - ramp_start[3]) * progress : gains[3]) *
++            user_scale;
+ 
+         // Conversion from stereo (current_frame) to quadraphonic (dest) occurs here.
+         dest[samplei][0] += static_cast<s32>(gain0 * current_frame[samplei][0]);
+@@ -64,6 +129,19 @@ void Source::MixInto(QuadFrame32& dest, std::size_t intermediate_mix_id) {
+ void Source::Reset() {
+     current_frame.fill({});
+     state = {};
++    if (bgm_replaced) {
++        bgm_replaced = false;
++        BgmReplacer::Instance().OnSourceIdle(source_id);
++    }
++    if (mirror_mode) {
++        mirror_mode = 0;
++        BgmReplacer::Instance().MirrorEnd(source_id);
++    }
++    mirror_new = true;
++    sfx_first = false;
++    sfx_gain = 1.0f;
++    sfx_cutscene = false;
++    stream_gain = 1.0f;
+ }
+ 
+ void Source::Sleep() {
+@@ -102,6 +180,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.enable_dirty) {
+         config.enable_dirty.Assign(0);
++        if (config.enable != 0 && !state.enabled) mirror_new = true;  // ff-bgm1x: 새 소리
+         state.enabled = config.enable != 0;
+         LOG_TRACE(Audio_DSP, "source_id={} enable={}", source_id, state.enabled);
+     }
+@@ -281,6 +360,7 @@ void Source::ParseConfig(SourceConfiguration::Configuration& config,
+ 
+     if (config.embedded_buffer_dirty) {
+         config.embedded_buffer_dirty.Assign(0);
++        mirror_new = true;  // ff-bgm1x: 새 소리
+         // HACK
+         // Luigi's Mansion Dark Moon configures the embedded buffer with an extremely large value
+         // for length, causing the Dequeue method to allocate a buffer of that size, eating up all
+@@ -449,6 +529,12 @@ bool Source::DequeueBuffer() {
+ 
+     Buffer buf = state.input_queue.top();
+     state.input_queue.pop();
++    const bool loop_repeat = buf.has_played;  // ff-bgm1x: 반복 버퍼가 다시 돌아옴
++    if (BgmReplacer::Diag()) {
++        LOG_INFO(Audio_DSP, "ff-diag buf src={} fmt={} len={} looping={} repeat={} pos={} mirror={} first={} bgm={}",
++                 source_id, static_cast<int>(buf.format), buf.length, buf.is_looping, loop_repeat, buf.play_position,
++                 mirror_mode, sfx_first, bgm_replaced);
++    }
+ 
+     if (buf.adpcm_dirty) {
+         state.adpcm_state.yn1 = buf.adpcm_yn[0];
+@@ -462,13 +548,28 @@ bool Source::DequeueBuffer() {
+         const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
+         switch (buf.format) {
+         case Format::PCM8:
++            if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM8(num_channels, memory, buf.length);
+             break;
+         case Format::PCM16:
++            // ff-bgm1x: AAC 디코더가 BGM 을 풀어 놓은 버퍼인지 확인
++            if (BgmReplacer::Instance().OnPcmBuffer(source_id, buf.physical_address, buf.length,
++                                                    num_channels)) {
++                bgm_replaced = true;
++            } else if (bgm_replaced) {
++                bgm_replaced = false;
++                BgmReplacer::Instance().OnSourceIdle(source_id);
++            }
+             state.current_buffer = Codec::DecodePCM16(num_channels, memory, buf.length);
+             break;
+         case Format::ADPCM:
+             DEBUG_ASSERT(num_channels == 1);
++            // ff-bgm1x: BGM 스트림 버퍼인지 확인
++            bgm_replaced = BgmReplacer::Instance().OnAdpcmBuffer(source_id, state.adpcm_coeffs,
++                                                                 memory, buf.length);
+             state.current_buffer =
+                 Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
+             break;
+@@ -476,6 +577,36 @@ bool Source::DequeueBuffer() {
+             UNIMPLEMENTED();
+             break;
+         }
++        // ff-bgm1x: 소리 분류 - 원본 그대로 내는 스트림 곡(연출 등)에 사용자가 정한 볼륨
++        stream_gain = buf.format == Format::PCM8 ? 1.0f : BgmReplacer::Instance().NativeGain(source_id);
++        // ff-bgm1x: 소리 분류 - 새 소리의 첫 버퍼로 어느 파형인지 알아내 사용자 지정을 따른다
++        // (분류 창이 닫혀 있고 사용자 지정도 없으면 Active() 가 false 라 아무것도 하지 않는다)
++        if (sfx_first && !bgm_replaced && !loop_repeat &&
++            BgmReplacer::Instance().Catalog().Active()) {
++            sfx_first = false;
++            const bool adpcm = buf.format == Format::ADPCM;
++            const u32 bytes = adpcm ? (buf.length + 13) / 14 * 8
++                              : buf.format == Format::PCM16 ? buf.length * 2 * num_channels
++                                                            : buf.length * num_channels;
++            const auto policy =
++                BgmReplacer::Instance().OnSfxBuffer(source_id, adpcm, state.adpcm_coeffs, memory, bytes);
++            if (policy.matched) {
++                sfx_gain = policy.gain;
++                sfx_cutscene = policy.kind == SoundCatalog::Kind_Cutscene;
++                if (policy.kind == SoundCatalog::Kind_None ||
++                    policy.kind == SoundCatalog::Kind_Cutscene) {
++                    // 원본 그대로 (게임 속도)
++                    if (mirror_mode) {
++                        mirror_mode = 0;
++                        BgmReplacer::Instance().MirrorEnd(source_id);
++                    }
++                } else if (policy.kind == SoundCatalog::Kind_Bgm ||
++                           policy.kind == SoundCatalog::Kind_Jingle) {
++                    // "대사·효과음 1배속" 이 꺼져 있어도 1배속
++                    if (!mirror_mode) mirror_mode = BgmReplacer::Instance().MirrorBeginForced(source_id);
++                }
++            }
++        }
+     } else {
+         LOG_WARNING(Audio_DSP,
+                     "source_id={} buffer_id={} length={}: Invalid physical address {:#010x}",
+@@ -506,6 +637,16 @@ bool Source::DequeueBuffer() {
+         state.current_buffer.begin(),
+         std::next(state.current_buffer.begin(), state.current_sample_number));
+ 
++    // ff-bgm1x: 느린 속도의 효과음 미러 - 받은 버퍼 전체를 넘겨 실제 시간으로 낸다 (BGM 음성은 BGM 쪽이 맡는다)
++    if (mirror_mode == 2) {
++        if (bgm_replaced) {
++            mirror_mode = 0;
++            BgmReplacer::Instance().MirrorEnd(source_id);
++        } else if (!loop_repeat) {
++            BgmReplacer::Instance().MirrorAheadBuffer(source_id, state.current_buffer, buf.is_looping);
++        }
++    }
++
+     LOG_TRACE(Audio_DSP,
+               "source_id={} buffer_id={} from_queue={} current_buffer.size()={}, "
+               "buf.has_played={}, buf.play_position={}",

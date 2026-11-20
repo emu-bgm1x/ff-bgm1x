@@ -1,0 +1,41 @@
+diff --git a/src/wx/cmdevents.cpp b/src/wx/cmdevents.cpp
+index 4778292..0a5b683 100644
+--- a/src/wx/cmdevents.cpp
++++ b/src/wx/cmdevents.cpp
+@@ -1,3 +1,4 @@
++#include "wx/ffbgm/sound_dialog.h"
+ #include "wx/wxvbam.h"
+ 
+ #include <wx/aboutdlg.h>
+@@ -2479,6 +2480,31 @@ EVT_HANDLER(AGBPrinter, "Enable AGB printer")
+     GetMenuOptionConfig("AGBPrinter", config::OptionID::kPrefAgbPrint);
+ }
+ 
++EVT_HANDLER(FfbgmBgm1x, "Keep BGM at 1x speed (toggle)")
++{
++    GetMenuOptionConfig("FfbgmBgm1x", config::OptionID::kSoundFfbgmBgm1x);
++}
++
++EVT_HANDLER(FfbgmFfCutscenes, "Fast forward during cutscenes (toggle)")
++{
++    GetMenuOptionConfig("FfbgmFfCutscenes", config::OptionID::kSoundFfbgmFfCutscenes);
++}
++
++EVT_HANDLER(FfbgmSfx1x, "Keep sound effects at 1x speed (toggle)")
++{
++    GetMenuOptionConfig("FfbgmSfx1x", config::OptionID::kSoundFfbgmSfx1x);
++}
++
++EVT_HANDLER(FfbgmRamSongs, "Read songs built in RAM (toggle)")
++{
++    GetMenuOptionConfig("FfbgmRamSongs", config::OptionID::kSoundFfbgmRamSongs);
++}
++
++EVT_HANDLER(FfbgmSoundCatalog, "Sound classification window (ff-bgm1x)")
++{
++    ffbgm::OpenSoundDialog(this);
++}
++
+ EVT_HANDLER_MASK(GBALcdFilter, "Enable LCD filter", CMDEN_GBA)
+ {
+     GetMenuOptionConfig("GBALcdFilter", config::OptionID::kGBALCDFilter);

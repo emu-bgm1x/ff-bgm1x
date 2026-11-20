@@ -1,0 +1,612 @@
+diff --git a/desmume/src/MMU.cpp b/desmume/src/MMU.cpp
+index 53947b7..148a56e 100644
+--- a/desmume/src/MMU.cpp
++++ b/desmume/src/MMU.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 yopyop
+ 	Copyright (C) 2007 shash
+@@ -4897,6 +4898,7 @@ void FASTCALL _MMU_ARM9_write32(u32 adr, u32 val)
+ 					return;
+ 				case REG_IPCFIFOSEND:
+ 					IPC_FIFOsend(ARMCPU_ARM9, val);
++					ffbgm_onArm9Fifo(val);
+ 					return;
+ 					
+ 				case REG_GCROMCTRL :
+diff --git a/desmume/src/NDSSystem.cpp b/desmume/src/NDSSystem.cpp
+index bdfc970..a6cab27 100644
+--- a/desmume/src/NDSSystem.cpp
++++ b/desmume/src/NDSSystem.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 yopyop
+ 	Copyright (C) 2008-2021 DeSmuME team
+@@ -804,6 +805,7 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
+ 	}
+ 
+ 	//UnloadMovieEmulationSettings(); called in NDS_Reset()
++	ffbgm_onRomLoaded(physicalName ? physicalName : filename);  // ff-bgm1x: ROM file path
+ 	NDS_Reset();
+ 
+ 	return ret;
+@@ -2640,6 +2642,7 @@ void NDS_Reset()
+ 	if(lastRom.filename.size()==0)
+ 		return;
+ 
++	ffbgm_onReset();
+ 	UnloadMovieEmulationSettings();
+ 
+ 	//reload last paths if needed
+diff --git a/desmume/src/SPU.cpp b/desmume/src/SPU.cpp
+index d113e7f..fad2e76 100644
+--- a/desmume/src/SPU.cpp
++++ b/desmume/src/SPU.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 yopyop
+ 	Copyright (C) 2006 Theo Berkau
+@@ -60,6 +61,9 @@ static inline s8 read_s8(u32 addr) { return (s8)_MMU_read08<ARMCPU_ARM7,MMU_AT_D
+ static ISynchronizingAudioBuffer* _currentSynchronizer = metaspu_construct(ESynchMethod_N);
+ 
+ SPU_struct *SPU_core = 0;
++s32 g_ffbgmGainQ8 = 256;  // ff-bgm1x: g_ffbgmGainMask channels are scaled by q8/256 (sound classification volume)
++u16 g_ffbgmGainMask = 0;
++u16 g_ffbgmMuteMask = 0;  // ff-bgm1x: channels with a set bit are not mixed (stream replaced at 1x)
+ SPU_struct *SPU_user = 0;
+ int SPU_currentCoreNum = SNDCORE_DUMMY;
+ static int _currentVolume = 100;
+@@ -1181,18 +1185,21 @@ static FORCEINLINE void FetchPSGData(channel_struct *chan, s32 *data)
+ static FORCEINLINE void MixL(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[SPU->bufpos<<1] += data;
+ }
+ 
+ static FORCEINLINE void MixR(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[(SPU->bufpos<<1)+1] += data;
+ }
+ 
+ static FORCEINLINE void MixLR(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[SPU->bufpos<<1] += spumuldiv7(data, 127 - chan->pan);
+ 	SPU->sndbuf[(SPU->bufpos<<1)+1] += spumuldiv7(data, chan->pan);
+ }
+@@ -1395,6 +1402,7 @@ static void SPU_MixAudio_Advanced(bool actuallyMix, SPU_struct *SPU, int length)
+ 				if (bypass) outputToMix = false;
+ 				bool outputToCap = outputToMix;
+ 				if (CommonSettings.spu_captureMuted && !bypass) outputToCap = true;
++				if (g_ffbgmMuteMask & (1 << i)) outputToMix = false;  // ff-bgm1x (capture unchanged)
+ 
+ 				//channels 1 and 3 should probably always generate their audio
+ 				//internally at least, just in case they get used by the spu output
+@@ -1593,7 +1601,7 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
+ 			SPU->buflength = length;
+ 
+ 			// Mix audio
+-			_SPU_ChanUpdate(!CommonSettings.spu_muteChannels[i] && actuallyMix, SPU, chan);
++			_SPU_ChanUpdate(!CommonSettings.spu_muteChannels[i] && !(g_ffbgmMuteMask & (1 << i)) && actuallyMix, SPU, chan);  // ff-bgm1x
+ 		}
+ 
+ 		//zero out capture buffers - effectively transform no-advanced-spu-emulation to capturing-zeroes
+@@ -1743,6 +1751,7 @@ void SPU_Emulate_user(bool mix)
+ 		processedSampleCount = SPU_DefaultPostProcessSamples(postProcessBuffer, freeSampleCount, _currentSynchMode, _currentSynchronizer);
+ 	}
+ 	
++	ffbgm_mix(postProcessBuffer, (int)processedSampleCount);
+ 	soundProcessor->UpdateAudio(postProcessBuffer, processedSampleCount);
+ 	WAV_WavSoundUpdate(postProcessBuffer, processedSampleCount, WAVMODE_USER);
+ }
+diff --git a/desmume/src/addons/slot1comp_protocol.cpp b/desmume/src/addons/slot1comp_protocol.cpp
+index abeaded..c69725c 100644
+--- a/desmume/src/addons/slot1comp_protocol.cpp
++++ b/desmume/src/addons/slot1comp_protocol.cpp
+@@ -16,6 +16,7 @@
+ */
+ 
+ #include "slot1comp_protocol.h"
++#include "../ffbgm/ffbgm.h"  // ff-bgm1x
+ 
+ #include <string.h>
+ 
+@@ -149,6 +150,7 @@ void Slot1Comp_Protocol::write_command_NORMAL(GC_Command theCommand)
+ #endif
+ 			address = (u32)((cmd64 >> 24));
+ 			length = 0x200;
++			ffbgm_onCartRead(address);  // ff-bgm1x: detect streamed songs (STRM)
+ 
+ 			client->slot1client_startOperation(operation);
+ 		}
+diff --git a/desmume/src/frontend/windows/DeSmuME.vcxproj b/desmume/src/frontend/windows/DeSmuME.vcxproj
+index abf9786..dfe004e 100644
+--- a/desmume/src/frontend/windows/DeSmuME.vcxproj
++++ b/desmume/src/frontend/windows/DeSmuME.vcxproj
+@@ -142,6 +142,41 @@
+     <ClCompile Include="..\..\slot1.cpp" />
+     <ClCompile Include="..\..\slot2.cpp" />
+     <ClCompile Include="..\..\SPU.cpp" />
++    <ClCompile Include="..\..\ffbgm\NitroSynth.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\BgmReplacer.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\NitroStrm.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\SoundCatalog.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\SoundPreview.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\ffbgm_glue.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\ffbgm_soundwin.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
+     <ClCompile Include="..\..\texcache.cpp" />
+     <ClCompile Include="..\..\thumb_instructions.cpp" />
+     <ClCompile Include="..\..\utils\advanscene.cpp" />
+@@ -449,6 +484,13 @@
+     <ClInclude Include="..\..\slot1.h" />
+     <ClInclude Include="..\..\slot2.h" />
+     <ClInclude Include="..\..\SPU.h" />
++    <ClInclude Include="..\..\ffbgm\NitroSynth.h" />
++    <ClInclude Include="..\..\ffbgm\BgmReplacer.h" />
++    <ClInclude Include="..\..\ffbgm\ffbgm.h" />
++    <ClInclude Include="..\..\ffbgm\ffbgm_glue.h" />
++    <ClInclude Include="..\..\ffbgm\NitroStrm.h" />
++    <ClInclude Include="..\..\ffbgm\SoundCatalog.h" />
++    <ClInclude Include="..\..\ffbgm\SoundPreview.h" />
+     <ClInclude Include="..\..\texcache.h" />
+     <ClInclude Include="..\..\utils\advanscene.h" />
+     <ClInclude Include="..\..\utils\AsmJit\asmjit.h" />
+diff --git a/desmume/src/frontend/windows/hotkey.cpp b/desmume/src/frontend/windows/hotkey.cpp
+index 4bdab10..39cfd8b 100644
+--- a/desmume/src/frontend/windows/hotkey.cpp
++++ b/desmume/src/frontend/windows/hotkey.cpp
+@@ -25,6 +25,7 @@
+ #include <Shellapi.h>
+ 
+ #include "hotkey.h"
++#include "../../ffbgm/ffbgm.h"
+ 
+ #include "NDSSystem.h"
+ #include "saves.h"
+@@ -528,6 +529,18 @@ void HK_FrameLimitToggle(int, bool justPressed) {
+ 	WritePrivateProfileInt("FrameLimit", "FrameLimit", FrameLimit, IniName);
+ }
+ 
++void HK_FfbgmBgm1xToggle(int, bool justPressed) {
++	ffbgm_setBgm1x(!ffbgm_bgm1x());
++	WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Bgm1x", ffbgm_bgm1x(), (char*)IniName);
++}
++void HK_FfbgmSoundWindow(int, bool justPressed) {
++	ffbgm_openSoundWindow(MainWindow->getHWnd());
++}
++void HK_FfbgmCutsceneToggle(int, bool justPressed) {
++	ffbgm_setFfCutscenes(!ffbgm_ffCutscenes());
++	WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"FfCutscenes", ffbgm_ffCutscenes(), (char*)IniName);
++}
++
+ void HK_FrameAdvanceKeyDown(int, bool justPressed) { FrameAdvance(true); }
+ void HK_FrameAdvanceKeyUp(int) { FrameAdvance(false); }
+ 
+@@ -696,6 +709,24 @@ void InitCustomKeys (SCustomKeys *keys)
+ 	keys->FrameLimitToggle.page = HOTKEY_PAGE_MAIN;
+ 	keys->FrameLimitToggle.key = NULL;
+ 
++	keys->FfbgmBgm1xToggle.handleKeyDown = HK_FfbgmBgm1xToggle;
++	keys->FfbgmBgm1xToggle.code = "FfbgmBgm1xToggle";
++	keys->FfbgmBgm1xToggle.name = STRW(ID_LABEL_HK_FFBGM);
++	keys->FfbgmBgm1xToggle.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmBgm1xToggle.key = NULL;
++
++	keys->FfbgmCutsceneToggle.handleKeyDown = HK_FfbgmCutsceneToggle;
++	keys->FfbgmCutsceneToggle.code = "FfbgmCutsceneToggle";
++	keys->FfbgmCutsceneToggle.name = STRW(ID_LABEL_HK_FFCUTSCENE);
++	keys->FfbgmCutsceneToggle.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmCutsceneToggle.key = NULL;
++
++	keys->FfbgmSoundWindow.handleKeyDown = HK_FfbgmSoundWindow;
++	keys->FfbgmSoundWindow.code = "FfbgmSoundWindow";
++	keys->FfbgmSoundWindow.name = STRW(ID_LABEL_HK_FFSOUNDWIN);
++	keys->FfbgmSoundWindow.page = HOTKEY_PAGE_MAIN;
++	keys->FfbgmSoundWindow.key = NULL;
++
+ 	keys->IncreasePressure.handleKeyDown = HK_IncreasePressure;
+ 	keys->IncreasePressure.code = "IncreasePressure";
+ 	keys->IncreasePressure.name = STRW(ID_LABEL_HK55);
+diff --git a/desmume/src/frontend/windows/hotkey.h b/desmume/src/frontend/windows/hotkey.h
+index 6a79c58..4424275 100644
+--- a/desmume/src/frontend/windows/hotkey.h
++++ b/desmume/src/frontend/windows/hotkey.h
+@@ -78,7 +78,7 @@ struct SCustomKeys
+ #ifdef HAVE_JIT
+ 	SCustomKey CpuMode, JitBlockSizeDec, JitBlockSizeInc;
+ #endif
+-	SCustomKey FrameAdvance, FastForward, FastForwardToggle, IncreaseSpeed, DecreaseSpeed, FrameLimitToggle, Microphone, PrevSample, NextSample, IncreasePressure, DecreasePressure;
++	SCustomKey FrameAdvance, FastForward, FastForwardToggle, IncreaseSpeed, DecreaseSpeed, FrameLimitToggle, FfbgmBgm1xToggle, FfbgmCutsceneToggle, FfbgmSoundWindow, Microphone, PrevSample, NextSample, IncreasePressure, DecreasePressure;
+ 
+ 	SCustomKey PlayMovie, RecordMovie, StopMovie, ToggleReadOnly;
+ 	
+diff --git a/desmume/src/frontend/windows/main.cpp b/desmume/src/frontend/windows/main.cpp
+index f84ccea..d98e6f8 100644
+--- a/desmume/src/frontend/windows/main.cpp
++++ b/desmume/src/frontend/windows/main.cpp
+@@ -1,4 +1,5 @@
+-﻿/*
++﻿#include "../../ffbgm/ffbgm.h"
++/*
+ 	Copyright (C) 2006 Theo Berkau
+ 	Copyright (C) 2006-2019 DeSmuME team
+ 
+@@ -1281,6 +1282,7 @@ static void StepRunLoop_Core()
+ 	{
+ 		Lock lock;
+ 		NDS_exec<false>();
++		ffbgm_afterMainFrame();
+ 		SPU_Emulate_user();
+ 		win_sound_samplecounter = DESMUME_SAMPLE_RATE/60;
+ 	}
+@@ -1362,7 +1364,10 @@ static void StepRunLoop_User()
+ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1)
+ {
+ 	int skipRate = (forceFrameSkip < 0) ? frameskiprate : forceFrameSkip;
+-	int ffSkipRate = (forceFrameSkip < 0) ? 9 : forceFrameSkip;
++	// ff-bgm1x: with a fixed fast forward speed (Nx), draw 1 of N frames; unlimited keeps the original 9 skips
++	int ffSkipRate = (forceFrameSkip < 0) ? (FastForwardSpeed > 0 ? FastForwardSpeed - 1 : 9) : forceFrameSkip;
++	// ff-bgm1x: during a cutscene hold, ignore fast forward and run at the normal speed
++	const bool ffHeld = FastForward && !ffbgm_cutsceneHold();
+ 
+ 	if(lastskiprate != skipRate)
+ 	{
+@@ -1370,7 +1375,7 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		mainLoopData.framestoskip = 0; // otherwise switches to lower frameskip rates will lag behind
+ 	}
+ 
+-	if(!mainLoopData.skipnextframe || forceFrameSkip == 0 || frameAdvance || (continuousframeAdvancing && !FastForward))
++	if(!mainLoopData.skipnextframe || forceFrameSkip == 0 || frameAdvance || (continuousframeAdvancing && !ffHeld))
+ 	{
+ 		mainLoopData.framesskipped = 0;
+ 
+@@ -1391,7 +1396,7 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		NDS_SkipNextFrame();
+ 	}
+ 
+-	if(FastForward)
++	if(ffHeld)
+ 	{
+ 		if(mainLoopData.framesskipped < ffSkipRate)
+ 		{
+@@ -1400,8 +1405,10 @@ static void StepRunLoop_Throttle(bool allowSleep = true, int forceFrameSkip = -1
+ 		}
+ 		if (mainLoopData.framestoskip < 1)
+ 			mainLoopData.framestoskip += ffSkipRate;
++		if (FastForwardSpeed > 0 && allowSleep)
++			SpeedThrottle(); // ff-bgm1x: limit fast forward to the chosen speed
+ 	}
+-	else if((/*autoframeskipenab && frameskiprate ||*/ FrameLimit) && allowSleep)
++	else if((/*autoframeskipenab && frameskiprate ||*/ FrameLimit || FastForward) && allowSleep)
+ 	{
+ 		SpeedThrottle();
+ 	}
+@@ -2093,6 +2100,12 @@ int _main()
+ 	start_paused = cmdline.start_paused!=0;
+ 	
+ 	FrameLimit = (cmdline.disable_limiter == 1) ? false : GetPrivateProfileBool("FrameLimit", "FrameLimit", true, IniName);
++	ffbgm_setBgm1x(GetPrivateProfileBool("ff-bgm1x", "Bgm1x", true, IniName));
++	ffbgm_setFfCutscenes(GetPrivateProfileBool("ff-bgm1x", "FfCutscenes", false, IniName));
++	ffbgm_setSfx1x(GetPrivateProfileBool("ff-bgm1x", "Sfx1x", true, IniName));
++	ffbgm_setSfxVolume(GetPrivateProfileInt("ff-bgm1x", "SfxVolume", 256, IniName));
++	FastForwardSpeed = GetPrivateProfileInt("ff-bgm1x", "FastForwardSpeed", 0, IniName);
++	if (FastForwardSpeed < 0 || FastForwardSpeed > 16) FastForwardSpeed = 0;
+ 	
+ 	// Temporary scanline parameter setting for Windows.
+ 	// TODO: When videofilter.cpp becomes Windows-friendly, replace the direct setting of
+@@ -3815,6 +3828,15 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
+ 			MainWindow->checkMenu(ID_VIEW_DISPLAYRTC,CommonSettings.hud.ShowRTC);
+ 			MainWindow->checkMenu(ID_VIEW_HUDEDITOR, HudEditorMode);
+ 			MainWindow->checkMenu(IDC_FRAMELIMIT, FrameLimit);
++			MainWindow->checkMenu(IDC_FFBGM_BGM1X, ffbgm_bgm1x());
++			MainWindow->checkMenu(IDC_FFBGM_SFX1X, ffbgm_sfx1x());
++			MainWindow->checkMenu(IDC_FFBGM_CUTSCENE, ffbgm_ffCutscenes());
++			MainWindow->checkMenu(IDC_FFSPEED_2X, FastForwardSpeed == 2);
++			MainWindow->checkMenu(IDC_FFSPEED_3X, FastForwardSpeed == 3);
++			MainWindow->checkMenu(IDC_FFSPEED_4X, FastForwardSpeed == 4);
++			MainWindow->checkMenu(IDC_FFSPEED_6X, FastForwardSpeed == 6);
++			MainWindow->checkMenu(IDC_FFSPEED_8X, FastForwardSpeed == 8);
++			MainWindow->checkMenu(IDC_FFSPEED_UNLIMITED, FastForwardSpeed <= 0);
+ 			
+ 			//Frame Skip
+ 			MainWindow->checkMenu(IDC_FRAMESKIPAUTO, autoframeskipenab);
+@@ -3954,6 +3976,7 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
+ 	case WM_DESTROY:
+ 	case WM_CLOSE:
+ 		{
++			ffbgm_closeSoundWindow();  // ff-bgm1x: close the sound window before teardown
+ 			NDS_Pause();
+ 			if (true/*AskSave()*/)	//Ask Save comes from the Ram Watch dialog.  The dialog uses .wch files and this allows asks the user if he wants to save changes first, should he cancel, closing will not happen
+ 			{
+@@ -5344,6 +5367,27 @@ DOKEYDOWN:
+ 			break;
+ 	
+ 
++		case IDC_FFSPEED_2X: FastForwardSpeed = 2; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_3X: FastForwardSpeed = 3; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_4X: FastForwardSpeed = 4; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_6X: FastForwardSpeed = 6; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_8X: FastForwardSpeed = 8; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFSPEED_UNLIMITED: FastForwardSpeed = 0; WritePrivateProfileInt("ff-bgm1x", "FastForwardSpeed", FastForwardSpeed, IniName); break;
++		case IDC_FFBGM_BGM1X:
++			ffbgm_setBgm1x(!ffbgm_bgm1x());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Bgm1x", ffbgm_bgm1x(), (char*)IniName);
++			break;
++		case IDC_FFBGM_SFX1X:
++			ffbgm_setSfx1x(!ffbgm_sfx1x());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"Sfx1x", ffbgm_sfx1x(), (char*)IniName);
++			break;
++		case IDC_FFBGM_SOUNDWIN:
++			ffbgm_openSoundWindow(hwnd);
++			break;
++		case IDC_FFBGM_CUTSCENE:
++			ffbgm_setFfCutscenes(!ffbgm_ffCutscenes());
++			WritePrivateProfileBool((char*)"ff-bgm1x", (char*)"FfCutscenes", ffbgm_ffCutscenes(), (char*)IniName);
++			break;
+ 		case IDC_FRAMELIMIT:
+ 			FrameLimit ^= 1;
+ 			WritePrivateProfileInt("FrameLimit", "FrameLimit", FrameLimit, IniName);
+@@ -6496,6 +6540,7 @@ static void SoundSettings_updateSynchMode(HWND hDlg)
+ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+ {
+ 	static UINT_PTR timerid=0;
++	static int sfxVolumeAtOpen = 256;
+ 	switch (uMsg)
+ 	{
+ 	case WM_INITDIALOG:
+@@ -6544,6 +6589,10 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 			// Set Selected Volume
+ 			SendDlgItemMessage(hDlg, IDC_SLVOLUME, TBM_SETPOS, TRUE, sndvolume);
+ 			SoundSettings_updateVolumeReadout(hDlg);
++			sfxVolumeAtOpen = ffbgm_sfxVolume();
++			SendDlgItemMessage(hDlg, IDC_SFXVOLUME, TBM_SETRANGE, 0, MAKELONG(0, 256));
++			SendDlgItemMessage(hDlg, IDC_SFXVOLUME, TBM_SETPOS, TRUE, sfxVolumeAtOpen);
++			SetDlgItemInt(hDlg, IDC_SFXVOLUMEREAD, sfxVolumeAtOpen, FALSE);
+ 
+ 			// Set spu advanced
+ 			CheckDlgItem(hDlg,IDC_SPU_ADVANCED,CommonSettings.spu_advanced);
+@@ -6553,6 +6602,14 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 		}
+ 	case WM_HSCROLL:
+ 		SoundSettings_updateVolumeReadout(hDlg);
++		{
++			if ((HWND)lParam == GetDlgItem(hDlg, IDC_SFXVOLUME))
++			{
++				int v = (int)SendMessage(GetDlgItem(hDlg, IDC_SFXVOLUME), TBM_GETPOS, 0, 0);
++				ffbgm_setSfxVolume(v);
++				SetDlgItemInt(hDlg, IDC_SFXVOLUMEREAD, v, FALSE);
++			}
++		}
+ 		break;
+ 
+ 	case WM_TIMER:
+@@ -6627,11 +6684,13 @@ static LRESULT CALLBACK SoundSettingsDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam
+ 					//write spu advanced
+ 					CommonSettings.spu_advanced = IsDlgCheckboxChecked(hDlg,IDC_SPU_ADVANCED);
+ 					WritePrivateProfileBool("Sound","SpuAdvanced",CommonSettings.spu_advanced,IniName);
++					WritePrivateProfileInt("ff-bgm1x", "SfxVolume", ffbgm_sfxVolume(), IniName);
+ 
+ 					return TRUE;
+ 				}
+ 			case IDCANCEL:
+ 				{
++					ffbgm_setSfxVolume(sfxVolumeAtOpen);
+ 					EndDialog(hDlg, FALSE);
+ 					return TRUE;
+ 				}
+diff --git a/desmume/src/frontend/windows/resource.h b/desmume/src/frontend/windows/resource.h
+index a753958..4493d61 100644
+--- a/desmume/src/frontend/windows/resource.h
++++ b/desmume/src/frontend/windows/resource.h
+@@ -931,6 +931,21 @@
+ #define IDM_ABOUT                       40003
+ #define IDM_EMULATIONSETTINGS           40004
+ #define IDC_FRAMELIMIT                  40005
++#define IDC_FFBGM_BGM1X                 40140
++#define IDC_FFBGM_SFX1X                 40141
++#define IDC_FFBGM_CUTSCENE              40142
++#define IDC_FFBGM_SOUNDWIN              40160
++#define IDC_FFSPEED_2X                  40130
++#define IDC_FFSPEED_3X                  40131
++#define IDC_FFSPEED_4X                  40132
++#define IDC_FFSPEED_6X                  40133
++#define IDC_FFSPEED_8X                  40134
++#define IDC_FFSPEED_UNLIMITED           40135
++#define IDC_SFXVOLUME                   2900
++#define IDC_SFXVOLUMEREAD               2901
++#define ID_LABEL_HK_FFBGM               44800
++#define ID_LABEL_HK_FFCUTSCENE          44801
++#define ID_LABEL_HK_FFSOUNDWIN          44802
+ #define ID_CONFIG_PAUSEWHENFOCUSLOST    40005
+ #define IDC_WINDOW1_5X                  40006
+ #define IDM_WIFISETTINGS                40007
+diff --git a/desmume/src/frontend/windows/resources.rc b/desmume/src/frontend/windows/resources.rc
+index 2325fe3..f95c2d8 100644
+--- a/desmume/src/frontend/windows/resources.rc
++++ b/desmume/src/frontend/windows/resources.rc
+@@ -1075,7 +1075,7 @@ BEGIN
+     CONTROL         "",1130,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,7,311,214
+ END
+ 
+-IDD_SOUNDSETTINGS DIALOGEX 0, 0, 387, 172
++IDD_SOUNDSETTINGS DIALOGEX 0, 0, 387, 190
+ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+ CAPTION "Sound Settings"
+ FONT 8, "MS Sans Serif", 0, 0, 0x1
+@@ -1093,8 +1093,8 @@ BEGIN
+     EDITTEXT        IDC_SOUNDBUFFERET,237,26,42,13
+     COMBOBOX        IDC_SPU_INTERPOLATION_CB,237,44,131,33,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+     CONTROL         "",IDC_SLVOLUME,"msctls_trackbar32",0x0,231,63,128,10
+-    DEFPUSHBUTTON   "&OK",IDOK,288,148,40,14
+-    PUSHBUTTON      "&Cancel",IDCANCEL,334,148,40,14
++    DEFPUSHBUTTON   "&OK",IDOK,288,166,40,14
++    PUSHBUTTON      "&Cancel",IDCANCEL,334,166,40,14
+     LTEXT           "Sound Core",IDC_STATIC,195,12,40,10
+     LTEXT           "Buffer Size",IDC_STATIC,197,29,39,10
+     LTEXT           "Volume",IDC_STATIC,201,63,30,10
+@@ -1108,6 +1108,9 @@ BEGIN
+                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,197,74,177,10
+     LTEXT           "This will be necessary to emulate sound capture (reverb and music visualization). This is costly, few games use it, and the effect is unnecessary.  Enable it if your system has power to spare; check the Sound Viewer to see if the game is using capture.",IDC_STATIC,196,86,177,41
+     LTEXT           "Can cause deterministically visible changes to emulation in principle!!!",IDC_STATIC,196,127,177,17
++    LTEXT           "SFX Volume (1x)",IDC_STATIC,195,152,44,10
++    CONTROL         "",IDC_SFXVOLUME,"msctls_trackbar32",0x0,240,150,118,10
++    LTEXT           "256",IDC_SFXVOLUMEREAD,364,152,18,10
+ END
+ 
+ IDD_SOUND_VIEW DIALOGEX 0, 0, 568, 269
+@@ -1780,6 +1783,23 @@ BEGIN
+             MENUITEM "&8",                          IDC_FRAMESKIP8
+             MENUITEM "&9",                          IDC_FRAMESKIP9
+         END
++        POPUP "Fast forward &speed"
++        BEGIN
++            MENUITEM "&2x",                         IDC_FFSPEED_2X
++            MENUITEM "&3x",                         IDC_FFSPEED_3X
++            MENUITEM "&4x",                         IDC_FFSPEED_4X
++            MENUITEM "&6x",                         IDC_FFSPEED_6X
++            MENUITEM "&8x",                         IDC_FFSPEED_8X
++            MENUITEM "&Unlimited",                  IDC_FFSPEED_UNLIMITED
++        END
++        POPUP "ff-bgm1x (1x audio)"
++        BEGIN
++            MENUITEM "Keep &BGM at 1x speed",         IDC_FFBGM_BGM1X
++            MENUITEM "Keep sound &effects at 1x",     IDC_FFBGM_SFX1X
++            MENUITEM "Fast forward during &cutscenes", IDC_FFBGM_CUTSCENE
++            MENUITEM SEPARATOR
++            MENUITEM "&Sound classification...",     IDC_FFBGM_SOUNDWIN
++        END
+         MENUITEM "&Emulation Settings",         IDM_EMULATIONSETTINGS
+         MENUITEM "&3D Settings",                IDM_3DCONFIG
+         MENUITEM "&Sound Settings",             IDM_SOUNDSETTINGS
+@@ -2247,6 +2267,9 @@ END
+ STRINGTABLE
+ BEGIN
+     ID_LABEL_HK8b           "Limit Framerate Toggle"
++    ID_LABEL_HK_FFBGM       "Keep BGM at 1x Toggle"
++    ID_LABEL_HK_FFCUTSCENE  "Fast Forward During Cutscenes Toggle"
++    ID_LABEL_HK_FFSOUNDWIN  "Sound Classification Window"
+ END
+ 
+ STRINGTABLE
+diff --git a/desmume/src/frontend/windows/throttle.cpp b/desmume/src/frontend/windows/throttle.cpp
+index ff7bf56..8cc37d8 100644
+--- a/desmume/src/frontend/windows/throttle.cpp
++++ b/desmume/src/frontend/windows/throttle.cpp
+@@ -19,6 +19,7 @@
+ 	along with the this software.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
++#include "../../ffbgm/ffbgm.h"
+ #include "throttle.h"
+ 
+ #define WIN32_LEAN_AND_MEAN
+@@ -34,6 +35,7 @@
+ #include "winutil.h"
+ 
+ int FastForward=0;
++int FastForwardSpeed=0; // ff-bgm1x: fast forward multiplier (0 = unlimited)
+ static u64 tmethod,tfreq,afsfreq;
+ static const u64 core_desiredfps = 3920763; //59.8261
+ static u64 desiredfps = core_desiredfps;
+@@ -113,16 +115,20 @@ void SpeedThrottle()
+ {
+ 	AutoFrameSkip_BeforeThrottle();
+ 
+-waiter:
+-	if(FastForward)
++	// ff-bgm1x: fast forward runs at FastForwardSpeed x the normal (100%) speed, ignoring the +/- setting like the original; 0 = unlimited.
++	// During a cutscene hold (cutscene and "fast forward during cutscenes" off) it runs at the normal target speed.
++	const bool ffActive = FastForward && !ffbgm_cutsceneHold();
++	if(ffActive && FastForwardSpeed <= 0)
+ 		return;
++	const u64 targetfps = ffActive ? core_desiredfps * (u64)FastForwardSpeed : desiredfps;
+ 
++waiter:
+ 	u64 ttime = GetCurTime();
+ 
+-	if((ttime - ltime) < (tfreq / desiredfps))
++	if((ttime - ltime) < (tfreq / targetfps))
+ 	{
+ 		u64 sleepy;
+-		sleepy = (tfreq / desiredfps) - (ttime - ltime);  
++		sleepy = (tfreq / targetfps) - (ttime - ltime);
+ 		sleepy *= 1000;
+ 		if(tfreq >= 65536)
+ 			sleepy /= afsfreq;
+@@ -134,10 +140,10 @@ waiter:
+ 			SwitchToThread(); // limit to other threads on the same CPU core for other short waits
+ 		goto waiter;
+ 	}
+-	if( (ttime-ltime) >= (tfreq*4/desiredfps))
++	if( (ttime-ltime) >= (tfreq*4/targetfps))
+ 		ltime=ttime;
+ 	else
+-		ltime+=tfreq/desiredfps;
++		ltime+=tfreq/targetfps;
+ }
+ 
+ 
+diff --git a/desmume/src/frontend/windows/throttle.h b/desmume/src/frontend/windows/throttle.h
+index 82ab654..7488a64 100644
+--- a/desmume/src/frontend/windows/throttle.h
++++ b/desmume/src/frontend/windows/throttle.h
+@@ -19,6 +19,7 @@
+ #define _THROTTLE_H_
+ 
+ extern int FastForward;
++extern int FastForwardSpeed; // ff-bgm1x: fast forward multiplier (0 = unlimited)
+ extern bool FrameLimit;
+ void IncreaseSpeed();
+ void DecreaseSpeed();
+diff --git a/desmume/src/saves.cpp b/desmume/src/saves.cpp
+index 9280cd9..c946ad3 100644
+--- a/desmume/src/saves.cpp
++++ b/desmume/src/saves.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 Normmatt
+ 	Copyright (C) 2006 Theo Berkau
+@@ -1375,6 +1376,7 @@ bool savestate_load(EMUFILE &is)
+ 	}
+ 
+ 
++	ffbgm_onStateLoaded();
+ 	return true;
+ }
+ 

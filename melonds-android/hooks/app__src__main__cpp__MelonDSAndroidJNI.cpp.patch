@@ -1,0 +1,61 @@
+diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+index 2a85bf86..b573960c 100644
+--- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
++++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
+@@ -301,6 +301,36 @@ Java_me_magnum_melonds_MelonEmulator_getFPS(JNIEnv* env, jobject thiz)
+     return fps;
+ }
+ 
++// ff-bgm1x 소리 분류: 문자열 명령 (UTF-8). NewStringUTF 는 변형 UTF-8 이라 바이트로 넘겨 자바에서 푼다
++JNIEXPORT jstring JNICALL
++Java_me_magnum_melonds_MelonEmulator_catalogCommand(JNIEnv* env, jobject thiz, jstring cmd)
++{
++    const char* c = env->GetStringUTFChars(cmd, nullptr);
++    std::string command = c ? c : "";
++    if (c) env->ReleaseStringUTFChars(cmd, c);
++    const std::string result = MelonDSAndroid::catalogCommand(command);
++    jbyteArray bytes = env->NewByteArray((jsize) result.size());
++    env->SetByteArrayRegion(bytes, 0, (jsize) result.size(), reinterpret_cast<const jbyte*>(result.data()));
++    jclass stringClass = env->FindClass("java/lang/String");
++    jmethodID ctor = env->GetMethodID(stringClass, "<init>", "([BLjava/lang/String;)V");
++    jstring charset = env->NewStringUTF("UTF-8");
++    jstring out = (jstring) env->NewObject(stringClass, ctor, bytes, charset);
++    env->DeleteLocalRef(bytes);
++    env->DeleteLocalRef(charset);
++    env->DeleteLocalRef(stringClass);
++    return out;
++}
++
++// ff-bgm1x 소리 분류: 재생 소리 (buffer 는 스테레오 int16, frames*2 칸, 0 으로 채워 둔 것)
++JNIEXPORT jint JNICALL
++Java_me_magnum_melonds_MelonEmulator_previewRender(JNIEnv* env, jobject thiz, jshortArray buffer, jint frames, jint sampleRate)
++{
++    jshort* data = env->GetShortArrayElements(buffer, nullptr);
++    const int n = MelonDSAndroid::previewRender(reinterpret_cast<s16*>(data), frames, sampleRate);
++    env->ReleaseShortArrayElements(buffer, data, 0);
++    return n;
++}
++
+ JNIEXPORT void JNICALL
+ Java_me_magnum_melonds_MelonEmulator_pauseEmulation(JNIEnv* env, jobject thiz)
+ {
+@@ -657,12 +687,17 @@ void* emulate(void*)
+         double currentTick = getCurrentMillis();
+         double delay = currentTick - lastTick;
+ 
++        // ff-bgm1x: 연출 중(연출 중에도 배속 꺼짐)이면 배속 중이어도 1배속으로 돈다
++        const bool bgmHold = isFastForwardEnabled && MelonDSAndroid::isBgmSpeedHold();
++        const float frameTargetFps = bgmHold ? 60.0f : (float) targetFps;
++        const bool frameLimitFps = limitFps || bgmHold;
++
+         // All times are in ms
+-        double frameTimeStep = (double) nLines / ((float) targetFps * 263.0) * 1000.0;
++        double frameTimeStep = (double) nLines / (frameTargetFps * 263.0) * 1000.0;
+         if (frameTimeStep < 1)
+             frameTimeStep = 1;
+ 
+-        if (limitFps)
++        if (frameLimitFps)
+         {
+             frameLimitError += frameTimeStep - delay;
+             if (frameLimitError < -frameTimeStep)

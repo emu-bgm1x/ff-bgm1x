@@ -1,0 +1,177 @@
+diff --git a/app/src/main/res/layout/view_layout_editor_manager.xml b/app/src/main/res/layout/view_layout_editor_manager.xml
+index 99766f84..baf6e170 100644
+--- a/app/src/main/res/layout/view_layout_editor_manager.xml
++++ b/app/src/main/res/layout/view_layout_editor_manager.xml
+@@ -55,10 +55,72 @@
+                 app:tint="@color/textLayoutEditor"
+                 android:contentDescription="@string/close" />
+ 
++            <!-- ff-bgm1x: 고른 항목의 왼쪽 위 자리 (px). 누르면 숫자로 입력 -->
+             <LinearLayout
+-                android:id="@+id/layout_size_labels"
++                android:id="@+id/layout_position"
+                 app:layout_constraintTop_toBottomOf="@id/button_delete_button"
+                 app:layout_constraintStart_toStartOf="parent"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:orientation="horizontal">
++
++                <LinearLayout
++                    android:id="@+id/layout_x_labels"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:clickable="true"
++                    android:focusable="true"
++                    android:background="?attr/selectableItemBackground"
++                    android:orientation="vertical"
++                    android:paddingVertical="4dp"
++                    android:paddingStart="16dp"
++                    android:paddingEnd="16dp">
++
++                    <TextView
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        android:text="@string/ff_layout_x" />
++
++                    <TextView
++                        android:id="@+id/text_x"
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        tools:text="100" />
++                </LinearLayout>
++
++                <LinearLayout
++                    android:id="@+id/layout_y_labels"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:clickable="true"
++                    android:focusable="true"
++                    android:background="?attr/selectableItemBackground"
++                    android:orientation="vertical"
++                    android:paddingVertical="4dp"
++                    android:paddingStart="16dp"
++                    android:paddingEnd="16dp">
++
++                    <TextView
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        android:text="@string/ff_layout_y" />
++
++                    <TextView
++                        android:id="@+id/text_y"
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:textColor="@color/textLayoutEditor"
++                        tools:text="100" />
++                </LinearLayout>
++            </LinearLayout>
++
++            <LinearLayout
++                android:id="@+id/layout_size_labels"
++                app:layout_constraintTop_toBottomOf="@id/layout_position"
++                app:layout_constraintStart_toStartOf="parent"
+                 app:layout_constraintEnd_toStartOf="@id/barrier_labels"
+                 app:layout_constraintWidth_min="wrap"
+                 android:layout_width="0dp"
+@@ -248,12 +310,24 @@
+                 android:paddingVertical="4dp"
+                 android:layout_marginStart="8dp"/>
+ 
++            <!-- ff-bgm1x: 배치 편의 기능 (Flow 로 줄바꿈해 나열) -->
++            <androidx.constraintlayout.helper.widget.Flow
++                android:id="@+id/flow_layout_tools"
++                android:layout_width="0dp"
++                android:layout_height="wrap_content"
++                app:layout_constraintTop_toBottomOf="@id/checkbox_above_screen"
++                app:layout_constraintStart_toStartOf="parent"
++                app:layout_constraintEnd_toEndOf="parent"
++                app:flow_wrapMode="chain"
++                app:flow_horizontalStyle="packed"
++                app:flow_horizontalBias="0"
++                app:flow_horizontalGap="4dp"
++                app:constraint_referenced_ids="button_center_horizontal,button_center_vertical,button_align_left,button_align_right,button_align_top,button_align_bottom,button_fill_screen,button_same_size,button_mirror,button_margin,button_grid" />
++
+             <Button
+                 android:id="@+id/button_center_horizontal"
+                 android:layout_width="wrap_content"
+                 android:layout_height="wrap_content"
+-                app:layout_constraintTop_toBottomOf="@id/checkbox_above_screen"
+-                app:layout_constraintStart_toStartOf="parent"
+                 android:text="@string/center_horizontal"
+                 style="@style/Button.Editor" />
+ 
+@@ -261,10 +335,69 @@
+                 android:id="@+id/button_center_vertical"
+                 android:layout_width="wrap_content"
+                 android:layout_height="wrap_content"
+-                app:layout_constraintStart_toEndOf="@id/button_center_horizontal"
+-                app:layout_constraintTop_toTopOf="@id/button_center_horizontal"
+                 android:text="@string/center_vertical"
+                 style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_left"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_left"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_right"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_right"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_top"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_top"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_align_bottom"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_edge_bottom"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_fill_screen"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_fill"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_same_size"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_same_size"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_mirror"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:text="@string/ff_layout_mirror"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_margin"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                style="@style/Button.Editor" />
++
++            <Button
++                android:id="@+id/button_grid"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                style="@style/Button.Editor" />
+         </androidx.constraintlayout.widget.ConstraintLayout>
+     </ScrollView>
+ 

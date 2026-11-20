@@ -1,0 +1,28 @@
+diff --git a/src/NDSCart.cpp b/src/NDSCart.cpp
+index bfc07f9..715043e 100644
+--- a/src/NDSCart.cpp
++++ b/src/NDSCart.cpp
+@@ -506,6 +506,7 @@ int CartRetail::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, const
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+             memset(data, 0, len);
+ 
+             if (((addr + len - 1) >> 12) != (addr >> 12))
+@@ -992,6 +993,7 @@ int CartRetailNAND::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, co
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+ 
+             if (SRAMWindow == 0)
+             {
+@@ -1391,6 +1393,7 @@ int CartHomebrew::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, cons
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+             memset(data, 0, len);
+ 
+             if (((addr + len - 1) >> 12) != (addr >> 12))

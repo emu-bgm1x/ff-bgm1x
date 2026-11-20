@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/inputsetup/ui/InputSetupScreen.kt b/app/src/main/java/me/magnum/melonds/ui/inputsetup/ui/InputSetupScreen.kt
+index 7dfdbae3..497a99d5 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/inputsetup/ui/InputSetupScreen.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/inputsetup/ui/InputSetupScreen.kt
+@@ -256,6 +256,7 @@ private fun getInputName(input: Input): String? {
+         Input.QUICK_SAVE -> R.string.input_quick_save
+         Input.QUICK_LOAD -> R.string.input_quick_load
+         Input.REWIND -> R.string.rewind
++        Input.SOUND_CATALOG -> R.string.ff_sound_catalog
+         else -> return null
+     }
+ 

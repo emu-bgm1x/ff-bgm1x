@@ -1,0 +1,18 @@
+diff --git a/src/wx/dialogs/sound-config.cpp b/src/wx/dialogs/sound-config.cpp
+index c4d58b6..ae5e7cf 100644
+--- a/src/wx/dialogs/sound-config.cpp
++++ b/src/wx/dialogs/sound-config.cpp
+@@ -167,6 +167,13 @@ SoundConfig::SoundConfig(wxWindow* parent) : BaseDialog(parent, "SoundConfig") {
+     GetValidatedChild("Volume100")
+         ->Bind(wxEVT_BUTTON, std::bind(&wxSlider::SetValue, volume_slider, 100));
+ 
++    // ff-bgm1x: volume of sound effects played at 1x speed (0-256, 256 = original)
++    wxSlider* ffbgm_sfx_slider = GetValidatedChild<wxSlider>("FfbgmSfxVolume");
++    ffbgm_sfx_slider->SetValidator(widgets::OptionIntValidator(config::OptionID::kSoundFfbgmSfxVolume));
++    ffbgm_sfx_slider->SetToolTip(wxString::Format("%d", ffbgm_sfx_slider->GetValue()));
++    ffbgm_sfx_slider->Bind(wxEVT_SLIDER, std::bind(UpdateSliderTooltip, ffbgm_sfx_slider, std::placeholders::_1));
++    ffbgm_sfx_slider->Bind(wxEVT_ENTER_WINDOW, std::bind(UpdateSliderTooltipOnHover, ffbgm_sfx_slider, std::placeholders::_1));
++
+     // Sound quality.
+     GetValidatedChild("Rate")->SetValidator(SoundRateValidator());
+ 

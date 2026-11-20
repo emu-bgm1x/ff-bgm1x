@@ -1,0 +1,16 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
+index 500dec61..99131967 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/model/LayoutComponentEditableProperty.kt
+@@ -4,4 +4,9 @@ enum class LayoutComponentEditableProperty {
+     SIZE,
+     WIDTH,
+     HEIGHT,
+-}
+\ No newline at end of file
++    // ff-bgm1x: 자리(px)와 편집기 여백·격자(px)
++    X,
++    Y,
++    MARGIN,
++    GRID,
++}

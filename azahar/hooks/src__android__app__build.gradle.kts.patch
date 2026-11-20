@@ -1,0 +1,17 @@
+diff --git a/src/android/app/build.gradle.kts b/src/android/app/build.gradle.kts
+index d873af1..0f883f1 100644
+--- a/src/android/app/build.gradle.kts
++++ b/src/android/app/build.gradle.kts
+@@ -91,6 +91,12 @@ android {
+         // ^ Has no suffix, unlike VERSION_NAME
+         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
+         buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
++
++        // ff-bgm1x: -PffbgmLab=true 면 소리 분류가 들어간 별도 앱 (기존 앱과 따로 설치된다)
++        val ffbgmLab = (project.findProperty("ffbgmLab") as String?) == "true"
++        if (ffbgmLab) applicationIdSuffix = ".lab"
++        buildConfigField("boolean", "FF_LAB", ffbgmLab.toString())
++        manifestPlaceholders["ffAppLabel"] = if (ffbgmLab) "Azahar 1x Lab" else "@string/app_name"
+     }
+ 
+     val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")

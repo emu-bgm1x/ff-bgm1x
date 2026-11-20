@@ -1,0 +1,29 @@
+diff --git a/src/SPU.h b/src/SPU.h
+index ef7f895..853dd39 100644
+--- a/src/SPU.h
++++ b/src/SPU.h
+@@ -263,6 +263,13 @@ public:
+     void Write16(u32 addr, u16 val);
+     void Write32(u32 addr, u32 val);
+ 
++    // ff-bgm1x: 스트림 곡을 1배속으로 대신 낼 때 원본 채널을 끄고, 게임이 정한 음량·팬을 읽는다
++    void SetFfbgmMuteMask(u16 mask) { FfbgmMuteMask = mask; }
++    // ff-bgm1x: 비트가 켜진 채널의 출력에 q8/256 을 곱한다 (소리 분류 창의 볼륨, 256 = 그대로)
++    void SetFfbgmGain(u16 mask, s32 q8) { FfbgmGainQ8 = q8; FfbgmGainMask = q8 == 256 ? 0 : mask; }
++    const SPUChannel& GetChannel(int i) const { return Channels[i & 15]; }
++    u8 GetMasterVolume() const { return MasterVolume; }
++
+ private:
+     u32 OutputBufferSize = 0;
+     double OutputSampleRate;
+@@ -284,6 +291,10 @@ private:
+ 
+     u16 Cnt = 0;
+     u8 MasterVolume = 0;
++    // ff-bgm1x: 비트가 켜진 채널은 출력에 섞지 않는다 (채널은 그대로 진행). 스트림 곡을 1배속으로 대신 낼 때 원본을 끈다
++    u16 FfbgmMuteMask = 0;
++    u16 FfbgmGainMask = 0;
++    s32 FfbgmGainQ8 = 256;
+     u16 Bias = 0;
+     bool ApplyBias = true;
+     bool Degrade10Bit = false;

@@ -1,0 +1,21 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.h b/libretrodroid/src/main/cpp/libretrodroidjni.h
+index 02ab0fc..78c4623 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.h
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.h
+@@ -40,6 +40,8 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_onKeyEvent
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_onMotionEvent(JNIEnv* env, jclass obj, jint port, jint source, jfloat xAxis, jfloat yAxis);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_onTouchEvent(JNIEnv* env, jclass obj, jfloat xAxis, jfloat yAxis);
+ JNIEXPORT jfloat JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getAspectRatio(JNIEnv* env, jclass obj);
++JNIEXPORT jstring JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_catalogCommand(JNIEnv* env, jclass obj, jstring cmd);
++JNIEXPORT jint JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_previewRender(JNIEnv* env, jclass obj, jshortArray buffer, jint frames, jint sampleRate);
+ JNIEXPORT jobjectArray JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getVariables(JNIEnv* env, jclass obj);
+ JNIEXPORT jobjectArray JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getControllers(JNIEnv* env, jclass obj);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setControllerType(JNIEnv* env, jclass obj, jint port, jint type);
+@@ -50,6 +52,7 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_changeDisk
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setRumbleEnabled(JNIEnv* env, jclass obj, jboolean enabled);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setFrameSpeed(JNIEnv* env, jclass obj, jint speed);
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setAudioEnabled(JNIEnv* env, jclass obj, jboolean enabled);
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setScreenRotation(JNIEnv* env, jclass obj, jint rotation);
+ 
+ }
+ 

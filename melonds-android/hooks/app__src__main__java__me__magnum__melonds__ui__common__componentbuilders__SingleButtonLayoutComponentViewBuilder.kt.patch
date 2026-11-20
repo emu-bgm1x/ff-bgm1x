@@ -1,0 +1,31 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/SingleButtonLayoutComponentViewBuilder.kt b/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/SingleButtonLayoutComponentViewBuilder.kt
+index 195bce62..2c0b62d8 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/SingleButtonLayoutComponentViewBuilder.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/common/componentbuilders/SingleButtonLayoutComponentViewBuilder.kt
+@@ -10,7 +10,17 @@ import me.magnum.melonds.ui.common.LayoutComponentViewBuilder
+ class SingleButtonLayoutComponentViewBuilder(private val layoutComponent: LayoutComponent) : LayoutComponentViewBuilder() {
+     override fun build(context: Context): View {
+         return ImageView(context).apply {
+-            setImageResource(getInputDrawable())
++            // ff-bgm1x: 스킨 그림이 있으면 그것
++            val skin = me.magnum.melonds.ui.layouteditor.skin.FfSkinButtons.current?.let {
++                when (layoutComponent) {
++                    LayoutComponent.BUTTON_L -> it.l
++                    LayoutComponent.BUTTON_R -> it.r
++                    LayoutComponent.BUTTON_START -> it.start
++                    LayoutComponent.BUTTON_SELECT -> it.select
++                    else -> null
++                }
++            }
++            if (skin != null) setImageBitmap(skin) else setImageResource(getInputDrawable())
+         }
+     }
+ 
+@@ -32,6 +42,7 @@ class SingleButtonLayoutComponentViewBuilder(private val layoutComponent: Layout
+             LayoutComponent.BUTTON_QUICK_LOAD -> R.drawable.button_quick_load
+             LayoutComponent.BUTTON_REWIND -> R.drawable.button_rewind
+             LayoutComponent.BUTTON_MICROPHONE_TOGGLE -> R.drawable.button_microphone
++            LayoutComponent.BUTTON_SOUND_CATALOG -> R.drawable.button_sound_catalog
+             else -> -1
+         }
+     }

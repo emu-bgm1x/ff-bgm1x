@@ -1,0 +1,130 @@
+diff --git a/src/NDS.cpp b/src/NDS.cpp
+index 25a3c0b..253761d 100644
+--- a/src/NDS.cpp
++++ b/src/NDS.cpp
+@@ -3577,6 +3577,7 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
+                 IPCFIFO9.Write(val);
+                 if ((IPCFIFOCnt7 & 0x0400) && wasempty)
+                     SetIRQ(1, IRQ_IPCRecv);
++                if (SoundFifoHook) SoundFifoHook(*this, val);  // ff-bgm1x
+             }
+         }
+         return;
+diff --git a/src/NDS.h b/src/NDS.h
+index 17e656e..503076e 100644
+--- a/src/NDS.h
++++ b/src/NDS.h
+@@ -250,6 +250,11 @@ private:
+ public: // TODO: Encapsulate the rest of these members
+     void* UserData;
+ 
++    // ff-bgm1x: ARM9 이 IPC FIFO 에 값을 쓸 때마다 불린다 (사운드 명령을 지켜보는 용도)
++    void (*SoundFifoHook)(NDS& nds, u32 fifoword) = nullptr;
++    // ff-bgm1x: 게임이 카트에서 롬 데이터를 읽을 때마다 불린다 (스트림(STRM) 곡이 나오는지 알아보는 용도)
++    void (*CartReadHook)(NDS& nds, u32 addr, u32 len) = nullptr;
++
+     int ConsoleType;
+     int CurCPU;
+ 
+diff --git a/src/NDSCart.cpp b/src/NDSCart.cpp
+index bfc07f9..715043e 100644
+--- a/src/NDSCart.cpp
++++ b/src/NDSCart.cpp
+@@ -506,6 +506,7 @@ int CartRetail::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, const
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+             memset(data, 0, len);
+ 
+             if (((addr + len - 1) >> 12) != (addr >> 12))
+@@ -992,6 +993,7 @@ int CartRetailNAND::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, co
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+ 
+             if (SRAMWindow == 0)
+             {
+@@ -1391,6 +1393,7 @@ int CartHomebrew::ROMCommandStart(NDS& nds, NDSCart::NDSCartSlot& cartslot, cons
+     case 0xB7:
+         {
+             u32 addr = (cmd[1]<<24) | (cmd[2]<<16) | (cmd[3]<<8) | cmd[4];
++            if (nds.CartReadHook) nds.CartReadHook(nds, addr, len);  // ff-bgm1x
+             memset(data, 0, len);
+ 
+             if (((addr + len - 1) >> 12) != (addr >> 12))
+diff --git a/src/SPU.cpp b/src/SPU.cpp
+index f42beee..76da134 100644
+--- a/src/SPU.cpp
++++ b/src/SPU.cpp
+@@ -335,7 +335,9 @@ void SPU::SetDegrade10Bit(AudioBitDepth depth)
+     switch (depth)
+     {
+     case AudioBitDepth::Auto:
+-        Degrade10Bit = (NDS.ConsoleType == 0);
++        // ff-bgm1x: 처음 켤 때(생성자)는 항상 16비트로 시작하는데, 롬을 다시 불러오면 이 함수가 불려
++        // DS 에서는 10비트로 바뀌었다. 같은 설정에서 소리가 달라지지 않게 자동은 16비트로 맞춘다
++        Degrade10Bit = false;
+         break;
+     case AudioBitDepth::_10Bit:
+         Degrade10Bit = true;
+@@ -861,6 +863,20 @@ void SPU::Mix(u32 spucycles)
+         s32 ch1 = Channels[1].DoRun(spucycles);
+         s32 ch2 = Channels[2].DoRun(spucycles);
+         s32 ch3 = Channels[3].DoRun(spucycles);
++        if (FfbgmMuteMask)  // ff-bgm1x
++        {
++            if (FfbgmMuteMask & 1) ch0 = 0;
++            if (FfbgmMuteMask & 2) ch1 = 0;
++            if (FfbgmMuteMask & 4) ch2 = 0;
++            if (FfbgmMuteMask & 8) ch3 = 0;
++        }
++        if (FfbgmGainMask)  // ff-bgm1x
++        {
++            if (FfbgmGainMask & 1) ch0 = (ch0 * FfbgmGainQ8) >> 8;
++            if (FfbgmGainMask & 2) ch1 = (ch1 * FfbgmGainQ8) >> 8;
++            if (FfbgmGainMask & 4) ch2 = (ch2 * FfbgmGainQ8) >> 8;
++            if (FfbgmGainMask & 8) ch3 = (ch3 * FfbgmGainQ8) >> 8;
++        }
+ 
+         // TODO: addition from capture registers
+         Channels[0].PanOutput(ch0, left, right);
+@@ -874,6 +890,8 @@ void SPU::Mix(u32 spucycles)
+             SPUChannel* chan = &Channels[i];
+ 
+             s32 channel = chan->DoRun(spucycles);
++            if (FfbgmMuteMask & (1 << i)) channel = 0;  // ff-bgm1x
++            if (FfbgmGainMask & (1 << i)) channel = (channel * FfbgmGainQ8) >> 8;  // ff-bgm1x
+             chan->PanOutput(channel, left, right);
+         }
+ 
+diff --git a/src/SPU.h b/src/SPU.h
+index a1e2c3a..3e1f7bf 100644
+--- a/src/SPU.h
++++ b/src/SPU.h
+@@ -263,6 +263,13 @@ public:
+     void Write16(u32 addr, u16 val);
+     void Write32(u32 addr, u32 val);
+ 
++    // ff-bgm1x: 스트림 곡을 1배속으로 대신 낼 때 원본 채널을 끄고, 게임이 정한 음량·팬을 읽는다
++    void SetFfbgmMuteMask(u16 mask) { FfbgmMuteMask = mask; }
++    // ff-bgm1x: 비트가 켜진 채널의 출력에 q8/256 을 곱한다 (소리 분류의 볼륨, 256 = 그대로)
++    void SetFfbgmGain(u16 mask, s32 q8) { FfbgmGainQ8 = q8; FfbgmGainMask = q8 == 256 ? 0 : mask; }
++    const SPUChannel& GetChannel(int i) const { return Channels[i & 15]; }
++    u8 GetMasterVolume() const { return MasterVolume; }
++
+ private:
+     u32 OutputBufferSize = 0;
+     double OutputSampleRate;
+@@ -284,6 +291,10 @@ private:
+ 
+     u16 Cnt = 0;
+     u8 MasterVolume = 0;
++    // ff-bgm1x: 비트가 켜진 채널은 출력에 섞지 않는다 (채널은 그대로 진행). 스트림 곡을 1배속으로 대신 낼 때 원본을 끈다
++    u16 FfbgmMuteMask = 0;
++    u16 FfbgmGainMask = 0;
++    s32 FfbgmGainQ8 = 256;
+     u16 Bias = 0;
+     bool ApplyBias = true;
+     bool Degrade10Bit = false;

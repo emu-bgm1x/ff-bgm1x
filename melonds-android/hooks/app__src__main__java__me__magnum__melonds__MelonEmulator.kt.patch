@@ -1,0 +1,16 @@
+diff --git a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
+index 417c45f0..b17e9804 100644
+--- a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
++++ b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
+@@ -89,6 +89,11 @@ object MelonEmulator {
+ 
+ 	external fun getFPS(): Float
+ 
++	// ff-bgm1x 소리 분류 (1x Lab 앱): 문자열 명령, 재생 소리
++	external fun catalogCommand(cmd: String): String
++
++	external fun previewRender(buffer: ShortArray, frames: Int, sampleRate: Int): Int
++
+ 	external fun pauseEmulation()
+ 
+ 	external fun resumeEmulation()

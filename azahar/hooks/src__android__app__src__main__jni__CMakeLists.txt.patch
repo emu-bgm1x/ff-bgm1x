@@ -1,0 +1,12 @@
+diff --git a/src/android/app/src/main/jni/CMakeLists.txt b/src/android/app/src/main/jni/CMakeLists.txt
+index 251788e..2237f1a 100644
+--- a/src/android/app/src/main/jni/CMakeLists.txt
++++ b/src/android/app/src/main/jni/CMakeLists.txt
+@@ -19,6 +19,7 @@ add_library(citra-android SHARED
+     default_ini.h
+     emu_window/emu_window.cpp
+     emu_window/emu_window.h
++    ff_catalog_command.cpp
+     game_info.cpp
+     id_cache.cpp
+     id_cache.h

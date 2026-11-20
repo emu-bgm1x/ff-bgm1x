@@ -1,0 +1,60 @@
+diff --git a/desmume/src/frontend/windows/DeSmuME.vcxproj b/desmume/src/frontend/windows/DeSmuME.vcxproj
+index abf9786..dfe004e 100644
+--- a/desmume/src/frontend/windows/DeSmuME.vcxproj
++++ b/desmume/src/frontend/windows/DeSmuME.vcxproj
+@@ -142,6 +142,41 @@
+     <ClCompile Include="..\..\slot1.cpp" />
+     <ClCompile Include="..\..\slot2.cpp" />
+     <ClCompile Include="..\..\SPU.cpp" />
++    <ClCompile Include="..\..\ffbgm\NitroSynth.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\BgmReplacer.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\NitroStrm.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\SoundCatalog.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\SoundPreview.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\ffbgm_glue.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\ffbgm\ffbgm_soundwin.cpp">
++      <LanguageStandard>stdcpp17</LanguageStandard>
++      <PreprocessorDefinitions>FFBGM_DESMUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
+     <ClCompile Include="..\..\texcache.cpp" />
+     <ClCompile Include="..\..\thumb_instructions.cpp" />
+     <ClCompile Include="..\..\utils\advanscene.cpp" />
+@@ -449,6 +484,13 @@
+     <ClInclude Include="..\..\slot1.h" />
+     <ClInclude Include="..\..\slot2.h" />
+     <ClInclude Include="..\..\SPU.h" />
++    <ClInclude Include="..\..\ffbgm\NitroSynth.h" />
++    <ClInclude Include="..\..\ffbgm\BgmReplacer.h" />
++    <ClInclude Include="..\..\ffbgm\ffbgm.h" />
++    <ClInclude Include="..\..\ffbgm\ffbgm_glue.h" />
++    <ClInclude Include="..\..\ffbgm\NitroStrm.h" />
++    <ClInclude Include="..\..\ffbgm\SoundCatalog.h" />
++    <ClInclude Include="..\..\ffbgm\SoundPreview.h" />
+     <ClInclude Include="..\..\texcache.h" />
+     <ClInclude Include="..\..\utils\advanscene.h" />
+     <ClInclude Include="..\..\utils\AsmJit\asmjit.h" />

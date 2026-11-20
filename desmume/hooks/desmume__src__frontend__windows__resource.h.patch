@@ -1,0 +1,26 @@
+diff --git a/desmume/src/frontend/windows/resource.h b/desmume/src/frontend/windows/resource.h
+index a753958..4493d61 100644
+--- a/desmume/src/frontend/windows/resource.h
++++ b/desmume/src/frontend/windows/resource.h
+@@ -931,6 +931,21 @@
+ #define IDM_ABOUT                       40003
+ #define IDM_EMULATIONSETTINGS           40004
+ #define IDC_FRAMELIMIT                  40005
++#define IDC_FFBGM_BGM1X                 40140
++#define IDC_FFBGM_SFX1X                 40141
++#define IDC_FFBGM_CUTSCENE              40142
++#define IDC_FFBGM_SOUNDWIN              40160
++#define IDC_FFSPEED_2X                  40130
++#define IDC_FFSPEED_3X                  40131
++#define IDC_FFSPEED_4X                  40132
++#define IDC_FFSPEED_6X                  40133
++#define IDC_FFSPEED_8X                  40134
++#define IDC_FFSPEED_UNLIMITED           40135
++#define IDC_SFXVOLUME                   2900
++#define IDC_SFXVOLUMEREAD               2901
++#define ID_LABEL_HK_FFBGM               44800
++#define ID_LABEL_HK_FFCUTSCENE          44801
++#define ID_LABEL_HK_FFSOUNDWIN          44802
+ #define ID_CONFIG_PAUSEWHENFOCUSLOST    40005
+ #define IDC_WINDOW1_5X                  40006
+ #define IDM_WIFISETTINGS                40007

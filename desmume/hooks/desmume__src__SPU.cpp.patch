@@ -1,0 +1,66 @@
+diff --git a/desmume/src/SPU.cpp b/desmume/src/SPU.cpp
+index d113e7f..fad2e76 100644
+--- a/desmume/src/SPU.cpp
++++ b/desmume/src/SPU.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 yopyop
+ 	Copyright (C) 2006 Theo Berkau
+@@ -60,6 +61,9 @@ static inline s8 read_s8(u32 addr) { return (s8)_MMU_read08<ARMCPU_ARM7,MMU_AT_D
+ static ISynchronizingAudioBuffer* _currentSynchronizer = metaspu_construct(ESynchMethod_N);
+ 
+ SPU_struct *SPU_core = 0;
++s32 g_ffbgmGainQ8 = 256;  // ff-bgm1x: g_ffbgmGainMask channels are scaled by q8/256 (sound classification volume)
++u16 g_ffbgmGainMask = 0;
++u16 g_ffbgmMuteMask = 0;  // ff-bgm1x: channels with a set bit are not mixed (stream replaced at 1x)
+ SPU_struct *SPU_user = 0;
+ int SPU_currentCoreNum = SNDCORE_DUMMY;
+ static int _currentVolume = 100;
+@@ -1181,18 +1185,21 @@ static FORCEINLINE void FetchPSGData(channel_struct *chan, s32 *data)
+ static FORCEINLINE void MixL(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[SPU->bufpos<<1] += data;
+ }
+ 
+ static FORCEINLINE void MixR(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[(SPU->bufpos<<1)+1] += data;
+ }
+ 
+ static FORCEINLINE void MixLR(SPU_struct* SPU, channel_struct *chan, s32 data)
+ {
+ 	data = spumuldiv7(data, chan->vol) >> volume_shift[chan->volumeDiv];
++	if (g_ffbgmGainMask & (1 << chan->num)) data = (data * g_ffbgmGainQ8) >> 8;  // ff-bgm1x
+ 	SPU->sndbuf[SPU->bufpos<<1] += spumuldiv7(data, 127 - chan->pan);
+ 	SPU->sndbuf[(SPU->bufpos<<1)+1] += spumuldiv7(data, chan->pan);
+ }
+@@ -1395,6 +1402,7 @@ static void SPU_MixAudio_Advanced(bool actuallyMix, SPU_struct *SPU, int length)
+ 				if (bypass) outputToMix = false;
+ 				bool outputToCap = outputToMix;
+ 				if (CommonSettings.spu_captureMuted && !bypass) outputToCap = true;
++				if (g_ffbgmMuteMask & (1 << i)) outputToMix = false;  // ff-bgm1x (capture unchanged)
+ 
+ 				//channels 1 and 3 should probably always generate their audio
+ 				//internally at least, just in case they get used by the spu output
+@@ -1593,7 +1601,7 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
+ 			SPU->buflength = length;
+ 
+ 			// Mix audio
+-			_SPU_ChanUpdate(!CommonSettings.spu_muteChannels[i] && actuallyMix, SPU, chan);
++			_SPU_ChanUpdate(!CommonSettings.spu_muteChannels[i] && !(g_ffbgmMuteMask & (1 << i)) && actuallyMix, SPU, chan);  // ff-bgm1x
+ 		}
+ 
+ 		//zero out capture buffers - effectively transform no-advanced-spu-emulation to capturing-zeroes
+@@ -1743,6 +1751,7 @@ void SPU_Emulate_user(bool mix)
+ 		processedSampleCount = SPU_DefaultPostProcessSamples(postProcessBuffer, freeSampleCount, _currentSynchMode, _currentSynchronizer);
+ 	}
+ 	
++	ffbgm_mix(postProcessBuffer, (int)processedSampleCount);
+ 	soundProcessor->UpdateAudio(postProcessBuffer, processedSampleCount);
+ 	WAV_WavSoundUpdate(postProcessBuffer, processedSampleCount, WAVMODE_USER);
+ }

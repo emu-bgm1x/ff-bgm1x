@@ -1,0 +1,12 @@
+diff --git a/src/frontend/qt_sdl/EmuThread.h b/src/frontend/qt_sdl/EmuThread.h
+index 7a7f060..102e16c 100755
+--- a/src/frontend/qt_sdl/EmuThread.h
++++ b/src/frontend/qt_sdl/EmuThread.h
+@@ -157,6 +157,7 @@ signals:
+     void autoScreenSizingChange(int sizing);
+ 
+     void windowFullscreenToggle();
++    void windowSoundCatalog();  // ff-bgm1x: 소리 분류 창 단축키
+ 
+     void swapScreensToggle();
+     void screenEmphasisToggle();

@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/me/magnum/melonds/domain/model/ControllerConfiguration.kt b/app/src/main/java/me/magnum/melonds/domain/model/ControllerConfiguration.kt
+index d5756598..93706e90 100644
+--- a/app/src/main/java/me/magnum/melonds/domain/model/ControllerConfiguration.kt
++++ b/app/src/main/java/me/magnum/melonds/domain/model/ControllerConfiguration.kt
+@@ -24,7 +24,7 @@ class ControllerConfiguration(configList: List<InputConfig>) {
+             Input.QUICK_SAVE,
+             Input.QUICK_LOAD,
+             Input.REWIND,
+-        )
++        ) + if (me.magnum.melonds.BuildConfig.FF_LAB) listOf(Input.SOUND_CATALOG) else emptyList()
+     }
+ 
+     val inputMapper: List<InputConfig>

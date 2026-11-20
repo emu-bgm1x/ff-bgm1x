@@ -1,0 +1,21 @@
+diff --git a/src/frontend/qt_sdl/main.cpp b/src/frontend/qt_sdl/main.cpp
+index f5bb3c9..9054aab 100644
+--- a/src/frontend/qt_sdl/main.cpp
++++ b/src/frontend/qt_sdl/main.cpp
+@@ -288,7 +288,16 @@ int main(int argc, char** argv)
+     if (argc != 0 && (!strcasecmp(argv[0], "derpDS") || !strcasecmp(argv[0], "./derpDS")))
+         printf("did you just call me a derp???\n");
+ 
++#if defined(__WIN32__)
++    // ff-bgm1x: SDL 의 시작 코드가 명령줄을 UTF-8 로 바꿔 넘기는데, Qt 는 바뀐 argv 를 시스템 코드페이지로
++    // 읽어서 한글 같은 비ASCII 경로가 깨진다. C 런타임의 원래 argv 를 넘기면 Qt 가 argv 가 바뀌지 않았다고
++    // 보고 유니코드 명령줄(GetCommandLineW)을 직접 읽는다.
++    int qtArgc = __argv ? __argc : argc;
++    char** qtArgv = __argv ? __argv : argv;
++    MelonApplication melon(qtArgc, qtArgv);
++#else
+     MelonApplication melon(argc, argv);
++#endif
+     pathInit();
+ 
+     CLI::CommandLineOptions* options = CLI::ManageArgs(melon);

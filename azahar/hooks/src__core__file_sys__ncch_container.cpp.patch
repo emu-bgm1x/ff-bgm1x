@@ -1,0 +1,39 @@
+diff --git a/src/core/file_sys/ncch_container.cpp b/src/core/file_sys/ncch_container.cpp
+index 666d603..c29da7a 100644
+--- a/src/core/file_sys/ncch_container.cpp
++++ b/src/core/file_sys/ncch_container.cpp
+@@ -236,6 +236,34 @@ Loader::ResultStatus NCCHContainer::LoadHeader() {
+ 
+     LOG_DEBUG(Service_FS, "NCCH type: {}", file->GetType().to_string());
+ 
++    // ff-bgm1x: NoCrypto 플래그가 꺼져 있어도 실제 내용이 평문인 덤프가 있다.
++    // ExeFS 첫 파일 이름(".code")이나 RomFS 표식("IVFC")이 그대로 읽히면 평문으로 본다.
++    if (!ncch_header.no_crypto) {
++        bool plaintext = false;
++        if (ncch_header.exefs_offset != 0) {
++            char name[8] = {};
++            if (file->ReadAtBytes(name, sizeof(name),
++                                  static_cast<std::size_t>(ncch_header.exefs_offset) * kBlockSize) ==
++                    sizeof(name) &&
++                std::memcmp(name, ".code\0\0\0", 8) == 0) {
++                plaintext = true;
++            }
++        }
++        if (!plaintext && ncch_header.romfs_offset != 0) {
++            char magic[4] = {};
++            if (file->ReadAtBytes(magic, sizeof(magic),
++                                  static_cast<std::size_t>(ncch_header.romfs_offset) * kBlockSize) ==
++                    sizeof(magic) &&
++                std::memcmp(magic, "IVFC", 4) == 0) {
++                plaintext = true;
++            }
++        }
++        if (plaintext) {
++            LOG_INFO(Service_FS, "ff-bgm1x: NoCrypto 플래그는 꺼져 있지만 내용이 평문이라 그대로 읽습니다");
++            ncch_header.no_crypto.Assign(1);
++        }
++    }
++
+     if (!ncch_header.no_crypto) {
+         // Encrypted NCCH are not supported
+         return Loader::ResultStatus::ErrorEncrypted;

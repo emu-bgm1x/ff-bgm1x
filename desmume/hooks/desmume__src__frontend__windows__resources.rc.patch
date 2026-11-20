@@ -1,0 +1,68 @@
+diff --git a/desmume/src/frontend/windows/resources.rc b/desmume/src/frontend/windows/resources.rc
+index 2325fe3..f95c2d8 100644
+--- a/desmume/src/frontend/windows/resources.rc
++++ b/desmume/src/frontend/windows/resources.rc
+@@ -1075,7 +1075,7 @@ BEGIN
+     CONTROL         "",1130,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,7,311,214
+ END
+ 
+-IDD_SOUNDSETTINGS DIALOGEX 0, 0, 387, 172
++IDD_SOUNDSETTINGS DIALOGEX 0, 0, 387, 190
+ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+ CAPTION "Sound Settings"
+ FONT 8, "MS Sans Serif", 0, 0, 0x1
+@@ -1093,8 +1093,8 @@ BEGIN
+     EDITTEXT        IDC_SOUNDBUFFERET,237,26,42,13
+     COMBOBOX        IDC_SPU_INTERPOLATION_CB,237,44,131,33,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+     CONTROL         "",IDC_SLVOLUME,"msctls_trackbar32",0x0,231,63,128,10
+-    DEFPUSHBUTTON   "&OK",IDOK,288,148,40,14
+-    PUSHBUTTON      "&Cancel",IDCANCEL,334,148,40,14
++    DEFPUSHBUTTON   "&OK",IDOK,288,166,40,14
++    PUSHBUTTON      "&Cancel",IDCANCEL,334,166,40,14
+     LTEXT           "Sound Core",IDC_STATIC,195,12,40,10
+     LTEXT           "Buffer Size",IDC_STATIC,197,29,39,10
+     LTEXT           "Volume",IDC_STATIC,201,63,30,10
+@@ -1108,6 +1108,9 @@ BEGIN
+                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,197,74,177,10
+     LTEXT           "This will be necessary to emulate sound capture (reverb and music visualization). This is costly, few games use it, and the effect is unnecessary.  Enable it if your system has power to spare; check the Sound Viewer to see if the game is using capture.",IDC_STATIC,196,86,177,41
+     LTEXT           "Can cause deterministically visible changes to emulation in principle!!!",IDC_STATIC,196,127,177,17
++    LTEXT           "SFX Volume (1x)",IDC_STATIC,195,152,44,10
++    CONTROL         "",IDC_SFXVOLUME,"msctls_trackbar32",0x0,240,150,118,10
++    LTEXT           "256",IDC_SFXVOLUMEREAD,364,152,18,10
+ END
+ 
+ IDD_SOUND_VIEW DIALOGEX 0, 0, 568, 269
+@@ -1780,6 +1783,23 @@ BEGIN
+             MENUITEM "&8",                          IDC_FRAMESKIP8
+             MENUITEM "&9",                          IDC_FRAMESKIP9
+         END
++        POPUP "Fast forward &speed"
++        BEGIN
++            MENUITEM "&2x",                         IDC_FFSPEED_2X
++            MENUITEM "&3x",                         IDC_FFSPEED_3X
++            MENUITEM "&4x",                         IDC_FFSPEED_4X
++            MENUITEM "&6x",                         IDC_FFSPEED_6X
++            MENUITEM "&8x",                         IDC_FFSPEED_8X
++            MENUITEM "&Unlimited",                  IDC_FFSPEED_UNLIMITED
++        END
++        POPUP "ff-bgm1x (1x audio)"
++        BEGIN
++            MENUITEM "Keep &BGM at 1x speed",         IDC_FFBGM_BGM1X
++            MENUITEM "Keep sound &effects at 1x",     IDC_FFBGM_SFX1X
++            MENUITEM "Fast forward during &cutscenes", IDC_FFBGM_CUTSCENE
++            MENUITEM SEPARATOR
++            MENUITEM "&Sound classification...",     IDC_FFBGM_SOUNDWIN
++        END
+         MENUITEM "&Emulation Settings",         IDM_EMULATIONSETTINGS
+         MENUITEM "&3D Settings",                IDM_3DCONFIG
+         MENUITEM "&Sound Settings",             IDM_SOUNDSETTINGS
+@@ -2247,6 +2267,9 @@ END
+ STRINGTABLE
+ BEGIN
+     ID_LABEL_HK8b           "Limit Framerate Toggle"
++    ID_LABEL_HK_FFBGM       "Keep BGM at 1x Toggle"
++    ID_LABEL_HK_FFCUTSCENE  "Fast Forward During Cutscenes Toggle"
++    ID_LABEL_HK_FFSOUNDWIN  "Sound Classification Window"
+ END
+ 
+ STRINGTABLE

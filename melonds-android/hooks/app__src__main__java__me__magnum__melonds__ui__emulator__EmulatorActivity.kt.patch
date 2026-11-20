@@ -1,0 +1,27 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
+index 8a8a8302..6e0451d5 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
+@@ -243,6 +243,12 @@ class EmulatorActivity : AppCompatActivity() {
+         override fun onRewind() {
+             viewModel.onOpenRewind()
+         }
++
++        override fun onSoundCatalog() {
++            if (me.magnum.melonds.BuildConfig.FF_LAB) {
++                startActivity(Intent(this@EmulatorActivity, me.magnum.melonds.ui.soundcatalog.SoundCatalogActivity::class.java))
++            }
++        }
+     }
+     private val settingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+         viewModel.onSettingsChanged()
+@@ -506,6 +512,9 @@ class EmulatorActivity : AppCompatActivity() {
+                             val settingsIntent = Intent(this@EmulatorActivity, SettingsActivity::class.java)
+                             settingsLauncher.launch(settingsIntent)
+                         }
++                        EmulatorUiEvent.OpenScreen.SoundCatalogScreen -> {
++                            startActivity(Intent(this@EmulatorActivity, me.magnum.melonds.ui.soundcatalog.SoundCatalogActivity::class.java))
++                        }
+                         is EmulatorUiEvent.ShowPauseMenu -> showPauseMenu(it.pauseMenu)
+                         is EmulatorUiEvent.ShowRewindWindow -> showRewindWindow(it.rewindWindow, it.windowPosition)
+                         is EmulatorUiEvent.ShowRomSaveStates -> {

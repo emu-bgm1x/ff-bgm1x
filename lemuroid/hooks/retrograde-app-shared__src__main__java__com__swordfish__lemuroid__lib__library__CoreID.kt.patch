@@ -1,0 +1,17 @@
+diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/CoreID.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/CoreID.kt
+index f22f7a05..842bd0e7 100644
+--- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/CoreID.kt
++++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/CoreID.kt
+@@ -41,6 +41,12 @@ enum class CoreID(
+         "mGBA",
+         "libmgba_libretro_android.so",
+     ),
++    // ff-bgm1x: VBA-M libretro 코어 (BGM·효과음 1배속 포함, 앱에 함께 묶는다)
++    VBAM(
++        "vbam",
++        "VBA-M",
++        "libvbam_libretro_android.so",
++    ),
+     MUPEN64_PLUS_NEXT(
+         "mupen64plus_next_gles3",
+         "Mupen64Plus",

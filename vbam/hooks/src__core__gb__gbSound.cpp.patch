@@ -1,0 +1,71 @@
+diff --git a/src/core/gb/gbSound.cpp b/src/core/gb/gbSound.cpp
+index b546e74..d7f0390 100644
+--- a/src/core/gb/gbSound.cpp
++++ b/src/core/gb/gbSound.cpp
+@@ -21,6 +21,9 @@ static Gb_Apu* gb_apu;
+ 
+ static float soundVolume_ = -1;
+ static int prevSoundEnable = -1;
++static int ffbgmMuteMask = 0;      // ff-bgm1x
++static int prevFfbgmMuteMask = -1; // ff-bgm1x
++static int ffbgmGain[4] = { 256, 256, 256, 256 }; // ff-bgm1x: per-channel volume (256 = unchanged)
+ static bool declicking = false;
+ 
+ int const chan_count = 4;
+@@ -51,6 +54,7 @@ static void end_frame(blip_time_t time)
+ static void apply_effects()
+ {
+     prevSoundEnable = soundGetEnable();
++    prevFfbgmMuteMask = ffbgmMuteMask;
+     gb_effects_config_current = gb_effects_config;
+ 
+     stereo_buffer->config().enabled = gb_effects_config_current.enabled;
+@@ -61,12 +65,28 @@ static void apply_effects()
+ 
+     for (int i = 0; i < chan_count; i++) {
+         Multi_Buffer::channel_t ch = { 0, 0, 0 };
+-        if (prevSoundEnable >> i & 1)
++        if ((prevSoundEnable & ~ffbgmMuteMask) >> i & 1)
+             ch = stereo_buffer->channel(i);
+         gb_apu->set_output(ch.center, ch.left, ch.right, i);
+     }
+ }
+ 
++void gbSoundSetFfbgmMuteMask(int mask)
++{
++    ffbgmMuteMask = mask & 0x0f;
++}
++
++// ff-bgm1x: per-channel volume multiplier for sounds left at game speed (sound classification window)
++void gbSoundSetFfbgmGain(int channel, int q8)
++{
++    channel &= 3;
++    if (ffbgmGain[channel] == q8)
++        return;
++    ffbgmGain[channel] = q8;
++    if (gb_apu)
++        gb_apu->osc_gain(channel, q8 / 256.0);
++}
++
+ void gbSoundConfigEffects(gb_effects_config_t const& c)
+ {
+     gb_effects_config = c;
+@@ -91,7 +111,8 @@ void gbSoundTick(int st)
+         // Update effects config if it was changed
+         if (memcmp(&gb_effects_config_current, &gb_effects_config,
+                 sizeof gb_effects_config)
+-            || soundGetEnable() != prevSoundEnable)
++            || soundGetEnable() != prevSoundEnable
++            || ffbgmMuteMask != prevFfbgmMuteMask)
+             apply_effects();
+ 
+         if (soundVolume_ != soundGetVolume())
+@@ -122,6 +143,8 @@ static void gb_remake_stereo_buffer()
+     // APU
+     if (!gb_apu) {
+         gb_apu = new Gb_Apu; // TODO: handle errors
++        for (int i = 0; i < 4; i++) // ff-bgm1x
++            gb_apu->osc_gain(i, ffbgmGain[i] / 256.0);
+         reset_apu();
+     }
+ 

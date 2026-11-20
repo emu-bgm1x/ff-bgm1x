@@ -1,0 +1,162 @@
+diff --git a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+index 831ed794..3211c8cc 100644
+--- a/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
++++ b/retrograde-app-shared/src/main/java/com/swordfish/lemuroid/lib/library/GameSystem.kt
+@@ -483,6 +483,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: GB 2세대 사운드 엔진. 자체 재생기가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -547,6 +564,23 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
++                                    // ff-bgm1x: GB 2세대 사운드 엔진. 자체 재생기가 BGM 을 1배속으로 낸다
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "gambatte_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "gambatte_dark_filter_level",
+                                         R.string.setting_gambatte_dark_filter_level,
+@@ -579,6 +613,43 @@ data class GameSystem(
+                                         "mgba_solar_sensor_level",
+                                         R.string.setting_mgba_solar_sensor_level,
+                                     ),
++                                    // ff-bgm1x
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_cutscenes",
++                                        R.string.setting_mgba_ff_bgm1x_cutscenes,
++                                        arrayListOf(
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_sfx_volume",
++                                        R.string.setting_mgba_ff_bgm1x_sfx_volume,
++                                    ),
++                                    ExposedSetting(
++                                        "mgba_ff_bgm1x_ram_songs",
++                                        R.string.setting_mgba_ff_bgm1x_ram_songs,
++                                        arrayListOf(
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                        ),
++                                    ),
+                                     ExposedSetting(
+                                         "mgba_interframe_blending",
+                                         R.string.setting_mgba_interframe_blending,
+@@ -601,17 +672,7 @@ data class GameSystem(
+                                             ),
+                                         ),
+                                     ),
+-                                    ExposedSetting(
+-                                        "mgba_frameskip",
+-                                        R.string.setting_mgba_frameskip,
+-                                        arrayListOf(
+-                                            ExposedSetting.Value(
+-                                                "disabled",
+-                                                R.string.value_mgba_frameskip_disabled,
+-                                            ),
+-                                            ExposedSetting.Value("auto", R.string.value_mgba_frameskip_auto),
+-                                        ),
+-                                    ),
++                                    // ff-bgm1x: mgba_frameskip 은 뺐다 (이 코어는 0~10 값이라 '끔/자동' 이 맞지 않아 설정 화면이 꺼졌다)
+                                     ExposedSetting(
+                                         "mgba_color_correction",
+                                         R.string.setting_mgba_color_correction,
+@@ -633,6 +694,46 @@ data class GameSystem(
+                                     0 to arrayListOf(ControllerConfigs.GBA),
+                                 ),
+                         ),
++                        // ff-bgm1x: VBA-M 코어 (설정 > 코어 선택에서 고른다. 기본은 위의 mGBA)
++                        SystemCoreConfig(
++                            CoreID.VBAM,
++                            exposedSettings =
++                                listOf(
++                                    ExposedSetting(
++                                        "vbam_ff_bgm1x",
++                                        R.string.setting_mgba_ff_bgm1x,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "vbam_ff_bgm1x_cutscenes",
++                                        R.string.setting_mgba_ff_bgm1x_cutscenes,
++                                        arrayListOf(
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "vbam_ff_bgm1x_sfx",
++                                        R.string.setting_mgba_ff_bgm1x_sfx,
++                                        arrayListOf(
++                                            ExposedSetting.Value("enabled", R.string.value_mgba_ff_bgm1x_enabled),
++                                            ExposedSetting.Value("disabled", R.string.value_mgba_ff_bgm1x_disabled),
++                                        ),
++                                    ),
++                                    ExposedSetting(
++                                        "vbam_ff_bgm1x_sfx_volume",
++                                        R.string.setting_mgba_ff_bgm1x_sfx_volume,
++                                    ),
++                                ),
++                            rumbleSupported = true,
++                            controllerConfigs =
++                                hashMapOf(
++                                    0 to arrayListOf(ControllerConfigs.GBA),
++                                ),
++                        ),
+                     ),
+                     uniqueExtensions = listOf("gba"),
+                 ),

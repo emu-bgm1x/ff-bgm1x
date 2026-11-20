@@ -1,0 +1,25 @@
+diff --git a/desmume/src/NDSSystem.cpp b/desmume/src/NDSSystem.cpp
+index bdfc970..a6cab27 100644
+--- a/desmume/src/NDSSystem.cpp
++++ b/desmume/src/NDSSystem.cpp
+@@ -1,3 +1,4 @@
++#include "ffbgm/ffbgm.h"
+ /*
+ 	Copyright (C) 2006 yopyop
+ 	Copyright (C) 2008-2021 DeSmuME team
+@@ -804,6 +805,7 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
+ 	}
+ 
+ 	//UnloadMovieEmulationSettings(); called in NDS_Reset()
++	ffbgm_onRomLoaded(physicalName ? physicalName : filename);  // ff-bgm1x: ROM file path
+ 	NDS_Reset();
+ 
+ 	return ret;
+@@ -2640,6 +2642,7 @@ void NDS_Reset()
+ 	if(lastRom.filename.size()==0)
+ 		return;
+ 
++	ffbgm_onReset();
+ 	UnloadMovieEmulationSettings();
+ 
+ 	//reload last paths if needed

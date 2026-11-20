@@ -1,0 +1,87 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.cpp b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+index 2ec15cf..22b42b3 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+@@ -35,6 +35,7 @@
+ #include "fpssync.h"
+ #include "input.h"
+ #include "rumble.h"
++#include "sensors.h"
+ #include "shadermanager.h"
+ #include "utils/javautils.h"
+ #include "errorcodes.h"
+@@ -572,6 +573,15 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setAudioEn
+     LibretroDroid::getInstance().setAudioEnabled(enabled);
+ }
+ 
++// ff-bgm1x: 센서 축을 화면 기준으로 바꾸기 위한 화면 회전 (Surface.ROTATION_0..3)
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setScreenRotation(
++    JNIEnv* env,
++    jclass obj,
++    jint rotation
++) {
++    Sensors::getInstance().setScreenRotation(rotation);
++}
++
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setShaderConfig(
+     JNIEnv* env,
+     jclass obj,
+@@ -599,6 +609,58 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setViewpor
+     LibretroDroid::getInstance().setViewportAlignment(viewportAlignment);
+ }
+ 
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setStretch(
++    JNIEnv* env,
++    jclass obj,
++    jboolean stretch
++) {
++    LibretroDroid::getInstance().setStretch(stretch);
++}
++
++JNIEXPORT jfloat JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getAspectRatio(
++    JNIEnv* env,
++    jclass obj
++) {
++    return LibretroDroid::getInstance().getAspectRatio();
++}
++
++// ff-bgm1x 소리 분류: 문자열 명령 (UTF-8)
++JNIEXPORT jstring JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_catalogCommand(
++    JNIEnv* env,
++    jclass obj,
++    jstring cmd
++) {
++    const char* c = env->GetStringUTFChars(cmd, nullptr);
++    std::string command = c ? c : "";
++    if (c) env->ReleaseStringUTFChars(cmd, c);
++    const std::string result = LibretroDroid::getInstance().catalogCommand(command);
++    // 자바의 NewStringUTF 는 변형 UTF-8 이라 바이트로 넘겨 자바 쪽에서 UTF-8 로 푼다
++    jbyteArray bytes = env->NewByteArray((jsize) result.size());
++    env->SetByteArrayRegion(bytes, 0, (jsize) result.size(), reinterpret_cast<const jbyte*>(result.data()));
++    jclass stringClass = env->FindClass("java/lang/String");
++    jmethodID ctor = env->GetMethodID(stringClass, "<init>", "([BLjava/lang/String;)V");
++    jstring charset = env->NewStringUTF("UTF-8");
++    jstring out = (jstring) env->NewObject(stringClass, ctor, bytes, charset);
++    env->DeleteLocalRef(bytes);
++    env->DeleteLocalRef(charset);
++    env->DeleteLocalRef(stringClass);
++    return out;
++}
++
++// ff-bgm1x 소리 분류: 재생 소리 (buffer 는 스테레오 int16, frames*2 칸, 이 소리를 더한다)
++JNIEXPORT jint JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_previewRender(
++    JNIEnv* env,
++    jclass obj,
++    jshortArray buffer,
++    jint frames,
++    jint sampleRate
++) {
++    jshort* data = env->GetShortArrayElements(buffer, nullptr);
++    const int n = LibretroDroid::getInstance().previewRender(reinterpret_cast<int16_t*>(data), frames, sampleRate);
++    env->ReleaseShortArrayElements(buffer, data, 0);
++    return n;
++}
++
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_refreshAspectRatio(
+     JNIEnv* env,
+     jclass obj

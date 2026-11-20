@@ -1,0 +1,27 @@
+diff --git a/src/android/app/src/main/AndroidManifest.xml b/src/android/app/src/main/AndroidManifest.xml
+index 022a4f6..64b7003 100644
+--- a/src/android/app/src/main/AndroidManifest.xml
++++ b/src/android/app/src/main/AndroidManifest.xml
+@@ -35,7 +35,7 @@
+ 
+     <application
+         android:name="org.citra.citra_emu.CitraApplication"
+-        android:label="@string/app_name"
++        android:label="${ffAppLabel}"
+         android:icon="@mipmap/ic_launcher"
+         android:appCategory="game"
+         android:allowBackup="false"
+@@ -81,6 +81,13 @@
+ 
+         </activity>
+ 
++        <!-- ff-bgm1x: 소리 분류 (1x Lab 앱) -->
++        <activity
++            android:name="org.citra.citra_emu.activities.FfSoundCatalogActivity"
++            android:exported="false"
++            android:theme="@style/Theme.Citra.Main"
++            android:label="@string/ff_sound_catalog"/>
++
+         <activity
+             android:name="org.citra.citra_emu.features.cheats.ui.CheatsActivity"
+             android:exported="false"

@@ -1,0 +1,45 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
+index 8817e58d..21e1b013 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
+@@ -51,6 +51,7 @@ class LayoutEditorActivity : AppCompatActivity() {
+     enum class MenuOption(@field:StringRes val stringRes: Int) {
+         PROPERTIES(R.string.properties),
+         BACKGROUNDS(R.string.background),
++        SKIN(R.string.ff_skin_apply),  // ff-bgm1x: 다른 에뮬레이터용 스킨(zip) 적용
+         REVERT(R.string.revert_changes),
+         RESET(R.string.reset_default),
+         SAVE_AND_EXIT(R.string.save_and_exit),
+@@ -100,7 +101,18 @@ class LayoutEditorActivity : AppCompatActivity() {
+         }
+     }
+ 
++    // ff-bgm1x: 스킨 zip 고르기
++    private val skinPickerLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
++        if (uri != null) viewModel.applySkin(this, uri)
++    }
++
+     private val layoutEditorManagerListener = object : LayoutEditorManagerView.LayoutEditorManagerListener {
++        override fun openSkinPicker() {
++            storeLayoutChanges()
++            viewModel.rememberSkinTarget()
++            skinPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*"))
++        }
++
+         override fun openBackgroundPicker(layoutTarget: LayoutTarget, selectedBackgroundId: UUID?) {
+             storeLayoutChanges()
+             val intent = Intent(this@LayoutEditorActivity, BackgroundsActivity::class.java).apply {
+@@ -204,6 +216,13 @@ class LayoutEditorActivity : AppCompatActivity() {
+                 }
+             }
+         }
++        lifecycleScope.launch {
++            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
++                viewModel.skinMessages.collect {
++                    android.widget.Toast.makeText(this@LayoutEditorActivity, it, android.widget.Toast.LENGTH_LONG).show()
++                }
++            }
++        }
+         lifecycleScope.launch {
+             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                 WindowInfoTracker.getOrCreate(this@LayoutEditorActivity).windowLayoutInfo(this@LayoutEditorActivity).collect { info ->

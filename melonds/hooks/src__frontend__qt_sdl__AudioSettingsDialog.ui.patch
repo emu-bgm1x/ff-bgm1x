@@ -1,0 +1,43 @@
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.ui b/src/frontend/qt_sdl/AudioSettingsDialog.ui
+index 380197e..a18c62c 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.ui
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.ui
+@@ -59,7 +59,30 @@
+         </property>
+        </widget>
+       </item>
++      <item row="3" column="0">
++       <widget class="QLabel" name="lblSfxVolume">
++        <property name="text">
++         <string>Sound effect volume:</string>
++        </property>
++       </widget>
++      </item>
+       <item row="3" column="1">
++       <widget class="QSlider" name="slSfxVolume">
++        <property name="whatsThis">
++         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Controls the volume of the sound effects played at 1x speed (Keep sound effects at 1x speed).&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
++        </property>
++        <property name="maximum">
++         <number>256</number>
++        </property>
++        <property name="pageStep">
++         <number>16</number>
++        </property>
++        <property name="orientation">
++         <enum>Qt::Horizontal</enum>
++        </property>
++       </widget>
++      </item>
++      <item row="4" column="1">
+         <widget class="QCheckBox" name="chkSyncDSiVolume">
+          <property name="whatsThis">
+           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Synchronizes the output volume with the DSi hardware volume.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+@@ -199,6 +222,7 @@
+   <tabstop>cbInterpolation</tabstop>
+   <tabstop>cbBitDepth</tabstop>
+   <tabstop>slVolume</tabstop>
++  <tabstop>slSfxVolume</tabstop>
+   <tabstop>chkSyncDSiVolume</tabstop>
+   <tabstop>rbMicNone</tabstop>
+   <tabstop>rbMicExternal</tabstop>

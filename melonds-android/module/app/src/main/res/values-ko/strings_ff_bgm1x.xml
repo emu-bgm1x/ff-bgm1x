@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ff-bgm1x: 한국어 (이 앱은 원래 한국어 번역이 없어 추가한 항목만 번역) -->
+<resources>
+    <string name="ff_bgm1x_bgm_1x">BGM 1배속 유지</string>
+    <string name="ff_bgm1x_bgm_1x_summary">배속 중에도 BGM 을 1배속으로 재생합니다</string>
+    <string name="ff_bgm1x_ff_cutscenes">연출 중에도 배속</string>
+    <string name="ff_bgm1x_ff_cutscenes_summary">끄면 연출 음악이 나오는 동안 배속을 잠시 멈춥니다</string>
+    <string name="ff_bgm1x_sfx_1x">효과음 1배속</string>
+    <string name="ff_bgm1x_sfx_1x_summary">배속 중에도 효과음을 1배속으로 냅니다</string>
+    <string name="ff_bgm1x_sfx_volume">효과음 볼륨</string>
+    <string name="ff_layout_x">X px</string>
+    <string name="ff_layout_y">Y px</string>
+    <string name="ff_layout_edge_left">◀ 왼쪽</string>
+    <string name="ff_layout_edge_right">오른쪽 ▶</string>
+    <string name="ff_layout_edge_top">▲ 위</string>
+    <string name="ff_layout_edge_bottom">▼ 아래</string>
+    <string name="ff_layout_fill">꽉 채우기</string>
+    <string name="ff_layout_same_size">고른 버튼 같은 크기로</string>
+    <string name="ff_layout_mirror">왼쪽 기준 좌우 대칭</string>
+    <string name="ff_layout_margin">여백 %1$d px</string>
+    <string name="ff_layout_grid">격자 %1$d px</string>
+    <string name="ff_layout_margin_title">여백 (px)</string>
+    <string name="ff_layout_grid_title">격자 (px, 0 = 끔)</string>
+    <string name="center_horizontal">가로 가운데</string>
+    <string name="center_vertical">세로 가운데</string>
+    <string name="ff_layout_new_panel">새 편집 패널</string>
+    <string name="ff_layout_use_original">원래 편집 패널</string>
+    <string name="ff_layout_panel_handle">☰ 여기를 끌어 패널 옮기기</string>
+    <string name="ff_layout_panel_collapse">접기</string>
+    <string name="ff_layout_panel_expand">펴기</string>
+    <string name="ff_layout_hint">누르면 하나(그룹이면 그룹 전체) 선택, 길게 누르면 여러 개 선택</string>
+    <string name="ff_layout_selected_many">%1$s 외 %2$d개 선택 (노란 테두리 기준)</string>
+    <string name="ff_layout_w">너비 px</string>
+    <string name="ff_layout_h">높이 px</string>
+    <string name="ff_layout_choose_function">버튼 고르기</string>
+    <string name="ff_layout_add_button">버튼 추가</string>
+    <string name="ff_layout_change_function">기능 바꾸기</string>
+    <string name="ff_layout_delete_button">삭제</string>
+    <string name="ff_layout_group">그룹 만들기</string>
+    <string name="ff_layout_ungroup">그룹 풀기</string>
+    <string name="ff_layout_section_each">서로 맞추기 (그룹 하나만 고르면 그 안에서)</string>
+    <string name="ff_layout_section_screen">화면 기준</string>
+    <string name="ff_layout_align_left">왼끝 맞춤</string>
+    <string name="ff_layout_align_hcenter">좌우 가운데 맞춤</string>
+    <string name="ff_layout_align_right">오른끝 맞춤</string>
+    <string name="ff_layout_align_top">위끝 맞춤</string>
+    <string name="ff_layout_align_vcenter">높이 맞춤</string>
+    <string name="ff_layout_align_bottom">아래끝 맞춤</string>
+    <string name="ff_layout_dist_h">가로 등간격</string>
+    <string name="ff_layout_dist_v">세로 등간격</string>
+    <string name="ff_layout_gap">간격 px (빈칸이면 양 끝 사이 균등)</string>
+</resources>

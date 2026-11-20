@@ -1,0 +1,44 @@
+diff --git a/src/frontend/qt_sdl/EmuInstance.cpp b/src/frontend/qt_sdl/EmuInstance.cpp
+index d6d662f..57f614c 100755
+--- a/src/frontend/qt_sdl/EmuInstance.cpp
++++ b/src/frontend/qt_sdl/EmuInstance.cpp
+@@ -35,6 +35,7 @@
+ #include "ArchiveUtil.h"
+ #endif
+ #include "EmuInstance.h"
++#include "BgmReplacer.h"
+ #include "Config.h"
+ #include "Platform.h"
+ #include "Net.h"
+@@ -124,6 +125,13 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
+     nds = nullptr;
+     //updateConsole();
+ 
++    // ff-bgm1x: 오디오 콜백이 쓰므로 오디오보다 먼저 만든다
++    bgmReplacer = new BgmReplacer(this);
++    bgmReplacer->setEnabled(localCfg.GetBool("Bgm1x"));
++    bgmReplacer->setFastForwardCutscenes(localCfg.GetBool("FfCutscenes"));
++    bgmReplacer->setSfx1x(localCfg.GetBool("MenuSounds1x"));
++    bgmReplacer->setSfxVolume(localCfg.GetInt("SfxVolume"));
++
+     audioInit();
+     inputInit();
+ 
+@@ -165,6 +173,9 @@ EmuInstance::~EmuInstance()
+     audioDeInit();
+     inputDeInit();
+ 
++    delete bgmReplacer;  // ff-bgm1x
++    bgmReplacer = nullptr;
++
+     if (nds)
+     {
+         saveRTCData();
+@@ -769,6 +780,7 @@ bool EmuInstance::loadState(const std::string& filename)
+     }
+ 
+     savestateLoaded = true;
++    if (bgmReplacer) bgmReplacer->onStateLoaded();  // ff-bgm1x
+ 
+     return true;
+ }

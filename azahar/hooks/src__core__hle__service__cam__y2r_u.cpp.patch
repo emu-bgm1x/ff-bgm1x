@@ -1,0 +1,20 @@
+diff --git a/src/core/hle/service/cam/y2r_u.cpp b/src/core/hle/service/cam/y2r_u.cpp
+index cd2d90a..37c63a0 100644
+--- a/src/core/hle/service/cam/y2r_u.cpp
++++ b/src/core/hle/service/cam/y2r_u.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <array>
+ #include <cstring>
++#include "audio_core/hle/bgm_replacer.h"
+ #include "common/archives.h"
+ #include "common/common_funcs.h"
+ #include "common/logging/log.h"
+@@ -514,6 +515,7 @@ void Y2R_U::GetDitheringWeightParams(Kernel::HLERequestContext& ctx) {
+ 
+ void Y2R_U::StartConversion(Kernel::HLERequestContext& ctx) {
+     IPC::RequestParser rp(ctx);
++    AudioCore::HLE::BgmReplacer::Instance().OnVideoFrame();  // ff-bgm1x: 동영상 재생 중
+ 
+     // dst_image_size would seem to be perfect for this, but it doesn't include the gap :(
+     u32 total_output_size =
