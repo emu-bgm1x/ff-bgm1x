@@ -1,10 +1,10 @@
 # ff-bgm1x 이식 자료 (AI 용)
 
-> **관리하지 않는 저장소입니다.** 만든 사람은 더 이상 새 버전을 만들거나 문의에 답하지 않습니다.
-> 에뮬레이터 새 버전에 적용하려면 아래 프롬프트로 AI 에게 맡기세요.
-> 이슈에는 [자동 점검](#새-버전-자동-점검) 결과만 올라옵니다.
+> 에뮬레이터 새 버전이 나오면 아래 프롬프트로 AI 코딩 도구에 맡겨 직접 적용할 수 있습니다.
+> 예: Azahar 2126.2 → 2127.0-rc3 시험 이식에서 연결 패치 36개 파일 중 28개가 그대로 들어갔고, PC판은 충돌 3곳·API 변경 1곳만 고쳐 약 10분 만에 첫 실행까지 됐습니다.
+> 이슈에는 공식 새 버전의 [자동 점검](#새-버전-자동-점검) 결과가 올라옵니다.
 >
-> *English: this repository is **not maintained**. See [English](#english) below.*
+> *English: see [English](#english) below.*
 
 배속(빨리 감기) 중에도 **BGM 과 효과음을 1배속으로** 들리게 하는 에뮬레이터 수정판(ff-bgm1x)을,
 에뮬레이터의 **공식 새 버전**에 다시 적용하기 위한 자료입니다.
@@ -111,8 +111,10 @@ Actions 탭에서 `Run workflow` 로 바로 돌려 볼 수도 있습니다.
 
 ## English
 
-**This repository is not maintained.** The author no longer makes new versions or answers questions.
-Issues are only used for the automatic upstream check below.
+When a new emulator version comes out, you can re-apply the mod yourself with an AI coding assistant and the prompt below.
+For example, in a trial port of Azahar 2126.2 → 2127.0-rc3, 28 of the 36 files in the hook patch applied unchanged, and the PC build
+ran for the first time after about 10 minutes, with only 3 conflicts and 1 API change to fix.
+Issues show the results of the [automatic upstream check](#새-버전-자동-점검) (described in Korean above).
 
 ff-bgm1x is a set of emulator modifications that keep **BGM and sound effects playing at 1x speed while
 fast-forwarding**, so the game runs fast but sounds normal. This repository is a *porting kit*: it contains
