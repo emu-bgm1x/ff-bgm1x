@@ -167,6 +167,9 @@ ff-bgm1x 의 GB/GBC 범용 1배속 BGM 이 이 롬에서 어긋난다. 아래 �
 
 ## 5. 시험 도구 명령 모음
 
+시험 도구 소스는 이 폴더의 `test-tools/src/` 에, 분석 스크립트는 `tools/` 에 있습니다.
+아래 경로(`src/...`, `work/...`)는 만든 사람의 작업 폴더 기준이므로, 에뮬레이터 소스(포크의 `gb-generic` 브랜치) 옆에 맞게 바꿔 쓰세요.
+
 ### 빌드
 ```bash
 export PATH=/c/msys64/ucrt64/bin:$PATH
