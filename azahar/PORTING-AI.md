@@ -111,14 +111,18 @@
 | 파일 | 역할 |
 |---|---|
 | `jni/config.cpp`, `default_ini.h`, `SettingKeys.kt`, `BooleanSetting.kt`, `IntSetting.kt`, `SettingsFragmentPresenter.kt`, `CMakeModules/GenerateSettingKeys.cmake` | 1배속 설정을 안드로이드 설정 화면(오디오)에 |
-| `jni/native.cpp`, `NativeLibrary.kt` | 배속 중 연출 곡 멈춤 상태 전달, 화면 메뉴 버튼 번호(`BUTTON_MENU` = 802) |
-| `overlay/InputOverlay.kt` | 화면 메뉴 버튼(한 번 누르면 메뉴), 기능 버튼(`FfCustomButtons`, 번호 900~999), 편집기용 버튼 정보 |
-| `fragments/EmulationFragment.kt`, `activities/EmulationActivity.kt` | 배치 편집기 열기·닫기, 편집 중 서랍 잠금·키보드 입력, 기능 버튼 실행(1배속 옵션 켜기/끄기 포함) |
+| `jni/native.cpp`, `NativeLibrary.kt` | 배속 중 연출 곡 멈춤 상태 전달, 화면 메뉴 버튼 번호(`BUTTON_MENU` = 802), 이 게임 화면 배치(`ffSetLayoutOverride`: `Config{}` 를 읽을 때마다 다시 덮어써서 `config.ini` 는 그대로 둔다) |
+| `overlay/InputOverlay.kt` | 화면 메뉴 버튼(한 번 누르면 메뉴), 기능 버튼(`FfCustomButtons`, 번호 900~999), 편집기용 버튼 정보. 설정은 `FfLayoutScope.prefs` 로 읽고 쓴다 |
+| `fragments/EmulationFragment.kt`, `activities/EmulationActivity.kt` | 배치 편집기 열기·닫기, 편집 중 서랍 잠금·키보드 입력, 기능 버튼 실행(1배속 옵션 켜기/끄기 포함), 게임 시작·끝에 `FfLayoutScope.setGame`, 편집기의 저장 대상·모두 초기화 처리 |
 | `display/ScreenAdjustmentUtil.kt`, `menu_*_screen_layout.xml` | 사용자 화면 배치 읽기·쓰기, "화면·버튼 배치 직접 편집" 메뉴 |
 | `res/values/integers.xml`, `arrays.xml`, `strings.xml` | 메뉴 버튼 기본 자리, 이름, 문구 |
 
 새 파일(`module/src/android/`): `display/ScreenLayoutEditor.kt`(화면·버튼 통합 편집기: 끌기, px 숫자, 여러 개 선택, 그룹,
-서로 맞추기, 등간격, 버튼 추가·삭제), `overlay/FfCustomButtons.kt`(기능 버튼 목록 저장), 메뉴 버튼 그림.
+서로 맞추기, 등간격, 버튼 추가·삭제, 저장 대상 "기본 / 이 게임", 모두 초기화), `overlay/FfCustomButtons.kt`(기능 버튼 목록 저장), 메뉴 버튼 그림,
+`display/FfLayoutScope.kt`(레무로이드와 같은 "기본 / 이 게임" 배치: 버튼 자리·크기·표시, 기능 버튼, 그룹, 스킨, 화면 자리 키만
+`g:<타이틀 ID>:<원래 키>` 로 바꿔 읽고 쓴다. 방향마다 표시 `ffGameLayout-<타이틀 ID>-Portrait/-Landscape` 가 있으면 이 게임 배치를 쓰고,
+처음 이 게임으로 저장할 때 그 방향의 기본 배치를 통째로 복사한다. 버튼 표시·크기·기능 버튼 목록은 원래부터 두 방향 공용이다).
 
 빌드: `src/android` 에서 `./gradlew assembleVanillaRelWithDebInfo` (JDK 17).
-확인: 화면 메뉴 버튼, 화면 배치 편집기(편집 패널이 상태 표시줄·노치 아래에 오고, 사각형이 실제 버튼 자리와 겹치는지), 기능 버튼.
+확인: 화면 메뉴 버튼, 화면 배치 편집기(편집 패널이 상태 표시줄·노치 아래에 오고, 사각형이 실제 버튼 자리와 겹치는지), 기능 버튼,
+"이 게임" 으로 저장한 배치가 그 게임에만 쓰이고 모두 초기화로 기본 배치로 돌아가는지.

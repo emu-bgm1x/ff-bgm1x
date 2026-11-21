@@ -16,6 +16,11 @@
 - 설정: 오디오 설정 화면(`pref_audio.xml`) → `SharedPreferencesSettingsRepository` → `EmulatorConfiguration` → `Configuration.h`.
 - 배치 편집기: 원래 편집기(`LayoutEditorView`)에 X·Y 숫자, 정렬, 꽉 채우기, 여러 개 선택, 그룹, 서로 맞추기, 등간격을 더했다.
   새 떠 있는 패널은 `module/.../layouteditor/ui/FfLayoutPanel.kt` (Compose), 원래 아래 패널과 골라 쓴다.
+- 게임 중 배치 편집: 일시정지 메뉴의 "Button layout" 으로 지금 쓰는 배치를 편집기에 연다. 레무로이드와 같이 저장 대상
+  "기본 / 이 게임" 과 모두 초기화가 패널 위쪽에 나온다. "이 게임" 은 이름 앞머리 `ff-bgm1x-game:` 인 배치
+  (`domain/model/layout/FfGameLayouts.kt`, 배치 목록·고르기 화면에서는 숨김)를 만들어 롬 설정의 `layoutId` 에 지정하고,
+  "기본" 은 고른 기본 배치에 저장한다(원래 배치면 새 배치로 만들어 기본으로 고른다).
+  모두 초기화는 이 게임이면 그 배치를 지우고 롬 지정을 풀고, 기본이면 원래 배치를 기본으로 고른다.
 - 기본 배치 4개에 일시정지(메뉴) 버튼 추가 (`DefaultLayoutProvider.kt`).
 
 ## 2. 원본에 끼우는 지점
@@ -29,7 +34,9 @@
 | `OboeCallback.cpp` | 출력 버퍼에 1배속 소리 더하기 |
 | `MelonDSAndroidJNI.cpp` | 배속 루프에서 연출 곡이면 1배속 |
 | `Configuration.h`, `MelonDSAndroidConfiguration.cpp`, `EmulatorConfiguration.kt`, `SharedPreferencesSettingsRepository.kt`, `pref_audio.xml`, `strings.xml` | 설정 항목 4개 (BGM 1배속, 연출 중에도 배속, 효과음 1배속, 효과음 볼륨) |
-| `layouteditor/*`, `view_layout_editor_manager.xml` | 배치 편집기 기능, 새 패널 연결 |
+| `layouteditor/*`, `view_layout_editor_manager.xml` | 배치 편집기 기능, 새 패널 연결, 게임 중에 열었을 때의 저장 대상·모두 초기화(`KEY_FF_*`, 결과 `RESULT_FF_*`) |
+| `RomPauseMenuOption.kt`, `EmulatorUiEvent.kt`, `EmulatorViewModel.kt`, `EmulatorActivity.kt` | 일시정지 메뉴 "Button layout", 편집기 결과로 롬 배치 지정·초기화, 롬 배치를 바꾸면 다시 지켜보기 |
+| `InternalLayoutsRepository.kt` | 게임 전용 배치를 배치 목록에서 숨김 |
 | `DefaultLayoutProvider.kt` | 기본 배치에 일시정지 버튼 |
 
 ## 3. 진행 순서
@@ -43,6 +50,7 @@
 
 - 배속 중 BGM·효과음이 1배속인지 (표준 사운드 드라이버 게임). 연출 곡에서 배속이 잠시 멈추는지.
 - 설정 → 입력 → 레이아웃 → 새 레이아웃: 새 패널, 여러 개 선택·그룹·서로 맞추기, 원래 패널로 바꾸기.
+- 게임 중 일시정지 → Button layout: "이 게임" 으로 저장한 배치가 그 게임에만 쓰이고, 배치 목록에는 보이지 않고, 모두 초기화로 기본 배치로 돌아가는지.
 
 ## 5. 알려진 함정
 

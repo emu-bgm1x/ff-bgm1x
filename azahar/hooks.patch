@@ -15,7 +15,7 @@ index f75bfe5..75d17e2 100644
          string(REPLACE "_" "_1" KEY_JNI_ESCAPED ${KEY})
          set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")
 diff --git a/src/android/app/build.gradle.kts b/src/android/app/build.gradle.kts
-index d873af1..0f883f1 100644
+index d873af1..6199fc7 100644
 --- a/src/android/app/build.gradle.kts
 +++ b/src/android/app/build.gradle.kts
 @@ -91,6 +91,12 @@ android {
@@ -23,10 +23,10 @@ index d873af1..0f883f1 100644
          buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
          buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
 +
-+        // ff-bgm1x: -PffbgmLab=true 면 소리 분류가 들어간 별도 앱 (기존 앱과 따로 설치된다)
++        // ff-bgm1x: 소리 분류는 항상 들어간다. -PffbgmLab=true 면 기존 앱과 따로 설치되는 별도 앱
 +        val ffbgmLab = (project.findProperty("ffbgmLab") as String?) == "true"
 +        if (ffbgmLab) applicationIdSuffix = ".lab"
-+        buildConfigField("boolean", "FF_LAB", ffbgmLab.toString())
++        buildConfigField("boolean", "FF_LAB", "true")
 +        manifestPlaceholders["ffAppLabel"] = if (ffbgmLab) "Azahar 1x Lab" else "@string/app_name"
      }
  
@@ -59,10 +59,20 @@ index 022a4f6..64b7003 100644
              android:name="org.citra.citra_emu.features.cheats.ui.CheatsActivity"
              android:exported="false"
 diff --git a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
-index b72ed24..075d222 100644
+index b72ed24..602cbac 100644
 --- a/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
 +++ b/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt
-@@ -208,6 +208,11 @@ object NativeLibrary {
+@@ -128,6 +128,9 @@ object NativeLibrary {
+ 
+     external fun reloadSettings()
+ 
++    // ff-bgm1x: 이 게임 전용 화면 배치 (위 x,y,w,h, 아래 x,y,w,h). on=false 면 끈다 (끈 뒤 reloadSettings 로 원래 값)
++    external fun ffSetLayoutOverride(portrait: Boolean, on: Boolean, values: IntArray?)
++
+     external fun getTitleId(filename: String): Long
+ 
+     external fun getIsSystemTitle(path: String): Boolean
+@@ -208,6 +211,11 @@ object NativeLibrary {
       */
      external fun getRunningTitleId(): Long
  
@@ -74,7 +84,7 @@ index b72ed24..075d222 100644
      /**
       * Returns the performance stats for the current game
       */
-@@ -1087,6 +1092,8 @@ object NativeLibrary {
+@@ -1087,6 +1095,8 @@ object NativeLibrary {
          const val BUTTON_GPIO14 = 782
          const val BUTTON_SWAP = 800
          const val BUTTON_TURBO = 801
@@ -254,7 +264,7 @@ index 044216e..3db3aed 100644
                  SwitchSetting(
                      BooleanSetting.ENABLE_AUDIO_STRETCHING,
 diff --git a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
-index 63430da..35fea3f 100644
+index 63430da..ca753a9 100644
 --- a/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
 +++ b/src/android/app/src/main/java/org/citra/citra_emu/fragments/EmulationFragment.kt
 @@ -67,8 +67,11 @@ import org.citra.citra_emu.databinding.FragmentEmulationBinding
@@ -269,10 +279,15 @@ index 63430da..35fea3f 100644
  import org.citra.citra_emu.features.settings.model.BooleanSetting
  import org.citra.citra_emu.features.settings.model.IntSetting
  import org.citra.citra_emu.features.settings.model.SettingsViewModel
-@@ -93,6 +96,86 @@ class EmulationFragment :
+@@ -90,8 +93,89 @@ class EmulationFragment :
+     Fragment(),
+     SurfaceHolder.Callback,
+     Choreographer.FrameCallback {
++    // ff-bgm1x: 배치 키는 "이 게임" 배치가 있으면 그쪽으로 (FfLayoutScope)
      private val preferences: SharedPreferences
-         get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
- 
+-        get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
++        get() = org.citra.citra_emu.display.FfLayoutScope.prefs
++
 +    // ff-bgm1x: 화면 배치 편집기의 스킨 zip 고르기
 +    private var skinCallback: ((android.net.Uri) -> Unit)? = null
 +    // 고르기를 시작한 때의 방향·버튼 층 크기 (파일 고르기 화면이 세로로 열려 돌아온 순간의 값은 틀릴 수 있다)
@@ -352,11 +367,21 @@ index 63430da..35fea3f 100644
 +            }.start()
 +        }
 +    }
-+
+ 
      private lateinit var emulationState: EmulationState
      private var perfStatsUpdater: Runnable? = null
+@@ -193,6 +277,10 @@ class EmulationFragment :
+         }
  
-@@ -211,6 +294,8 @@ class EmulationFragment :
+         Log.info("[EmulationFragment] Starting application " + game.path)
++        // ff-bgm1x: 이 게임 배치가 있으면 그것을 쓰도록 (타이틀 ID, 없으면 파일 이름)
++        org.citra.citra_emu.display.FfLayoutScope.setGame(
++            if (game.titleId != 0L) java.lang.Long.toHexString(game.titleId) else "f_" + game.filename
++        )
+ 
+         // So this fragment doesn't restart on configuration changes; i.e. rotation.
+         retainInstance = true
+@@ -211,6 +299,8 @@ class EmulationFragment :
          _binding = FragmentEmulationBinding.inflate(inflater)
          binding.inGameMenu.menu.findItem(R.id.menu_secondary_screen_layout).isVisible =
              emulationActivity.secondaryDisplayManager.availableDisplays.isNotEmpty()
@@ -365,7 +390,7 @@ index 63430da..35fea3f 100644
          binding.inGameMenu.menu.findItem(R.id.menu_landscape_screen_layout).isVisible =
              CitraApplication.appContext.resources.configuration.orientation !=
              Configuration.ORIENTATION_PORTRAIT
-@@ -233,6 +318,29 @@ class EmulationFragment :
+@@ -233,6 +323,29 @@ class EmulationFragment :
              binding.doneControlConfig.visibility = View.GONE
              binding.surfaceInputOverlay.setIsInEditMode(false)
          }
@@ -395,7 +420,7 @@ index 63430da..35fea3f 100644
  
          // Show/hide the "Stats" overlay
          updateShowPerformanceOverlay()
-@@ -263,7 +371,11 @@ class EmulationFragment :
+@@ -263,7 +376,11 @@ class EmulationFragment :
              }
  
              override fun onDrawerClosed(drawerView: View) {
@@ -408,7 +433,7 @@ index 63430da..35fea3f 100644
                  binding.surfaceInputOverlay.isClickable = true
                  binding.surfaceInputOverlay.isFocusable = true
                  binding.surfaceInputOverlay.isFocusableInTouchMode = true
-@@ -393,6 +505,11 @@ class EmulationFragment :
+@@ -393,6 +510,11 @@ class EmulationFragment :
                      true
                  }
  
@@ -420,7 +445,7 @@ index 63430da..35fea3f 100644
                  R.id.menu_cheats -> {
                      val action = EmulationNavigationDirections
                          .actionGlobalCheatsActivity(NativeLibrary.getRunningTitleId())
-@@ -443,6 +560,12 @@ class EmulationFragment :
+@@ -443,6 +565,12 @@ class EmulationFragment :
                          return
                      }
  
@@ -433,7 +458,18 @@ index 63430da..35fea3f 100644
                      if (binding.drawerLayout.isOpen) {
                          binding.drawerLayout.close()
                      } else {
-@@ -1024,6 +1147,11 @@ class EmulationFragment :
+@@ -572,6 +700,10 @@ class EmulationFragment :
+         if (::emulationState.isInitialized && requireActivity().isFinishing) {
+             emulationState.stop()
+         }
++        // ff-bgm1x: 게임을 끝내면 이 게임 배치를 끈다 (화면을 돌려 조각만 새로 만들 때는 그대로)
++        if (requireActivity().isFinishing) {
++            org.citra.citra_emu.display.FfLayoutScope.setGame(null)
++        }
+         EmulationLifecycleUtil.removeHook(onPause)
+         EmulationLifecycleUtil.removeHook(onShutdown)
+         if (gameFd != null) {
+@@ -1024,6 +1156,11 @@ class EmulationFragment :
                      true
                  }
  
@@ -445,7 +481,7 @@ index 63430da..35fea3f 100644
                  else -> true
              }
          }
-@@ -1083,6 +1211,11 @@ class EmulationFragment :
+@@ -1083,6 +1220,11 @@ class EmulationFragment :
                      true
                  }
  
@@ -457,7 +493,7 @@ index 63430da..35fea3f 100644
                  else -> true
              }
          }
-@@ -1254,9 +1387,85 @@ class EmulationFragment :
+@@ -1254,9 +1396,127 @@ class EmulationFragment :
          }
      }
  
@@ -488,7 +524,14 @@ index 63430da..35fea3f 100644
 +    private fun showScreenLayoutEditor(portrait: Boolean) {
 +        binding.drawerLayout.close()
 +        val parent = binding.surfaceEmulation.parent as ViewGroup
-+        val (top, bottom) = screenAdjustmentUtil.customLayout(portrait)
++        // ff-bgm1x: 이 게임 배치에 화면 자리가 있으면 그것에서 시작
++        val scope = org.citra.citra_emu.display.FfLayoutScope
++        val gameScreen = scope.gameScreen(portrait)
++        val (top, bottom) = if (gameScreen != null) {
++            gameScreen.copyOfRange(0, 4) to gameScreen.copyOfRange(4, 8)
++        } else {
++            screenAdjustmentUtil.customLayout(portrait)
++        }
 +        var editor: View? = null
 +        // 편집기가 버튼을 사각형으로 그리므로 편집하는 동안 실제 버튼은 숨긴다
 +        val overlay = binding.surfaceInputOverlay
@@ -503,7 +546,42 @@ index 63430da..35fea3f 100644
 +            overlay,
 +            screenOffsetX,
 +            screenOffsetY,
-+            onSave = { t, b -> screenAdjustmentUtil.applyCustomLayout(portrait, t, b) },
++            onSave = { t, b, forGame ->
++                if (forGame) scope.saveGameScreen(portrait, t, b)
++                else screenAdjustmentUtil.applyCustomLayout(portrait, t, b)
++            },
++            initialForGame = scope.hasGameLayout(portrait),
++            onReset = { forGame ->
++                if (forGame) {
++                    // 이 게임 배치를 지워 기본 배치로
++                    scope.clearGameLayout(portrait)
++                } else {
++                    // 기본 배치를 원래대로: 버튼(원래 앱의 "초기화"), 기능 버튼, 그룹, 스킨, 화면 배치 방식
++                    scope.forceGame = false
++                    try {
++                        // 원래 앱의 "초기화" 에서 투명도만 빼고 (투명도는 배치가 아니다)
++                        resetAllScales()
++                        val toggles = preferences.edit()
++                        for (i in 0 until 18) {
++                            toggles.putBoolean("buttonToggle$i", i !in setOf(6, 7, 12, 13, 14, 15, 16))
++                        }
++                        toggles.commit()
++                        binding.surfaceInputOverlay.resetButtonPlacement()
++                        org.citra.citra_emu.overlay.FfCustomButtons.save(preferences, emptyMap())
++                        preferences.edit().remove("ffLayoutGroups" + if (portrait) "-Portrait" else "").apply()
++                        org.citra.citra_emu.display.FfSkin.clear(preferences, portrait)
++                    } finally {
++                        scope.forceGame = null
++                    }
++                    if (portrait) {
++                        screenAdjustmentUtil.changePortraitOrientation(IntSetting.PORTRAIT_SCREEN_LAYOUT.defaultValue)
++                    } else {
++                        screenAdjustmentUtil.changeScreenOrientation(IntSetting.SCREEN_LAYOUT.defaultValue)
++                    }
++                }
++                binding.surfaceInputOverlay.refreshControls()
++                binding.surfaceInputOverlay.invalidate()
++            },
 +            onPickSkin = { callback ->
 +                skinCallback = callback
 +                skinPickPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
@@ -544,7 +622,7 @@ index 63430da..35fea3f 100644
          enabledButtons.forEachIndexed { i: Int, _: Boolean ->
              // Buttons that are disabled by default
              var defaultValue = true
-@@ -1469,7 +1678,7 @@ class EmulationFragment :
+@@ -1469,7 +1729,7 @@ class EmulationFragment :
  
          val editor = preferences.edit()
          // TODO: This code sucks balls. We need to do this differently. -OS
@@ -553,7 +631,7 @@ index 63430da..35fea3f 100644
              var defaultValue = true
              when (i) {
                  6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
-@@ -1815,5 +2024,10 @@ class EmulationFragment :
+@@ -1815,5 +2075,10 @@ class EmulationFragment :
  
      companion object {
          private val perfStatsUpdateHandler = Handler(Looper.myLooper()!!)
@@ -565,7 +643,7 @@ index 63430da..35fea3f 100644
      }
  }
 diff --git a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
-index 06c5ff2..09c86a6 100644
+index 06c5ff2..b860207 100644
 --- a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
 +++ b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
 @@ -11,6 +11,8 @@ import android.content.res.Configuration
@@ -769,7 +847,18 @@ index 06c5ff2..09c86a6 100644
              .putFloat(
                  Hotkey.COMBO_BUTTON.button.toString() + portrait + "-X",
                  resources.getInteger(R.integer.N3DS_BUTTON_COMBO_PORTRAIT_X).toFloat() / 1000 * maxX
-@@ -1023,6 +1148,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1011,8 +1136,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+     override fun isInEditMode(): Boolean = isInEditMode
+ 
+     companion object {
++        // ff-bgm1x: 배치 키는 "이 게임" 배치가 있으면 그쪽으로 (FfLayoutScope)
+         private val preferences
+-            get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
++            get() = org.citra.citra_emu.display.FfLayoutScope.prefs
+ 
+         /**
+          * Resizes a [Bitmap] by a given scale factor
+@@ -1023,6 +1149,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
           * @return The scaled [Bitmap]
           */
          private fun getBitmap(context: Context, drawableId: Int, scale: Float): Bitmap {
@@ -790,7 +879,7 @@ index 06c5ff2..09c86a6 100644
              try {
                  val bitmap = BitmapFactory.decodeResource(context.resources, drawableId)
                  return resizeBitmap(context, bitmap, scale)
-@@ -1114,7 +1253,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1114,7 +1254,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
                  NativeLibrary.ButtonType.BUTTON_HOME,
                  NativeLibrary.ButtonType.BUTTON_START,
                  NativeLibrary.ButtonType.BUTTON_SELECT,
@@ -800,7 +889,7 @@ index 06c5ff2..09c86a6 100644
  
                  NativeLibrary.ButtonType.BUTTON_TURBO -> 0.10f
  
-@@ -1163,6 +1303,80 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1163,6 +1304,80 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
              return overlayDrawable
          }
  
@@ -961,7 +1050,7 @@ index 9422927..7203383 100644
  # 1.0 (default): 100%, 0.0; mute
  )") DECLARE_KEY(volume) BOOST_HANA_STRING(R"(
 diff --git a/src/android/app/src/main/jni/native.cpp b/src/android/app/src/main/jni/native.cpp
-index fd52ce0..7db53ec 100644
+index fd52ce0..66a1edc 100644
 --- a/src/android/app/src/main/jni/native.cpp
 +++ b/src/android/app/src/main/jni/native.cpp
 @@ -15,6 +15,7 @@
@@ -972,7 +1061,59 @@ index fd52ce0..7db53ec 100644
  #include "common/arch.h"
  
  #if CITRA_ARCH(arm64)
-@@ -379,6 +380,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
+@@ -78,6 +79,43 @@ namespace {
+ ANativeWindow* s_surface;
+ ANativeWindow* s_secondary_surface;
+ 
++// ff-bgm1x: per-game screen layout from the layout editor ("This game").
++// Index 0 = landscape, 1 = portrait. Values: top x, y, w, h, bottom x, y, w, h.
++// Re-applied after every Config{} so the global config.ini stays untouched.
++struct FfLayoutOverride {
++    bool on = false;
++    u16 v[8] = {};
++};
++FfLayoutOverride s_ff_layout_override[2];
++
++void ApplyFfLayoutOverride() {
++    const auto& l = s_ff_layout_override[0];
++    if (l.on) {
++        Settings::values.layout_option.SetValue(Settings::LayoutOption::CustomLayout);
++        Settings::values.custom_top_x.SetValue(l.v[0]);
++        Settings::values.custom_top_y.SetValue(l.v[1]);
++        Settings::values.custom_top_width.SetValue(l.v[2]);
++        Settings::values.custom_top_height.SetValue(l.v[3]);
++        Settings::values.custom_bottom_x.SetValue(l.v[4]);
++        Settings::values.custom_bottom_y.SetValue(l.v[5]);
++        Settings::values.custom_bottom_width.SetValue(l.v[6]);
++        Settings::values.custom_bottom_height.SetValue(l.v[7]);
++    }
++    const auto& p = s_ff_layout_override[1];
++    if (p.on) {
++        Settings::values.portrait_layout_option.SetValue(
++            Settings::PortraitLayoutOption::PortraitCustomLayout);
++        Settings::values.custom_portrait_top_x.SetValue(p.v[0]);
++        Settings::values.custom_portrait_top_y.SetValue(p.v[1]);
++        Settings::values.custom_portrait_top_width.SetValue(p.v[2]);
++        Settings::values.custom_portrait_top_height.SetValue(p.v[3]);
++        Settings::values.custom_portrait_bottom_x.SetValue(p.v[4]);
++        Settings::values.custom_portrait_bottom_y.SetValue(p.v[5]);
++        Settings::values.custom_portrait_bottom_width.SetValue(p.v[6]);
++        Settings::values.custom_portrait_bottom_height.SetValue(p.v[7]);
++    }
++}
++
+ enum class CompressionStatus : jint {
+     Success = 0,
+     Compress_Unsupported = 1,
+@@ -287,6 +325,7 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
+ 
+     // Forces a config reload on game boot, if the user changed settings in the UI
+     Config{};
++    ApplyFfLayoutOverride();
+     // Replace with game-specific settings
+     u64 program_id{};
+     FileUtil::SetCurrentRomPath(filepath);
+@@ -379,6 +418,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
              SCOPE_EXIT({ Settings::values.volume = volume; });
              Settings::values.volume = 0;
  
@@ -983,6 +1124,39 @@ index fd52ce0..7db53ec 100644
              std::unique_lock pause_lock{paused_mutex};
              running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
              window->PollEvents();
+@@ -540,6 +583,24 @@ void Java_org_citra_citra_1emu_NativeLibrary_notifyOrientationChange([[maybe_unu
+                                                                      jint rotation,
+                                                                      jboolean portrait) {
+     Settings::values.layout_option = static_cast<Settings::LayoutOption>(layout_option);
++    ApplyFfLayoutOverride();
++}
++
++// ff-bgm1x: set or clear the per-game screen layout for one orientation (values: 8 ints, see above)
++void Java_org_citra_citra_1emu_NativeLibrary_ffSetLayoutOverride(JNIEnv* env,
++                                                                 [[maybe_unused]] jobject obj,
++                                                                 jboolean portrait, jboolean on,
++                                                                 jintArray j_values) {
++    auto& o = s_ff_layout_override[portrait ? 1 : 0];
++    o.on = on;
++    if (on && j_values != nullptr && env->GetArrayLength(j_values) >= 8) {
++        jint values[8];
++        env->GetIntArrayRegion(j_values, 0, 8, values);
++        for (int i = 0; i < 8; i++) {
++            o.v[i] = static_cast<u16>(std::max<jint>(0, values[i]));
++        }
++    }
++    ApplyFfLayoutOverride();
+ }
+ void Java_org_citra_citra_1emu_NativeLibrary_updateFramebuffer([[maybe_unused]] JNIEnv* env,
+                                                                [[maybe_unused]] jobject obj,
+@@ -1009,6 +1070,7 @@ void Java_org_citra_citra_1emu_NativeLibrary_logUserDirectory(JNIEnv* env,
+ void Java_org_citra_citra_1emu_NativeLibrary_reloadSettings([[maybe_unused]] JNIEnv* env,
+                                                             [[maybe_unused]] jobject obj) {
+     Config{};
++    ApplyFfLayoutOverride();
+     Core::System& system{Core::System::GetInstance()};
+ 
+     // Replace with game-specific settings
 diff --git a/src/android/app/src/main/res/menu/menu_in_game.xml b/src/android/app/src/main/res/menu/menu_in_game.xml
 index f7e9017..220f669 100644
 --- a/src/android/app/src/main/res/menu/menu_in_game.xml
@@ -1065,7 +1239,7 @@ index 5843e67..e7c6cdf 100644
      <integer name="N3DS_BUTTON_COMBO_PORTRAIT_Y">925</integer>
  
 diff --git a/src/android/app/src/main/res/values/strings.xml b/src/android/app/src/main/res/values/strings.xml
-index 12bb68c..e072a6c 100644
+index 12bb68c..4eb4d7c 100644
 --- a/src/android/app/src/main/res/values/strings.xml
 +++ b/src/android/app/src/main/res/values/strings.xml
 @@ -165,6 +165,7 @@
@@ -1076,7 +1250,7 @@ index 12bb68c..e072a6c 100644
      <string name="button_combo">Combo Button</string>
      <string name="button_x" translatable="false">X</string>
      <string name="button_y" translatable="false">Y</string>
-@@ -364,6 +365,97 @@
+@@ -364,6 +365,100 @@
      <string name="realtime_audio_description">Scales audio playback speed to account for drops in emulation framerate. This means that audio will play at full speed even while the game framerate is low. May cause audio desync issues.</string>
      <string name="simulate_headphones_plugged">Simulate Headphones Plugged In</string>
      <string name="simulate_headphones_plugged_description">Simulates whether headphones are plugged in to the emulated 3DS system.</string>
@@ -1098,6 +1272,9 @@ index 12bb68c..e072a6c 100644
 +    <string name="ff_skin_apply">스킨 적용 (zip)</string>
 +    <string name="ff_skin_remove">스킨 끄기</string>
 +    <string name="ff_bgm1x_layout_save">저장</string>
++    <string name="ff_bgm1x_layout_target_default">기본</string>
++    <string name="ff_bgm1x_layout_target_game">이 게임</string>
++    <string name="ff_bgm1x_layout_reset_all">모두 초기화</string>
 +    <string name="ff_bgm1x_layout_size_percent">크기 %</string>
 +    <string name="ff_bgm1x_layout_center_h">가로 가운데</string>
 +    <string name="ff_bgm1x_layout_center_v">세로 가운데</string>

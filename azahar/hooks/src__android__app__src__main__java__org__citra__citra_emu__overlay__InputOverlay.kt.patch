@@ -1,5 +1,5 @@
 diff --git a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
-index 06c5ff2..09c86a6 100644
+index 06c5ff2..b860207 100644
 --- a/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
 +++ b/src/android/app/src/main/java/org/citra/citra_emu/overlay/InputOverlay.kt
 @@ -11,6 +11,8 @@ import android.content.res.Configuration
@@ -203,7 +203,18 @@ index 06c5ff2..09c86a6 100644
              .putFloat(
                  Hotkey.COMBO_BUTTON.button.toString() + portrait + "-X",
                  resources.getInteger(R.integer.N3DS_BUTTON_COMBO_PORTRAIT_X).toFloat() / 1000 * maxX
-@@ -1023,6 +1148,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1011,8 +1136,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+     override fun isInEditMode(): Boolean = isInEditMode
+ 
+     companion object {
++        // ff-bgm1x: 배치 키는 "이 게임" 배치가 있으면 그쪽으로 (FfLayoutScope)
+         private val preferences
+-            get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
++            get() = org.citra.citra_emu.display.FfLayoutScope.prefs
+ 
+         /**
+          * Resizes a [Bitmap] by a given scale factor
+@@ -1023,6 +1149,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
           * @return The scaled [Bitmap]
           */
          private fun getBitmap(context: Context, drawableId: Int, scale: Float): Bitmap {
@@ -224,7 +235,7 @@ index 06c5ff2..09c86a6 100644
              try {
                  val bitmap = BitmapFactory.decodeResource(context.resources, drawableId)
                  return resizeBitmap(context, bitmap, scale)
-@@ -1114,7 +1253,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1114,7 +1254,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
                  NativeLibrary.ButtonType.BUTTON_HOME,
                  NativeLibrary.ButtonType.BUTTON_START,
                  NativeLibrary.ButtonType.BUTTON_SELECT,
@@ -234,7 +245,7 @@ index 06c5ff2..09c86a6 100644
  
                  NativeLibrary.ButtonType.BUTTON_TURBO -> 0.10f
  
-@@ -1163,6 +1303,80 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
+@@ -1163,6 +1304,80 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
              return overlayDrawable
          }
  

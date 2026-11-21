@@ -52,13 +52,68 @@ class ScreenLayoutEditor(
     // 게임 화면 층이 버튼 층보다 떨어진 만큼 (화면 사각형을 이만큼 옮겨 보여 주고, 저장할 때 되돌린다)
     private val screenOffsetX: Int,
     private val screenOffsetY: Int,
-    private val onSave: (IntArray, IntArray) -> Unit,
+    // ff-bgm1x: 화면 자리 저장 (위, 아래, true = 이 게임)
+    private val onSave: (IntArray, IntArray, Boolean) -> Unit,
     private val onClose: () -> Unit,
     // ff-bgm1x: 스킨 zip 고르기 (고르면 받은 함수를 부른다)
-    private val onPickSkin: (((android.net.Uri) -> Unit) -> Unit)? = null
+    private val onPickSkin: (((android.net.Uri) -> Unit) -> Unit)? = null,
+    // ff-bgm1x: 처음 고른 저장 대상 (이 게임 배치를 쓰고 있으면 true)
+    initialForGame: Boolean = false,
+    // ff-bgm1x: "모두 초기화" (true = 이 게임 배치를 지워 기본으로, false = 기본 배치를 원래대로)
+    private val onReset: ((Boolean) -> Unit)? = null
 ) : FrameLayout(context) {
+    // ff-bgm1x: 저장 대상 (레무로이드와 같이 "기본" / "이 게임")
+    private var forGame = initialForGame
+    private val portraitNow get() = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    // 이번에 연 동안 이 게임 배치를 새로 만들었는가 (취소하면 지운다)
+    private var createdGame = false
+    // 스킨 미리 보기를 쓴 쪽과, 쓰기 전 그쪽 스킨 값 (취소하거나 다른 쪽에 저장하면 되돌린다)
+    private var previewGame: Boolean? = null
+    private var skinBackup: Map<String, Any?> = emptyMap()
+    private var skinRemoved = false
+
+    private fun <T> inScope(game: Boolean, block: () -> T): T {
+        if (game && !FfLayoutScope.hasGameLayout(portraitNow)) {
+            FfLayoutScope.ensureGameLayout(portraitNow)
+            createdGame = true
+        }
+        FfLayoutScope.forceGame = game
+        try {
+            return block()
+        } finally {
+            FfLayoutScope.forceGame = null
+        }
+    }
+
+    private fun skinKeys(game: Boolean): List<String> {
+        val p = portraitNow
+        val o = if (p) "-Portrait" else ""
+        return listOf("ffSkinDir" + (if (p) "-Portrait" else "-Landscape"), "ffSkinBg$o", "ffSkinHoles$o")
+            .map { FfLayoutScope.rawKey(it, game) }
+    }
+
+    // 스킨 미리 보기를 지금 고른 쪽에 쓴다 (다른 쪽에 써 둔 미리 보기는 먼저 되돌린다)
+    private fun previewSkin(block: () -> Unit) {
+        val target = forGame
+        if (previewGame != null && previewGame != target) undoSkinPreview()
+        inScope(target) {
+            if (previewGame == null) {
+                skinBackup = FfLayoutScope.snapshot(skinKeys(target))
+                previewGame = target
+            }
+            block()
+        }
+    }
+
+    private fun undoSkinPreview() {
+        if (previewGame == null) return
+        FfLayoutScope.restore(skinBackup)
+        previewGame = null
+        skinBackup = emptyMap()
+    }
     private val density = resources.displayMetrics.density
-    private val preferences = PreferenceManager.getDefaultSharedPreferences(context)
+    // ff-bgm1x: 배치 키는 고른 쪽(기본/이 게임)으로 (FfLayoutScope)
+    private val preferences = FfLayoutScope.prefs
 
     // 편집할 항목 하나 (화면 또는 버튼). key 는 그룹 저장에 쓰는 이름 (s0, s1, c<버튼 번호>)
     private class Item(
@@ -855,8 +910,12 @@ class ScreenLayoutEditor(
             toggleOriginal.forEach { (i, v) -> edit.putBoolean("buttonToggle$i", v) }
             edit.commit()
             toggleOriginal.clear()
-            inputOverlay.refreshControls()
         }
+        // ff-bgm1x: 스킨 미리 보기와 이번에 새로 만든 이 게임 배치는 되돌린다
+        undoSkinPreview()
+        if (createdGame) FfLayoutScope.clearGameLayout(portraitNow)
+        inputOverlay.refreshControls()
+        inputOverlay.invalidate()
         onClose()
     }
 
@@ -877,8 +936,11 @@ class ScreenLayoutEditor(
                         items[1].rect.set(p.bottom)
                     }
                     pendingSkin = p.dir to p.background
-                    // 미리 보기: 배경을 바로 버튼 층에 깔고, 버튼 그림도 바꾼다
-                    FfSkin.save(preferences, p.dir, portrait, p.background, items[0].rect, items[1].rect)
+                    skinRemoved = false
+                    // 미리 보기: 배경을 바로 버튼 층에 깔고, 버튼 그림도 바꾼다 (고른 저장 대상 쪽에)
+                    previewSkin {
+                        FfSkin.save(preferences, p.dir, portrait, p.background, items[0].rect, items[1].rect)
+                    }
                     inputOverlay.refreshControls()
                     inputOverlay.visibility = View.VISIBLE
                     inputOverlay.invalidate()
@@ -895,6 +957,40 @@ class ScreenLayoutEditor(
     }
 
     private fun save() {
+        // ff-bgm1x: 편집하는 동안 켠 기본 버튼은 지금 쓰는 쪽에 들어가 있으므로 되돌리고, 고른 저장 대상 쪽에 다시 쓴다
+        val toggled = toggleOriginal.keys.associateWith { preferences.getBoolean("buttonToggle$it", true) }
+        if (toggleOriginal.isNotEmpty()) {
+            val edit = preferences.edit()
+            toggleOriginal.forEach { (i, v) -> edit.putBoolean("buttonToggle$i", v) }
+            edit.commit()
+        }
+        // 스킨 미리 보기를 다른 쪽에 써 두었으면 그쪽은 되돌리고, 고른 쪽에 다시 쓴다
+        val skinToApply = pendingSkin
+        val skinWasPreviewedElsewhere = previewGame != null && previewGame != forGame
+        if (skinWasPreviewedElsewhere) undoSkinPreview()
+        val game = forGame
+        inScope(game) {
+            if (toggled.isNotEmpty()) {
+                val edit = preferences.edit()
+                toggled.forEach { (i, v) -> edit.putBoolean("buttonToggle$i", v) }
+                edit.commit()
+            }
+            if (skinWasPreviewedElsewhere) {
+                if (skinToApply != null) {
+                    FfSkin.save(preferences, skinToApply.first, portraitNow, skinToApply.second, items[0].rect, items[1].rect)
+                } else if (skinRemoved) {
+                    FfSkin.clear(preferences, portraitNow)
+                }
+            }
+            saveInScope(game)
+        }
+        // 저장했으니 미리 보기·새로 만든 배치는 확정
+        previewGame = null
+        skinBackup = emptyMap()
+        createdGame = false
+    }
+
+    private fun saveInScope(game: Boolean) {
         // 기능 버튼 목록 먼저 (refreshControls 가 이 목록으로 버튼을 만든다)
         val customs = LinkedHashMap<Int, FfCustomButtons.Function>()
         items.forEach { item -> item.function?.let { customs[item.control!!.posId] = it } }
@@ -918,7 +1014,7 @@ class ScreenLayoutEditor(
         // ff-bgm1x: 스킨이 있으면 비워 둘 게임 화면 자리도 옮긴 자리로
         FfSkin.updateHoles(preferences, resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT, items[0].rect, items[1].rect)
         inputOverlay.invalidate()
-        if (!top.contentEquals(initialTop) || !bottom.contentEquals(initialBottom)) onSave(top, bottom)
+        if (!top.contentEquals(initialTop) || !bottom.contentEquals(initialBottom)) onSave(top, bottom, game)
     }
 
     // 패널 ---------------------------------------------------------------
@@ -1190,8 +1286,9 @@ class ScreenLayoutEditor(
             },
             toolButton(R.string.ff_skin_remove) {
                 pendingSkin = null
-                // 지금 방향의 스킨만 끈다 (세로·가로는 따로)
-                FfSkin.clear(preferences, resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
+                skinRemoved = true
+                // 지금 방향의 스킨만 끈다 (세로·가로는 따로, 고른 저장 대상 쪽만)
+                previewSkin { FfSkin.clear(preferences, portraitNow) }
                 inputOverlay.refreshControls()
                 inputOverlay.invalidate()
             },
@@ -1232,10 +1329,51 @@ class ScreenLayoutEditor(
             setOnCheckedChangeListener { _, checked -> keepAspect = checked }
         })
 
+        // ff-bgm1x: 저장 대상 (레무로이드와 같이 "기본" / "이 게임"). 글이 길어도 갈라지지 않게 버튼 줄과 나눈다
+        val targets = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val targetButtons = ArrayList<Button>()
+        fun paintTargets() {
+            targetButtons.forEachIndexed { i, b ->
+                val chosen = (i == 1) == forGame
+                b.alpha = if (chosen) 1f else 0.55f
+                b.paintFlags = if (chosen) b.paintFlags or Paint.UNDERLINE_TEXT_FLAG
+                else b.paintFlags and Paint.UNDERLINE_TEXT_FLAG.inv()
+            }
+        }
+        listOf(R.string.ff_bgm1x_layout_target_default, R.string.ff_bgm1x_layout_target_game).forEachIndexed { i, res ->
+            val b = Button(context).apply {
+                text = context.getString(res)
+                isAllCaps = false
+                setOnClickListener {
+                    forGame = i == 1
+                    paintTargets()
+                }
+            }
+            targetButtons.add(b)
+            targets.addView(b)
+        }
+        paintTargets()
+        panel.addView(targets)
+
         // 저장·취소는 스크롤 밖에 두어 항상 보이게 한다
         val buttons = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
+        }
+        // ff-bgm1x: 모두 초기화 (고른 쪽만: 이 게임이면 이 게임 배치를 지워 기본으로, 기본이면 기본을 원래대로)
+        if (onReset != null) {
+            buttons.addView(Button(context).apply {
+                text = context.getString(R.string.ff_bgm1x_layout_reset_all)
+                isAllCaps = false
+                setOnClickListener {
+                    val game = forGame
+                    undoSkinPreview()
+                    toggleOriginal.clear()
+                    createdGame = false
+                    onClose()
+                    onReset.invoke(game)
+                }
+            })
         }
         buttons.addView(Button(context).apply {
             text = context.getString(android.R.string.cancel)

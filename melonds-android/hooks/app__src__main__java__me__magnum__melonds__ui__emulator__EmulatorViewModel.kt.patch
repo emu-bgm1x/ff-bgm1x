@@ -1,8 +1,16 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
-index afe7129f..41f334ba 100644
+index afe7129f..d73b198b 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
-@@ -453,6 +453,7 @@ class EmulatorViewModel @Inject constructor(
+@@ -425,6 +425,7 @@ class EmulatorViewModel @Inject constructor(
+             is RomPauseMenuOption -> {
+                 when (option) {
+                     RomPauseMenuOption.SETTINGS -> _uiEvent.tryEmit(EmulatorUiEvent.OpenScreen.SettingsScreen)
++                    RomPauseMenuOption.LAYOUT -> openLayoutEditorForGame()
+                     RomPauseMenuOption.SAVE_STATE -> {
+                         (_emulatorState.value as? EmulatorState.RunningRom)?.let {
+                             val saveStateSlots = getRomSaveStateSlots(it.rom)
+@@ -453,6 +454,7 @@ class EmulatorViewModel @Inject constructor(
                          }
                      }
                      RomPauseMenuOption.VIEW_ACHIEVEMENTS -> _uiEvent.tryEmit(EmulatorUiEvent.ShowAchievementList)
@@ -10,7 +18,85 @@ index afe7129f..41f334ba 100644
                      RomPauseMenuOption.RESET -> resetEmulator()
                      RomPauseMenuOption.EXIT -> exitEmulator(force = false)
                  }
-@@ -1000,6 +1001,7 @@ class EmulatorViewModel @Inject constructor(
+@@ -714,6 +716,9 @@ class EmulatorViewModel @Inject constructor(
+         }
+     }
+ 
++    // ff-bgm1x: 롬 배치를 바꾸면 다시 지켜보므로, 앞의 지켜보기를 끊을 수 있게 둔다
++    private var romLayoutJob: kotlinx.coroutines.Job? = null
++
+     private fun startObservingLayoutForRom(rom: Rom) {
+         val romLayoutId = rom.config.layoutId
+         val layoutFlow = if (romLayoutId == null) {
+@@ -726,13 +731,66 @@ class EmulatorViewModel @Inject constructor(
+                 }
+         }
+ 
+-        sessionCoroutineScope.launch {
++        romLayoutJob?.cancel()
++        romLayoutJob = sessionCoroutineScope.launch {
+             combine(layoutFlow, ensureEmulatorIsRunning()) { layout, _ ->
+                 layout
+             }.collect(_layout)
+         }
+     }
+ 
++    // ff-bgm1x: 게임 중 버튼 배치 편집 (레무로이드와 같이 "기본" / "이 게임") ------------------------
++
++    private fun openLayoutEditorForGame() {
++        val rom = (_emulatorState.value as? EmulatorState.RunningRom)?.rom ?: return
++        val current = _layout.value
++        val globalId = settingsRepository.getSelectedLayoutId()
++        val romLayoutId = rom.config.layoutId
++        val gameLayoutId = romLayoutId?.takeIf { me.magnum.melonds.domain.model.layout.FfGameLayouts.isGameLayout(current) && current?.id == it }
++        _uiEvent.tryEmit(
++            EmulatorUiEvent.OpenScreen.LayoutEditor(
++                layoutId = current?.id ?: globalId,
++                // 롬에 배치가 지정되어 있으면 (게임 전용이든 원래 기능으로 고른 배치든) "이 게임" 으로 시작
++                initialForGame = romLayoutId != null,
++                gameLayoutId = gameLayoutId,
++                globalLayoutId = globalId,
++                gameName = rom.config.customName ?: rom.name,
++            )
++        )
++    }
++
++    /** 편집기에서 돌아왔을 때. [layoutId] 는 저장한 배치 (초기화면 null) */
++    fun onLayoutEditorResult(forGame: Boolean, layoutId: java.util.UUID?, reset: Boolean) {
++        val rom = (_emulatorState.value as? EmulatorState.RunningRom)?.rom ?: return
++        sessionCoroutineScope.launch {
++            if (reset) {
++                if (forGame) {
++                    // 이 게임 배치를 지워 기본 배치로
++                    val romLayoutId = rom.config.layoutId
++                    if (romLayoutId != null) {
++                        val layout = layoutsRepository.getLayout(romLayoutId)
++                        if (me.magnum.melonds.domain.model.layout.FfGameLayouts.isGameLayout(layout)) {
++                            layoutsRepository.deleteLayout(layout!!)
++                        }
++                        setRomLayout(rom, null)
++                    }
++                } else {
++                    // 기본 배치를 원래 배치로
++                    settingsRepository.setSelectedLayoutId(LayoutConfiguration.DEFAULT_ID)
++                }
++            } else if (forGame && layoutId != null && rom.config.layoutId != layoutId) {
++                setRomLayout(rom, layoutId)
++            }
++        }
++    }
++
++    private fun setRomLayout(rom: Rom, layoutId: java.util.UUID?) {
++        val newConfig = rom.config.copy(layoutId = layoutId)
++        romsRepository.updateRomConfig(rom, newConfig)
++        rom.config = newConfig
++        startObservingLayoutForRom(rom)
++    }
++
+     private fun startObservingRendererConfiguration() {
+         sessionCoroutineScope.launch {
+             settingsRepository.observeRenderConfiguration().collectLatest {
+@@ -1000,6 +1058,7 @@ class EmulatorViewModel @Inject constructor(
              RomPauseMenuOption.LOAD_STATE -> emulatorSession.areSaveStateLoadsAllowed()
              RomPauseMenuOption.CHEATS -> emulatorSession.areCheatsEnabled()
              RomPauseMenuOption.VIEW_ACHIEVEMENTS -> emulatorSession.areRetroAchievementsEnabled()

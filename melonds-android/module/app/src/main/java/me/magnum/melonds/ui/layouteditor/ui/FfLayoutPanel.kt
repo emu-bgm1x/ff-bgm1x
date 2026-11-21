@@ -63,6 +63,12 @@ fun FfLayoutPanel(
     onFillScreen: () -> Unit,
     onOpenMenu: () -> Unit,
     onUseOriginalEditor: () -> Unit,
+    // 게임 중에 열었을 때만: 저장 대상 (true = 이 게임), 바꾸기, 모두 초기화, 저장. null 이면 보이지 않는다
+    target: Boolean? = null,
+    onTargetChanged: (Boolean) -> Unit = {},
+    onResetAll: (Boolean) -> Unit = {},
+    onSave: (Boolean) -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
     var panelOffset by remember { mutableStateOf(Offset.Zero) }
     var collapsed by remember { mutableStateOf(false) }
@@ -125,6 +131,23 @@ fun FfLayoutPanel(
                     )
                     TextButton(onClick = { collapsed = !collapsed }) {
                         Text(stringResource(if (collapsed) R.string.ff_layout_panel_expand else R.string.ff_layout_panel_collapse))
+                    }
+                }
+                // ff-bgm1x: 저장 대상과 저장·초기화는 손잡이 바로 아래 (레무로이드와 같이, 접어도 보이게. 두 줄로 나눠 글이 갈라지지 않게)
+                if (target != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(false to R.string.ff_layout_target_default, true to R.string.ff_layout_target_game).forEach { (game, res) ->
+                            if (game == target) {
+                                androidx.compose.material.Button(onClick = { onTargetChanged(game) }) { Text(stringResource(res)) }
+                            } else {
+                                OutlinedButton(onClick = { onTargetChanged(game) }) { Text(stringResource(res)) }
+                            }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End)) {
+                        TextButton(onClick = { onResetAll(target) }) { Text(stringResource(R.string.ff_layout_reset_all)) }
+                        TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                        TextButton(onClick = { onSave(target) }) { Text(stringResource(R.string.ff_layout_save)) }
                     }
                 }
                 if (!collapsed) {

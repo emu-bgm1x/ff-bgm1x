@@ -1,8 +1,8 @@
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 4a7e1ddd..154114a5 100644
+index 4a7e1ddd..3f6199ff 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
-@@ -243,6 +243,53 @@
+@@ -243,6 +243,59 @@
      <string name="interpolation">Interpolation</string>
      <string name="bitrate">Bitrate</string>
      <string name="volume">Volume</string>
@@ -30,6 +30,12 @@ index 4a7e1ddd..154114a5 100644
 +    <string name="ff_layout_new_panel">New panel</string>
 +    <string name="ff_layout_use_original">Original panel</string>
 +    <string name="ff_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="ff_layout_edit_game">Button layout</string>
++    <string name="ff_layout_target_default">Default</string>
++    <string name="ff_layout_target_game">This game</string>
++    <string name="ff_layout_reset_all">Reset all</string>
++    <string name="ff_layout_save">Save</string>
++    <string name="ff_layout_default_name">Default (edited)</string>
 +    <string name="ff_layout_panel_collapse">Collapse</string>
 +    <string name="ff_layout_panel_expand">Expand</string>
 +    <string name="ff_layout_hint">Tap to select one (whole group if grouped), long-press to select several</string>

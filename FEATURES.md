@@ -62,6 +62,11 @@
 왼쪽 기준 좌우 대칭. 3DS·GBA 는 버튼 삭제(기본 버튼 포함)와, 화면에 없는 기능만 고를 수 있는 버튼 추가
 (빠른 저장·불러오기, 1배속 옵션 켜기/끄기 등). melonDS 는 떠 있는 새 패널과 원래 아래 패널을 골라 쓴다.
 
+세 앱 모두 배치를 "기본" 과 "이 게임" 으로 나눠 저장한다. 편집기 위쪽에서 저장 대상(기본 / 이 게임)을 고르고, 모두 초기화·취소·저장을 누른다.
+이 게임 배치가 있으면 그것, 없으면 기본 배치를 쓴다. 모두 초기화는 고른 쪽만: 이 게임이면 기본 배치로 돌아가고, 기본이면 원래 배치로 돌아간다.
+스킨도 배치와 함께 고른 쪽에 저장된다. melonDS 는 게임 중 일시정지 메뉴의 "Button layout" 으로 편집기를 열며,
+이 게임 배치는 배치 목록에 보이지 않고 그 롬의 배치로 지정된다.
+
 ## 기능과 별개로 고친 것
 
 | 에뮬레이터 | 수정 |
@@ -150,6 +155,11 @@ Layout editor in all three: drag buttons and screens, absolute (px) number input
 groups (nestable), align to each other (edges, centers), even spacing, same real size for selected buttons, screen-relative
 alignment, fill, margin, grid, left-to-right mirror. 3DS and GBA can delete any button (including default ones) and add only
 functions that are not on screen (quick save/load, 1x option toggles, ...). melonDS has a new floating panel and keeps the original one.
+
+All three save layouts as "Default" and "This game". At the top of the editor you pick where to save (Default / This game), then Reset all, Cancel or Save.
+The game's layout is used if it exists, otherwise the default one. Reset all affects only the chosen one: This game goes back to the default layout,
+Default goes back to the original layout. Skins are saved with the layout, on the chosen side. In melonDS the editor opens from "Button layout"
+in the in-game pause menu; a game's layout is hidden from the layout list and assigned to that ROM.
 
 ## Other fixes
 

@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
-index ec726f10..48ff7902 100644
+index ec726f10..4171e84d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
 @@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
@@ -12,7 +12,7 @@ index ec726f10..48ff7902 100644
  import kotlinx.coroutines.flow.asStateFlow
  import kotlinx.coroutines.flow.distinctUntilChangedBy
  import kotlinx.coroutines.flow.filterNotNull
-@@ -31,6 +33,15 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutBackgroundProperties
+@@ -31,12 +33,22 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutBackgroundProperties
  import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
  import java.util.UUID
  import javax.inject.Inject
@@ -28,7 +28,14 @@ index ec726f10..48ff7902 100644
  
  @HiltViewModel
  class LayoutEditorViewModel @Inject constructor(
-@@ -52,6 +63,10 @@ class LayoutEditorViewModel @Inject constructor(
+     private val layoutsRepository: LayoutsRepository,
+     private val backgroundsRepository: BackgroundRepository,
+     private val uiLayoutProvider: UILayoutProvider,
++    private val settingsRepository: me.magnum.melonds.domain.repositories.SettingsRepository,  // ff-bgm1x: 기본 배치 고르기
+     savedStateHandle: SavedStateHandle
+ ) : ViewModel() {
+ 
+@@ -52,6 +64,10 @@ class LayoutEditorViewModel @Inject constructor(
      private val _secondaryScreenBackground = MutableStateFlow<RuntimeBackground?>(null)
      val secondaryScreenBackground = _secondaryScreenBackground.asStateFlow()
  
@@ -39,7 +46,56 @@ index ec726f10..48ff7902 100644
      private val _currentLayout = MutableStateFlow<CurrentLayoutState?>(null)
      val currentLayout = _currentLayout.asStateFlow()
  
-@@ -347,6 +362,88 @@ class LayoutEditorViewModel @Inject constructor(
+@@ -192,6 +208,48 @@ class LayoutEditorViewModel @Inject constructor(
+         }
+     }
+ 
++    /**
++     * ff-bgm1x: 게임 중 편집에서 고른 쪽에 저장한다 (레무로이드와 같이).
++     * - 이 게임: 게임 전용 배치가 있으면 그것을, 없으면 새로 만들어 저장 (배치 목록에는 보이지 않음). 롬 지정은 게임 화면이 한다.
++     * - 기본: 지금 고른 기본 배치에 저장. 기본 배치가 원래 배치(바꿀 수 없음)면 새 배치로 만들어 기본으로 고른다.
++     * 끝나면 [done] 에 저장한 배치 번호를 넘긴다.
++     */
++    fun ffSave(
++        forGame: Boolean,
++        gameLayoutId: UUID?,
++        globalLayoutId: UUID?,
++        gameName: String,
++        defaultName: String,
++        done: (UUID?) -> Unit,
++    ) {
++        val config = _currentLayoutConfiguration.value
++        if (config == null) {
++            done(null)
++            return
++        }
++        viewModelScope.launch {
++            val savedId = if (forGame) {
++                val id = gameLayoutId ?: UUID.randomUUID()
++                layoutsRepository.saveLayout(
++                    config.copy(id = id, name = me.magnum.melonds.domain.model.layout.FfGameLayouts.nameFor(gameName), type = LayoutConfiguration.LayoutType.CUSTOM)
++                )
++                id
++            } else {
++                val global = globalLayoutId?.let { layoutsRepository.getLayout(it) }
++                if (global == null || global.type == LayoutConfiguration.LayoutType.DEFAULT) {
++                    val id = UUID.randomUUID()
++                    layoutsRepository.saveLayout(config.copy(id = id, name = defaultName, type = LayoutConfiguration.LayoutType.CUSTOM))
++                    settingsRepository.setSelectedLayoutId(id)
++                    id
++                } else {
++                    layoutsRepository.saveLayout(config.copy(id = global.id, name = global.name, type = LayoutConfiguration.LayoutType.CUSTOM))
++                    global.id
++                }
++            }
++            done(savedId)
++        }
++    }
++
+     fun revertLayoutChanges() {
+         _currentLayoutConfiguration.value = initialLayoutConfiguration
+     }
+@@ -347,6 +405,88 @@ class LayoutEditorViewModel @Inject constructor(
          }
      }
  

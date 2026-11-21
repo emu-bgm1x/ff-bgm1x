@@ -1,5 +1,5 @@
 diff --git a/src/android/app/build.gradle.kts b/src/android/app/build.gradle.kts
-index d873af1..0f883f1 100644
+index d873af1..6199fc7 100644
 --- a/src/android/app/build.gradle.kts
 +++ b/src/android/app/build.gradle.kts
 @@ -91,6 +91,12 @@ android {
@@ -7,10 +7,10 @@ index d873af1..0f883f1 100644
          buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
          buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
 +
-+        // ff-bgm1x: -PffbgmLab=true 면 소리 분류가 들어간 별도 앱 (기존 앱과 따로 설치된다)
++        // ff-bgm1x: 소리 분류는 항상 들어간다. -PffbgmLab=true 면 기존 앱과 따로 설치되는 별도 앱
 +        val ffbgmLab = (project.findProperty("ffbgmLab") as String?) == "true"
 +        if (ffbgmLab) applicationIdSuffix = ".lab"
-+        buildConfigField("boolean", "FF_LAB", ffbgmLab.toString())
++        buildConfigField("boolean", "FF_LAB", "true")
 +        manifestPlaceholders["ffAppLabel"] = if (ffbgmLab) "Azahar 1x Lab" else "@string/app_name"
      }
  

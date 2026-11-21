@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
-index 8cb35d1c..40a608ef 100644
+index 8cb35d1c..8e86a3dc 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
 @@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModelProvider
@@ -28,7 +28,7 @@ index 8cb35d1c..40a608ef 100644
  
  class LayoutEditorManagerView(
      private val layoutTarget: LayoutTarget,
-@@ -66,6 +71,7 @@ class LayoutEditorManagerView(
+@@ -66,11 +71,17 @@ class LayoutEditorManagerView(
  
      interface LayoutEditorManagerListener {
          fun openBackgroundPicker(layoutTarget: LayoutTarget, selectedBackgroundId: UUID?)
@@ -36,7 +36,17 @@ index 8cb35d1c..40a608ef 100644
          fun onStoreLayoutChanges()
          fun onSaveLayoutAndExit()
          fun onExit()
-@@ -100,6 +106,16 @@ class LayoutEditorManagerView(
++        fun onFfSave(forGame: Boolean) {}  // ff-bgm1x: 게임 중 편집에서 고른 쪽에 저장
++        fun onFfResetAll(forGame: Boolean) {}  // ff-bgm1x: 게임 중 편집에서 고른 쪽만 초기화
+     }
+ 
++    // ff-bgm1x: 게임 중에 열었을 때의 저장 대상 (null = 설정 화면에서 연 편집기라 고르기 없음, true = 이 게임)
++    val ffTarget = mutableStateOf<Boolean?>(null)
++
+     private enum class ScreenAspectRatio(val ratio: Float?) {
+         RATIO_4_3(consoleAspectRatio),
+         RATIO_16_9(16 / 9f),
+@@ -100,6 +111,16 @@ class LayoutEditorManagerView(
      private var bottomAspectRatio = ScreenAspectRatio.RATIO_4_3
      private var updatingAspectSpinner = false
  
@@ -53,7 +63,7 @@ index 8cb35d1c..40a608ef 100644
      private var showLayoutPropertiesDialog by mutableStateOf(initialEditorState?.isPropertiesDialogShown ?: false)
      private var showBackgroundPropertiesDialog by mutableStateOf(initialEditorState?.isBackgroundPropertiesDialogShown ?: false)
      private var shownEditablePropertyDialog by mutableStateOf<LayoutComponentEditableProperty?>(null)
-@@ -165,6 +181,10 @@ class LayoutEditorManagerView(
+@@ -165,6 +186,10 @@ class LayoutEditorManagerView(
                              LayoutComponentEditableProperty.SIZE -> binding.seekBarSize.progress + selectedViewMinSize
                              LayoutComponentEditableProperty.WIDTH -> binding.seekBarWidth.progress + selectedViewMinSize
                              LayoutComponentEditableProperty.HEIGHT -> binding.seekBarHeight.progress + selectedViewMinSize
@@ -64,7 +74,7 @@ index 8cb35d1c..40a608ef 100644
                              null -> 0
                          },
                          onValueChanged = {
-@@ -178,6 +198,18 @@ class LayoutEditorManagerView(
+@@ -178,6 +203,18 @@ class LayoutEditorManagerView(
                                      binding.seekBarHeight.progress = it - selectedViewMinSize
                                      enforceAspectRatio(selectedAspectRatio, HEIGHT)
                                  }
@@ -83,7 +93,7 @@ index 8cb35d1c..40a608ef 100644
                                  null -> { /* no-op */ }
                              }
                              shownEditablePropertyDialog = null
-@@ -189,6 +221,39 @@ class LayoutEditorManagerView(
+@@ -189,6 +226,44 @@ class LayoutEditorManagerView(
                          title = stringResource(R.string.layout_name),
                          dialogState = nameInputDialogState,
                      )
@@ -118,12 +128,17 @@ index 8cb35d1c..40a608ef 100644
 +                            },
 +                            onOpenMenu = { openMenu() },
 +                            onUseOriginalEditor = { setNewPanel(false) },
++                            target = ffTarget.value,
++                            onTargetChanged = { ffTarget.value = it },
++                            onResetAll = { listener?.onFfResetAll(it) },
++                            onSave = { listener?.onFfSave(it) },
++                            onCancel = { listener?.onExit() },
 +                        )
 +                    }
                  }
              }
          }
-@@ -228,15 +293,69 @@ class LayoutEditorManagerView(
+@@ -228,15 +303,69 @@ class LayoutEditorManagerView(
          binding.buttonCenterVertical.setOnClickListener {
              binding.viewLayoutEditor.centerSelectedViewVertically()
          }
@@ -193,7 +208,7 @@ index 8cb35d1c..40a608ef 100644
              hideBottomControls()
              // Force the scaling controls to restart so the new view always
              // receives fresh listeners even if they were already visible.
-@@ -366,6 +485,16 @@ class LayoutEditorManagerView(
+@@ -366,6 +495,16 @@ class LayoutEditorManagerView(
          }
  
          hideScalingControls(false)
@@ -210,7 +225,7 @@ index 8cb35d1c..40a608ef 100644
      }
  
      override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-@@ -376,6 +505,19 @@ class LayoutEditorManagerView(
+@@ -376,6 +515,19 @@ class LayoutEditorManagerView(
          }
      }
  
@@ -230,7 +245,7 @@ index 8cb35d1c..40a608ef 100644
      fun handleBackNavigation() {
          if (areScalingControlsShown) {
              hideScalingControls(true)
-@@ -408,7 +550,9 @@ class LayoutEditorManagerView(
+@@ -408,7 +560,9 @@ class LayoutEditorManagerView(
      private fun openButtonsMenu() {
          hideBottomControls()
          val instantiatedComponents = binding.viewLayoutEditor.getInstantiatedComponents()
@@ -241,7 +256,7 @@ index 8cb35d1c..40a608ef 100644
  
          val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
          val dialogBuilder = AlertDialog.Builder(themedContext)
-@@ -446,6 +590,7 @@ class LayoutEditorManagerView(
+@@ -446,6 +600,7 @@ class LayoutEditorManagerView(
          when (option) {
              MenuOption.PROPERTIES -> openPropertiesDialog()
              MenuOption.BACKGROUNDS -> openBackgroundsConfigDialog()
@@ -249,7 +264,7 @@ index 8cb35d1c..40a608ef 100644
              MenuOption.REVERT -> viewModel.revertLayoutChanges()
              MenuOption.RESET -> viewModel.resetLayout()
              MenuOption.SAVE_AND_EXIT -> {
-@@ -572,8 +717,9 @@ class LayoutEditorManagerView(
+@@ -572,8 +727,9 @@ class LayoutEditorManagerView(
          binding.seekBarAlpha.isVisible = isScreen
          binding.layoutAspectRatio.isVisible = isScreen
          binding.checkboxAboveScreen.isVisible = isScreen
@@ -261,7 +276,7 @@ index 8cb35d1c..40a608ef 100644
  
          currentWidthScale = widthScale
          currentHeightScale = heightScale
-@@ -627,6 +773,11 @@ class LayoutEditorManagerView(
+@@ -627,6 +783,11 @@ class LayoutEditorManagerView(
          areScalingControlsShown = false
      }
  

@@ -1,8 +1,22 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
-index 8817e58d..21e1b013 100644
+index 8817e58d..e20571e8 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
-@@ -51,6 +51,7 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -46,11 +46,21 @@ import javax.inject.Inject
+ class LayoutEditorActivity : AppCompatActivity() {
+     companion object {
+         const val KEY_LAYOUT_ID = "layout_id"
++        // ff-bgm1x: 게임 중에 열었을 때 (레무로이드와 같이 "기본" / "이 게임" 저장 대상과 "모두 초기화")
++        const val KEY_FF_GAME_MODE = "ff_game_mode"
++        const val KEY_FF_INITIAL_FOR_GAME = "ff_initial_for_game"
++        const val KEY_FF_GAME_LAYOUT_ID = "ff_game_layout_id"
++        const val KEY_FF_GLOBAL_LAYOUT_ID = "ff_global_layout_id"
++        const val KEY_FF_GAME_NAME = "ff_game_name"
++        const val RESULT_FF_FOR_GAME = "ff_result_for_game"
++        const val RESULT_FF_LAYOUT_ID = "ff_result_layout_id"
++        const val RESULT_FF_RESET = "ff_result_reset"
+     }
+ 
      enum class MenuOption(@field:StringRes val stringRes: Int) {
          PROPERTIES(R.string.properties),
          BACKGROUNDS(R.string.background),
@@ -10,7 +24,7 @@ index 8817e58d..21e1b013 100644
          REVERT(R.string.revert_changes),
          RESET(R.string.reset_default),
          SAVE_AND_EXIT(R.string.save_and_exit),
-@@ -100,7 +101,18 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -100,7 +110,18 @@ class LayoutEditorActivity : AppCompatActivity() {
          }
      }
  
@@ -29,7 +43,61 @@ index 8817e58d..21e1b013 100644
          override fun openBackgroundPicker(layoutTarget: LayoutTarget, selectedBackgroundId: UUID?) {
              storeLayoutChanges()
              val intent = Intent(this@LayoutEditorActivity, BackgroundsActivity::class.java).apply {
-@@ -204,6 +216,13 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -117,12 +138,41 @@ class LayoutEditorActivity : AppCompatActivity() {
+         }
+ 
+         override fun onSaveLayoutAndExit() {
+-            saveLayoutAndExit()
++            // ff-bgm1x: 게임 중에 열었으면 메뉴의 "저장하고 나가기" 도 고른 쪽에 저장
++            val target = layoutEditorManager.ffTarget.value
++            if (target != null) onFfSave(target) else saveLayoutAndExit()
+         }
+ 
+         override fun onExit() {
+             finish()
+         }
++
++        // ff-bgm1x: 고른 쪽(기본 / 이 게임)에 저장하고 닫는다
++        override fun onFfSave(forGame: Boolean) {
++            storeLayoutChanges()
++            viewModel.ffSave(
++                forGame = forGame,
++                gameLayoutId = intent.getStringExtra(KEY_FF_GAME_LAYOUT_ID)?.let { UUID.fromString(it) },
++                globalLayoutId = intent.getStringExtra(KEY_FF_GLOBAL_LAYOUT_ID)?.let { UUID.fromString(it) },
++                gameName = intent.getStringExtra(KEY_FF_GAME_NAME) ?: "",
++                defaultName = getString(R.string.ff_layout_default_name),
++            ) { savedId ->
++                setResult(RESULT_OK, Intent().apply {
++                    putExtra(RESULT_FF_FOR_GAME, forGame)
++                    putExtra(RESULT_FF_LAYOUT_ID, savedId?.toString())
++                })
++                finish()
++            }
++        }
++
++        // ff-bgm1x: 고른 쪽만 초기화하고 닫는다 (실제 초기화는 게임 화면이 한다: 롬 설정·고른 배치를 바꿔야 해서)
++        override fun onFfResetAll(forGame: Boolean) {
++            setResult(RESULT_OK, Intent().apply {
++                putExtra(RESULT_FF_FOR_GAME, forGame)
++                putExtra(RESULT_FF_RESET, true)
++            })
++            finish()
++        }
+     }
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -134,6 +184,10 @@ class LayoutEditorActivity : AppCompatActivity() {
+         }
+         layoutEditorManager = LayoutEditorManagerView(LayoutTarget.MAIN_SCREEN, picasso, null, this).apply {
+             listener = layoutEditorManagerListener
++            // ff-bgm1x: 게임 중에 열었으면 저장 대상 고르기와 모두 초기화를 보인다
++            if (intent.getBooleanExtra(KEY_FF_GAME_MODE, false)) {
++                ffTarget.value = intent.getBooleanExtra(KEY_FF_INITIAL_FOR_GAME, false)
++            }
+         }
+         container.addView(layoutEditorManager, RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT)
+         setContentView(container)
+@@ -204,6 +258,13 @@ class LayoutEditorActivity : AppCompatActivity() {
                  }
              }
          }

@@ -241,6 +241,7 @@ fun CustomLayoutEditor(
                     }
                 }
                 // 저장 대상과 저장·취소·초기화는 손잡이 바로 아래에 둔다 (가로 화면에서도, 접어도 항상 보이게)
+                // 한 줄에 모두 두면 영어처럼 긴 문구에서 마지막 버튼 글자가 두 줄로 갈라져서, 저장 대상 줄과 버튼 줄을 나눈다
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -256,7 +257,12 @@ fun CustomLayoutEditor(
                         onClick = { forGame = true },
                         label = { Text(stringResource(R.string.custom_layout_target_game)) },
                     )
-                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                ) {
                     TextButton(
                         onClick = {
                             onClear(forGame)
@@ -280,9 +286,9 @@ fun CustomLayoutEditor(
                 if (collapsed) return@Column
 
                 // 내용이 길어 스크롤한다. 높이는 화면에 맞춘다
-                // (손잡이·저장 줄·여백·상태 표시줄 몫으로 약 180dp 를 뺀다)
+                // (손잡이·저장 대상 줄·버튼 줄·여백·상태 표시줄 몫으로 약 230dp 를 뺀다)
                 val scrollMax =
-                    (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 180)
+                    (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 230)
                         .coerceIn(72, 280)
                 Column(
                     modifier =

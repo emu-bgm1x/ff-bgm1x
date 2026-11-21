@@ -478,6 +478,19 @@ index bfc3e998..6f52d631 100644
  
      fun isScreen(): Boolean {
          return this == TOP_SCREEN || this == BOTTOM_SCREEN
+diff --git a/app/src/main/java/me/magnum/melonds/impl/InternalLayoutsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/InternalLayoutsRepository.kt
+index a464a213..2b6213e3 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/InternalLayoutsRepository.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/InternalLayoutsRepository.kt
+@@ -52,6 +52,8 @@ class InternalLayoutsRepository(private val context: Context, private val gson:
+         return layouts
+             .onStart { ensureLayoutsAreLoaded() }
+             .map { it.filterNotDeleted() }
++            // ff-bgm1x: 게임 전용 배치는 배치 목록·고르기 화면에 보이지 않게 한다
++            .map { list -> list.filterNot { me.magnum.melonds.domain.model.layout.FfGameLayouts.isGameLayout(it) } }
+     }
+ 
+     override suspend fun getLayout(id: UUID): LayoutConfiguration? {
 diff --git a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
 index 4d688b35..1c708b87 100644
 --- a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
@@ -637,7 +650,7 @@ index 195bce62..2c0b62d8 100644
          }
      }
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
-index 8a8a8302..6e0451d5 100644
+index 8a8a8302..9a4eea4d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 @@ -243,6 +243,12 @@ class EmulatorActivity : AppCompatActivity() {
@@ -653,21 +666,60 @@ index 8a8a8302..6e0451d5 100644
      }
      private val settingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
          viewModel.onSettingsChanged()
-@@ -506,6 +512,9 @@ class EmulatorActivity : AppCompatActivity() {
+@@ -254,6 +260,18 @@ class EmulatorActivity : AppCompatActivity() {
+         viewModel.onCheatsChanged()
+         viewModel.resumeEmulator()
+     }
++    // ff-bgm1x: 게임 중 버튼 배치 편집에서 돌아왔을 때 (이 게임 배치를 롬에 지정하거나 초기화)
++    private val ffLayoutEditorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
++        val data = it.data
++        if (it.resultCode == RESULT_OK && data != null) {
++            viewModel.onLayoutEditorResult(
++                forGame = data.getBooleanExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_FOR_GAME, false),
++                layoutId = data.getStringExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_LAYOUT_ID)?.let { id -> java.util.UUID.fromString(id) },
++                reset = data.getBooleanExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_RESET, false),
++            )
++        }
++        viewModel.resumeEmulator()
++    }
+     private val permissionRequestLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+         lifecycleScope.launch {
+             it.keys.forEach { permission ->
+@@ -506,6 +524,21 @@ class EmulatorActivity : AppCompatActivity() {
                              val settingsIntent = Intent(this@EmulatorActivity, SettingsActivity::class.java)
                              settingsLauncher.launch(settingsIntent)
                          }
 +                        EmulatorUiEvent.OpenScreen.SoundCatalogScreen -> {
 +                            startActivity(Intent(this@EmulatorActivity, me.magnum.melonds.ui.soundcatalog.SoundCatalogActivity::class.java))
 +                        }
++                        is EmulatorUiEvent.OpenScreen.LayoutEditor -> {
++                            val e = me.magnum.melonds.ui.layouteditor.LayoutEditorActivity
++                            val intent = Intent(this@EmulatorActivity, me.magnum.melonds.ui.layouteditor.LayoutEditorActivity::class.java).apply {
++                                putExtra(e.KEY_LAYOUT_ID, it.layoutId.toString())
++                                putExtra(e.KEY_FF_GAME_MODE, true)
++                                putExtra(e.KEY_FF_INITIAL_FOR_GAME, it.initialForGame)
++                                putExtra(e.KEY_FF_GAME_LAYOUT_ID, it.gameLayoutId?.toString())
++                                putExtra(e.KEY_FF_GLOBAL_LAYOUT_ID, it.globalLayoutId.toString())
++                                putExtra(e.KEY_FF_GAME_NAME, it.gameName)
++                            }
++                            ffLayoutEditorLauncher.launch(intent)
++                        }
                          is EmulatorUiEvent.ShowPauseMenu -> showPauseMenu(it.pauseMenu)
                          is EmulatorUiEvent.ShowRewindWindow -> showRewindWindow(it.rewindWindow, it.windowPosition)
                          is EmulatorUiEvent.ShowRomSaveStates -> {
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
-index afe7129f..41f334ba 100644
+index afe7129f..d73b198b 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorViewModel.kt
-@@ -453,6 +453,7 @@ class EmulatorViewModel @Inject constructor(
+@@ -425,6 +425,7 @@ class EmulatorViewModel @Inject constructor(
+             is RomPauseMenuOption -> {
+                 when (option) {
+                     RomPauseMenuOption.SETTINGS -> _uiEvent.tryEmit(EmulatorUiEvent.OpenScreen.SettingsScreen)
++                    RomPauseMenuOption.LAYOUT -> openLayoutEditorForGame()
+                     RomPauseMenuOption.SAVE_STATE -> {
+                         (_emulatorState.value as? EmulatorState.RunningRom)?.let {
+                             val saveStateSlots = getRomSaveStateSlots(it.rom)
+@@ -453,6 +454,7 @@ class EmulatorViewModel @Inject constructor(
                          }
                      }
                      RomPauseMenuOption.VIEW_ACHIEVEMENTS -> _uiEvent.tryEmit(EmulatorUiEvent.ShowAchievementList)
@@ -675,7 +727,85 @@ index afe7129f..41f334ba 100644
                      RomPauseMenuOption.RESET -> resetEmulator()
                      RomPauseMenuOption.EXIT -> exitEmulator(force = false)
                  }
-@@ -1000,6 +1001,7 @@ class EmulatorViewModel @Inject constructor(
+@@ -714,6 +716,9 @@ class EmulatorViewModel @Inject constructor(
+         }
+     }
+ 
++    // ff-bgm1x: 롬 배치를 바꾸면 다시 지켜보므로, 앞의 지켜보기를 끊을 수 있게 둔다
++    private var romLayoutJob: kotlinx.coroutines.Job? = null
++
+     private fun startObservingLayoutForRom(rom: Rom) {
+         val romLayoutId = rom.config.layoutId
+         val layoutFlow = if (romLayoutId == null) {
+@@ -726,13 +731,66 @@ class EmulatorViewModel @Inject constructor(
+                 }
+         }
+ 
+-        sessionCoroutineScope.launch {
++        romLayoutJob?.cancel()
++        romLayoutJob = sessionCoroutineScope.launch {
+             combine(layoutFlow, ensureEmulatorIsRunning()) { layout, _ ->
+                 layout
+             }.collect(_layout)
+         }
+     }
+ 
++    // ff-bgm1x: 게임 중 버튼 배치 편집 (레무로이드와 같이 "기본" / "이 게임") ------------------------
++
++    private fun openLayoutEditorForGame() {
++        val rom = (_emulatorState.value as? EmulatorState.RunningRom)?.rom ?: return
++        val current = _layout.value
++        val globalId = settingsRepository.getSelectedLayoutId()
++        val romLayoutId = rom.config.layoutId
++        val gameLayoutId = romLayoutId?.takeIf { me.magnum.melonds.domain.model.layout.FfGameLayouts.isGameLayout(current) && current?.id == it }
++        _uiEvent.tryEmit(
++            EmulatorUiEvent.OpenScreen.LayoutEditor(
++                layoutId = current?.id ?: globalId,
++                // 롬에 배치가 지정되어 있으면 (게임 전용이든 원래 기능으로 고른 배치든) "이 게임" 으로 시작
++                initialForGame = romLayoutId != null,
++                gameLayoutId = gameLayoutId,
++                globalLayoutId = globalId,
++                gameName = rom.config.customName ?: rom.name,
++            )
++        )
++    }
++
++    /** 편집기에서 돌아왔을 때. [layoutId] 는 저장한 배치 (초기화면 null) */
++    fun onLayoutEditorResult(forGame: Boolean, layoutId: java.util.UUID?, reset: Boolean) {
++        val rom = (_emulatorState.value as? EmulatorState.RunningRom)?.rom ?: return
++        sessionCoroutineScope.launch {
++            if (reset) {
++                if (forGame) {
++                    // 이 게임 배치를 지워 기본 배치로
++                    val romLayoutId = rom.config.layoutId
++                    if (romLayoutId != null) {
++                        val layout = layoutsRepository.getLayout(romLayoutId)
++                        if (me.magnum.melonds.domain.model.layout.FfGameLayouts.isGameLayout(layout)) {
++                            layoutsRepository.deleteLayout(layout!!)
++                        }
++                        setRomLayout(rom, null)
++                    }
++                } else {
++                    // 기본 배치를 원래 배치로
++                    settingsRepository.setSelectedLayoutId(LayoutConfiguration.DEFAULT_ID)
++                }
++            } else if (forGame && layoutId != null && rom.config.layoutId != layoutId) {
++                setRomLayout(rom, layoutId)
++            }
++        }
++    }
++
++    private fun setRomLayout(rom: Rom, layoutId: java.util.UUID?) {
++        val newConfig = rom.config.copy(layoutId = layoutId)
++        romsRepository.updateRomConfig(rom, newConfig)
++        rom.config = newConfig
++        startObservingLayoutForRom(rom)
++    }
++
+     private fun startObservingRendererConfiguration() {
+         sessionCoroutineScope.launch {
+             settingsRepository.observeRenderConfiguration().collectLatest {
+@@ -1000,6 +1058,7 @@ class EmulatorViewModel @Inject constructor(
              RomPauseMenuOption.LOAD_STATE -> emulatorSession.areSaveStateLoadsAllowed()
              RomPauseMenuOption.CHEATS -> emulatorSession.areCheatsEnabled()
              RomPauseMenuOption.VIEW_ACHIEVEMENTS -> emulatorSession.areRetroAchievementsEnabled()
@@ -716,22 +846,35 @@ index 3b6229e2..62740de8 100644
  }
 \ No newline at end of file
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
-index 084098ac..89a90b9b 100644
+index 084098ac..9f21b73d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/model/EmulatorUiEvent.kt
-@@ -9,6 +9,7 @@ sealed class EmulatorUiEvent {
+@@ -9,6 +9,15 @@ sealed class EmulatorUiEvent {
      sealed class OpenScreen : EmulatorUiEvent() {
          data object SettingsScreen : OpenScreen()
          data class CheatsScreen(val romInfo: RomInfo) : OpenScreen()
 +        data object SoundCatalogScreen : OpenScreen()  // ff-bgm1x
++        // ff-bgm1x: 게임 중 버튼 배치 편집. layoutId = 지금 쓰는 배치, initialForGame = 이 게임 배치를 쓰는 중
++        data class LayoutEditor(
++            val layoutId: java.util.UUID,
++            val initialForGame: Boolean,
++            val gameLayoutId: java.util.UUID?,
++            val globalLayoutId: java.util.UUID,
++            val gameName: String,
++        ) : OpenScreen()
      }
      data class ShowPauseMenu(val pauseMenu: PauseMenu) : EmulatorUiEvent()
      data class ShowRewindWindow(val rewindWindow: RewindWindow, val windowPosition: RewindWindowPosition) : EmulatorUiEvent()
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
-index ea395486..1be63dd9 100644
+index ea395486..20862a6a 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
-@@ -9,6 +9,7 @@ enum class RomPauseMenuOption(override val textResource: Int) : PauseMenuOption
+@@ -5,10 +5,12 @@ import me.magnum.melonds.ui.emulator.PauseMenuOption
+ 
+ enum class RomPauseMenuOption(override val textResource: Int) : PauseMenuOption {
+     SETTINGS(R.string.settings),
++    LAYOUT(R.string.ff_layout_edit_game),  // ff-bgm1x: 게임 중에 버튼 배치 편집 (기본 / 이 게임)
+     SAVE_STATE(R.string.save_state),
      LOAD_STATE(R.string.load_state),
      REWIND(R.string.rewind),
      CHEATS(R.string.cheats),
@@ -752,10 +895,24 @@ index 7dfdbae3..497a99d5 100644
      }
  
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
-index 8817e58d..21e1b013 100644
+index 8817e58d..e20571e8 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorActivity.kt
-@@ -51,6 +51,7 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -46,11 +46,21 @@ import javax.inject.Inject
+ class LayoutEditorActivity : AppCompatActivity() {
+     companion object {
+         const val KEY_LAYOUT_ID = "layout_id"
++        // ff-bgm1x: 게임 중에 열었을 때 (레무로이드와 같이 "기본" / "이 게임" 저장 대상과 "모두 초기화")
++        const val KEY_FF_GAME_MODE = "ff_game_mode"
++        const val KEY_FF_INITIAL_FOR_GAME = "ff_initial_for_game"
++        const val KEY_FF_GAME_LAYOUT_ID = "ff_game_layout_id"
++        const val KEY_FF_GLOBAL_LAYOUT_ID = "ff_global_layout_id"
++        const val KEY_FF_GAME_NAME = "ff_game_name"
++        const val RESULT_FF_FOR_GAME = "ff_result_for_game"
++        const val RESULT_FF_LAYOUT_ID = "ff_result_layout_id"
++        const val RESULT_FF_RESET = "ff_result_reset"
+     }
+ 
      enum class MenuOption(@field:StringRes val stringRes: Int) {
          PROPERTIES(R.string.properties),
          BACKGROUNDS(R.string.background),
@@ -763,7 +920,7 @@ index 8817e58d..21e1b013 100644
          REVERT(R.string.revert_changes),
          RESET(R.string.reset_default),
          SAVE_AND_EXIT(R.string.save_and_exit),
-@@ -100,7 +101,18 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -100,7 +110,18 @@ class LayoutEditorActivity : AppCompatActivity() {
          }
      }
  
@@ -782,7 +939,61 @@ index 8817e58d..21e1b013 100644
          override fun openBackgroundPicker(layoutTarget: LayoutTarget, selectedBackgroundId: UUID?) {
              storeLayoutChanges()
              val intent = Intent(this@LayoutEditorActivity, BackgroundsActivity::class.java).apply {
-@@ -204,6 +216,13 @@ class LayoutEditorActivity : AppCompatActivity() {
+@@ -117,12 +138,41 @@ class LayoutEditorActivity : AppCompatActivity() {
+         }
+ 
+         override fun onSaveLayoutAndExit() {
+-            saveLayoutAndExit()
++            // ff-bgm1x: 게임 중에 열었으면 메뉴의 "저장하고 나가기" 도 고른 쪽에 저장
++            val target = layoutEditorManager.ffTarget.value
++            if (target != null) onFfSave(target) else saveLayoutAndExit()
+         }
+ 
+         override fun onExit() {
+             finish()
+         }
++
++        // ff-bgm1x: 고른 쪽(기본 / 이 게임)에 저장하고 닫는다
++        override fun onFfSave(forGame: Boolean) {
++            storeLayoutChanges()
++            viewModel.ffSave(
++                forGame = forGame,
++                gameLayoutId = intent.getStringExtra(KEY_FF_GAME_LAYOUT_ID)?.let { UUID.fromString(it) },
++                globalLayoutId = intent.getStringExtra(KEY_FF_GLOBAL_LAYOUT_ID)?.let { UUID.fromString(it) },
++                gameName = intent.getStringExtra(KEY_FF_GAME_NAME) ?: "",
++                defaultName = getString(R.string.ff_layout_default_name),
++            ) { savedId ->
++                setResult(RESULT_OK, Intent().apply {
++                    putExtra(RESULT_FF_FOR_GAME, forGame)
++                    putExtra(RESULT_FF_LAYOUT_ID, savedId?.toString())
++                })
++                finish()
++            }
++        }
++
++        // ff-bgm1x: 고른 쪽만 초기화하고 닫는다 (실제 초기화는 게임 화면이 한다: 롬 설정·고른 배치를 바꿔야 해서)
++        override fun onFfResetAll(forGame: Boolean) {
++            setResult(RESULT_OK, Intent().apply {
++                putExtra(RESULT_FF_FOR_GAME, forGame)
++                putExtra(RESULT_FF_RESET, true)
++            })
++            finish()
++        }
+     }
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -134,6 +184,10 @@ class LayoutEditorActivity : AppCompatActivity() {
+         }
+         layoutEditorManager = LayoutEditorManagerView(LayoutTarget.MAIN_SCREEN, picasso, null, this).apply {
+             listener = layoutEditorManagerListener
++            // ff-bgm1x: 게임 중에 열었으면 저장 대상 고르기와 모두 초기화를 보인다
++            if (intent.getBooleanExtra(KEY_FF_GAME_MODE, false)) {
++                ffTarget.value = intent.getBooleanExtra(KEY_FF_INITIAL_FOR_GAME, false)
++            }
+         }
+         container.addView(layoutEditorManager, RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT)
+         setContentView(container)
+@@ -204,6 +258,13 @@ class LayoutEditorActivity : AppCompatActivity() {
                  }
              }
          }
@@ -797,7 +1008,7 @@ index 8817e58d..21e1b013 100644
              lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                  WindowInfoTracker.getOrCreate(this@LayoutEditorActivity).windowLayoutInfo(this@LayoutEditorActivity).collect { info ->
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
-index 8cb35d1c..40a608ef 100644
+index 8cb35d1c..8e86a3dc 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorManagerView.kt
 @@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModelProvider
@@ -826,7 +1037,7 @@ index 8cb35d1c..40a608ef 100644
  
  class LayoutEditorManagerView(
      private val layoutTarget: LayoutTarget,
-@@ -66,6 +71,7 @@ class LayoutEditorManagerView(
+@@ -66,11 +71,17 @@ class LayoutEditorManagerView(
  
      interface LayoutEditorManagerListener {
          fun openBackgroundPicker(layoutTarget: LayoutTarget, selectedBackgroundId: UUID?)
@@ -834,7 +1045,17 @@ index 8cb35d1c..40a608ef 100644
          fun onStoreLayoutChanges()
          fun onSaveLayoutAndExit()
          fun onExit()
-@@ -100,6 +106,16 @@ class LayoutEditorManagerView(
++        fun onFfSave(forGame: Boolean) {}  // ff-bgm1x: 게임 중 편집에서 고른 쪽에 저장
++        fun onFfResetAll(forGame: Boolean) {}  // ff-bgm1x: 게임 중 편집에서 고른 쪽만 초기화
+     }
+ 
++    // ff-bgm1x: 게임 중에 열었을 때의 저장 대상 (null = 설정 화면에서 연 편집기라 고르기 없음, true = 이 게임)
++    val ffTarget = mutableStateOf<Boolean?>(null)
++
+     private enum class ScreenAspectRatio(val ratio: Float?) {
+         RATIO_4_3(consoleAspectRatio),
+         RATIO_16_9(16 / 9f),
+@@ -100,6 +111,16 @@ class LayoutEditorManagerView(
      private var bottomAspectRatio = ScreenAspectRatio.RATIO_4_3
      private var updatingAspectSpinner = false
  
@@ -851,7 +1072,7 @@ index 8cb35d1c..40a608ef 100644
      private var showLayoutPropertiesDialog by mutableStateOf(initialEditorState?.isPropertiesDialogShown ?: false)
      private var showBackgroundPropertiesDialog by mutableStateOf(initialEditorState?.isBackgroundPropertiesDialogShown ?: false)
      private var shownEditablePropertyDialog by mutableStateOf<LayoutComponentEditableProperty?>(null)
-@@ -165,6 +181,10 @@ class LayoutEditorManagerView(
+@@ -165,6 +186,10 @@ class LayoutEditorManagerView(
                              LayoutComponentEditableProperty.SIZE -> binding.seekBarSize.progress + selectedViewMinSize
                              LayoutComponentEditableProperty.WIDTH -> binding.seekBarWidth.progress + selectedViewMinSize
                              LayoutComponentEditableProperty.HEIGHT -> binding.seekBarHeight.progress + selectedViewMinSize
@@ -862,7 +1083,7 @@ index 8cb35d1c..40a608ef 100644
                              null -> 0
                          },
                          onValueChanged = {
-@@ -178,6 +198,18 @@ class LayoutEditorManagerView(
+@@ -178,6 +203,18 @@ class LayoutEditorManagerView(
                                      binding.seekBarHeight.progress = it - selectedViewMinSize
                                      enforceAspectRatio(selectedAspectRatio, HEIGHT)
                                  }
@@ -881,7 +1102,7 @@ index 8cb35d1c..40a608ef 100644
                                  null -> { /* no-op */ }
                              }
                              shownEditablePropertyDialog = null
-@@ -189,6 +221,39 @@ class LayoutEditorManagerView(
+@@ -189,6 +226,44 @@ class LayoutEditorManagerView(
                          title = stringResource(R.string.layout_name),
                          dialogState = nameInputDialogState,
                      )
@@ -916,12 +1137,17 @@ index 8cb35d1c..40a608ef 100644
 +                            },
 +                            onOpenMenu = { openMenu() },
 +                            onUseOriginalEditor = { setNewPanel(false) },
++                            target = ffTarget.value,
++                            onTargetChanged = { ffTarget.value = it },
++                            onResetAll = { listener?.onFfResetAll(it) },
++                            onSave = { listener?.onFfSave(it) },
++                            onCancel = { listener?.onExit() },
 +                        )
 +                    }
                  }
              }
          }
-@@ -228,15 +293,69 @@ class LayoutEditorManagerView(
+@@ -228,15 +303,69 @@ class LayoutEditorManagerView(
          binding.buttonCenterVertical.setOnClickListener {
              binding.viewLayoutEditor.centerSelectedViewVertically()
          }
@@ -991,7 +1217,7 @@ index 8cb35d1c..40a608ef 100644
              hideBottomControls()
              // Force the scaling controls to restart so the new view always
              // receives fresh listeners even if they were already visible.
-@@ -366,6 +485,16 @@ class LayoutEditorManagerView(
+@@ -366,6 +495,16 @@ class LayoutEditorManagerView(
          }
  
          hideScalingControls(false)
@@ -1008,7 +1234,7 @@ index 8cb35d1c..40a608ef 100644
      }
  
      override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-@@ -376,6 +505,19 @@ class LayoutEditorManagerView(
+@@ -376,6 +515,19 @@ class LayoutEditorManagerView(
          }
      }
  
@@ -1028,7 +1254,7 @@ index 8cb35d1c..40a608ef 100644
      fun handleBackNavigation() {
          if (areScalingControlsShown) {
              hideScalingControls(true)
-@@ -408,7 +550,9 @@ class LayoutEditorManagerView(
+@@ -408,7 +560,9 @@ class LayoutEditorManagerView(
      private fun openButtonsMenu() {
          hideBottomControls()
          val instantiatedComponents = binding.viewLayoutEditor.getInstantiatedComponents()
@@ -1039,7 +1265,7 @@ index 8cb35d1c..40a608ef 100644
  
          val themedContext = android.view.ContextThemeWrapper(context, R.style.AppTheme)
          val dialogBuilder = AlertDialog.Builder(themedContext)
-@@ -446,6 +590,7 @@ class LayoutEditorManagerView(
+@@ -446,6 +600,7 @@ class LayoutEditorManagerView(
          when (option) {
              MenuOption.PROPERTIES -> openPropertiesDialog()
              MenuOption.BACKGROUNDS -> openBackgroundsConfigDialog()
@@ -1047,7 +1273,7 @@ index 8cb35d1c..40a608ef 100644
              MenuOption.REVERT -> viewModel.revertLayoutChanges()
              MenuOption.RESET -> viewModel.resetLayout()
              MenuOption.SAVE_AND_EXIT -> {
-@@ -572,8 +717,9 @@ class LayoutEditorManagerView(
+@@ -572,8 +727,9 @@ class LayoutEditorManagerView(
          binding.seekBarAlpha.isVisible = isScreen
          binding.layoutAspectRatio.isVisible = isScreen
          binding.checkboxAboveScreen.isVisible = isScreen
@@ -1059,7 +1285,7 @@ index 8cb35d1c..40a608ef 100644
  
          currentWidthScale = widthScale
          currentHeightScale = heightScale
-@@ -627,6 +773,11 @@ class LayoutEditorManagerView(
+@@ -627,6 +783,11 @@ class LayoutEditorManagerView(
          areScalingControlsShown = false
      }
  
@@ -1762,7 +1988,7 @@ index c70cf791..3dc3efe7 100644
 \ No newline at end of file
 +}
 diff --git a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
-index ec726f10..48ff7902 100644
+index ec726f10..4171e84d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/layouteditor/LayoutEditorViewModel.kt
 @@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
@@ -1775,7 +2001,7 @@ index ec726f10..48ff7902 100644
  import kotlinx.coroutines.flow.asStateFlow
  import kotlinx.coroutines.flow.distinctUntilChangedBy
  import kotlinx.coroutines.flow.filterNotNull
-@@ -31,6 +33,15 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutBackgroundProperties
+@@ -31,12 +33,22 @@ import me.magnum.melonds.ui.layouteditor.model.LayoutBackgroundProperties
  import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
  import java.util.UUID
  import javax.inject.Inject
@@ -1791,7 +2017,14 @@ index ec726f10..48ff7902 100644
  
  @HiltViewModel
  class LayoutEditorViewModel @Inject constructor(
-@@ -52,6 +63,10 @@ class LayoutEditorViewModel @Inject constructor(
+     private val layoutsRepository: LayoutsRepository,
+     private val backgroundsRepository: BackgroundRepository,
+     private val uiLayoutProvider: UILayoutProvider,
++    private val settingsRepository: me.magnum.melonds.domain.repositories.SettingsRepository,  // ff-bgm1x: 기본 배치 고르기
+     savedStateHandle: SavedStateHandle
+ ) : ViewModel() {
+ 
+@@ -52,6 +64,10 @@ class LayoutEditorViewModel @Inject constructor(
      private val _secondaryScreenBackground = MutableStateFlow<RuntimeBackground?>(null)
      val secondaryScreenBackground = _secondaryScreenBackground.asStateFlow()
  
@@ -1802,7 +2035,56 @@ index ec726f10..48ff7902 100644
      private val _currentLayout = MutableStateFlow<CurrentLayoutState?>(null)
      val currentLayout = _currentLayout.asStateFlow()
  
-@@ -347,6 +362,88 @@ class LayoutEditorViewModel @Inject constructor(
+@@ -192,6 +208,48 @@ class LayoutEditorViewModel @Inject constructor(
+         }
+     }
+ 
++    /**
++     * ff-bgm1x: 게임 중 편집에서 고른 쪽에 저장한다 (레무로이드와 같이).
++     * - 이 게임: 게임 전용 배치가 있으면 그것을, 없으면 새로 만들어 저장 (배치 목록에는 보이지 않음). 롬 지정은 게임 화면이 한다.
++     * - 기본: 지금 고른 기본 배치에 저장. 기본 배치가 원래 배치(바꿀 수 없음)면 새 배치로 만들어 기본으로 고른다.
++     * 끝나면 [done] 에 저장한 배치 번호를 넘긴다.
++     */
++    fun ffSave(
++        forGame: Boolean,
++        gameLayoutId: UUID?,
++        globalLayoutId: UUID?,
++        gameName: String,
++        defaultName: String,
++        done: (UUID?) -> Unit,
++    ) {
++        val config = _currentLayoutConfiguration.value
++        if (config == null) {
++            done(null)
++            return
++        }
++        viewModelScope.launch {
++            val savedId = if (forGame) {
++                val id = gameLayoutId ?: UUID.randomUUID()
++                layoutsRepository.saveLayout(
++                    config.copy(id = id, name = me.magnum.melonds.domain.model.layout.FfGameLayouts.nameFor(gameName), type = LayoutConfiguration.LayoutType.CUSTOM)
++                )
++                id
++            } else {
++                val global = globalLayoutId?.let { layoutsRepository.getLayout(it) }
++                if (global == null || global.type == LayoutConfiguration.LayoutType.DEFAULT) {
++                    val id = UUID.randomUUID()
++                    layoutsRepository.saveLayout(config.copy(id = id, name = defaultName, type = LayoutConfiguration.LayoutType.CUSTOM))
++                    settingsRepository.setSelectedLayoutId(id)
++                    id
++                } else {
++                    layoutsRepository.saveLayout(config.copy(id = global.id, name = global.name, type = LayoutConfiguration.LayoutType.CUSTOM))
++                    global.id
++                }
++            }
++            done(savedId)
++        }
++    }
++
+     fun revertLayoutChanges() {
+         _currentLayoutConfiguration.value = initialLayoutConfiguration
+     }
+@@ -347,6 +405,88 @@ class LayoutEditorViewModel @Inject constructor(
          }
      }
  
@@ -2112,10 +2394,10 @@ index 99766f84..baf6e170 100644
      </ScrollView>
  
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 4a7e1ddd..154114a5 100644
+index 4a7e1ddd..3f6199ff 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
-@@ -243,6 +243,53 @@
+@@ -243,6 +243,59 @@
      <string name="interpolation">Interpolation</string>
      <string name="bitrate">Bitrate</string>
      <string name="volume">Volume</string>
@@ -2143,6 +2425,12 @@ index 4a7e1ddd..154114a5 100644
 +    <string name="ff_layout_new_panel">New panel</string>
 +    <string name="ff_layout_use_original">Original panel</string>
 +    <string name="ff_layout_panel_handle">☰ Drag here to move this panel</string>
++    <string name="ff_layout_edit_game">Button layout</string>
++    <string name="ff_layout_target_default">Default</string>
++    <string name="ff_layout_target_game">This game</string>
++    <string name="ff_layout_reset_all">Reset all</string>
++    <string name="ff_layout_save">Save</string>
++    <string name="ff_layout_default_name">Default (edited)</string>
 +    <string name="ff_layout_panel_collapse">Collapse</string>
 +    <string name="ff_layout_panel_expand">Expand</string>
 +    <string name="ff_layout_hint">Tap to select one (whole group if grouped), long-press to select several</string>

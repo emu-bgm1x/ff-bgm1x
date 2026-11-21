@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
-index 8a8a8302..6e0451d5 100644
+index 8a8a8302..9a4eea4d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 @@ -243,6 +243,12 @@ class EmulatorActivity : AppCompatActivity() {
@@ -15,12 +15,43 @@ index 8a8a8302..6e0451d5 100644
      }
      private val settingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
          viewModel.onSettingsChanged()
-@@ -506,6 +512,9 @@ class EmulatorActivity : AppCompatActivity() {
+@@ -254,6 +260,18 @@ class EmulatorActivity : AppCompatActivity() {
+         viewModel.onCheatsChanged()
+         viewModel.resumeEmulator()
+     }
++    // ff-bgm1x: 게임 중 버튼 배치 편집에서 돌아왔을 때 (이 게임 배치를 롬에 지정하거나 초기화)
++    private val ffLayoutEditorLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
++        val data = it.data
++        if (it.resultCode == RESULT_OK && data != null) {
++            viewModel.onLayoutEditorResult(
++                forGame = data.getBooleanExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_FOR_GAME, false),
++                layoutId = data.getStringExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_LAYOUT_ID)?.let { id -> java.util.UUID.fromString(id) },
++                reset = data.getBooleanExtra(me.magnum.melonds.ui.layouteditor.LayoutEditorActivity.RESULT_FF_RESET, false),
++            )
++        }
++        viewModel.resumeEmulator()
++    }
+     private val permissionRequestLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+         lifecycleScope.launch {
+             it.keys.forEach { permission ->
+@@ -506,6 +524,21 @@ class EmulatorActivity : AppCompatActivity() {
                              val settingsIntent = Intent(this@EmulatorActivity, SettingsActivity::class.java)
                              settingsLauncher.launch(settingsIntent)
                          }
 +                        EmulatorUiEvent.OpenScreen.SoundCatalogScreen -> {
 +                            startActivity(Intent(this@EmulatorActivity, me.magnum.melonds.ui.soundcatalog.SoundCatalogActivity::class.java))
++                        }
++                        is EmulatorUiEvent.OpenScreen.LayoutEditor -> {
++                            val e = me.magnum.melonds.ui.layouteditor.LayoutEditorActivity
++                            val intent = Intent(this@EmulatorActivity, me.magnum.melonds.ui.layouteditor.LayoutEditorActivity::class.java).apply {
++                                putExtra(e.KEY_LAYOUT_ID, it.layoutId.toString())
++                                putExtra(e.KEY_FF_GAME_MODE, true)
++                                putExtra(e.KEY_FF_INITIAL_FOR_GAME, it.initialForGame)
++                                putExtra(e.KEY_FF_GAME_LAYOUT_ID, it.gameLayoutId?.toString())
++                                putExtra(e.KEY_FF_GLOBAL_LAYOUT_ID, it.globalLayoutId.toString())
++                                putExtra(e.KEY_FF_GAME_NAME, it.gameName)
++                            }
++                            ffLayoutEditorLauncher.launch(intent)
 +                        }
                          is EmulatorUiEvent.ShowPauseMenu -> showPauseMenu(it.pauseMenu)
                          is EmulatorUiEvent.ShowRewindWindow -> showRewindWindow(it.rewindWindow, it.windowPosition)

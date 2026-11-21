@@ -1,8 +1,13 @@
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
-index ea395486..1be63dd9 100644
+index ea395486..20862a6a 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/rom/RomPauseMenuOption.kt
-@@ -9,6 +9,7 @@ enum class RomPauseMenuOption(override val textResource: Int) : PauseMenuOption
+@@ -5,10 +5,12 @@ import me.magnum.melonds.ui.emulator.PauseMenuOption
+ 
+ enum class RomPauseMenuOption(override val textResource: Int) : PauseMenuOption {
+     SETTINGS(R.string.settings),
++    LAYOUT(R.string.ff_layout_edit_game),  // ff-bgm1x: 게임 중에 버튼 배치 편집 (기본 / 이 게임)
+     SAVE_STATE(R.string.save_state),
      LOAD_STATE(R.string.load_state),
      REWIND(R.string.rewind),
      CHEATS(R.string.cheats),

@@ -26,6 +26,12 @@
     <string name="ff_layout_new_panel">새 편집 패널</string>
     <string name="ff_layout_use_original">원래 편집 패널</string>
     <string name="ff_layout_panel_handle">☰ 여기를 끌어 패널 옮기기</string>
+    <string name="ff_layout_edit_game">버튼 배치</string>
+    <string name="ff_layout_target_default">기본</string>
+    <string name="ff_layout_target_game">이 게임</string>
+    <string name="ff_layout_reset_all">모두 초기화</string>
+    <string name="ff_layout_save">저장</string>
+    <string name="ff_layout_default_name">기본 (편집함)</string>
     <string name="ff_layout_panel_collapse">접기</string>
     <string name="ff_layout_panel_expand">펴기</string>
     <string name="ff_layout_hint">누르면 하나(그룹이면 그룹 전체) 선택, 길게 누르면 여러 개 선택</string>
