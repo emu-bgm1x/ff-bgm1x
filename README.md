@@ -2,7 +2,7 @@
 
 > 에뮬레이터 새 버전이 나오면 아래 프롬프트로 AI 코딩 도구에 맡겨 직접 적용할 수 있습니다.
 > 예: Azahar 2126.2 → 2127.0-rc3 시험 이식에서 연결 패치 36개 파일 중 28개가 그대로 들어갔고, PC판은 충돌 3곳·API 변경 1곳만 고쳐 약 10분 만에 첫 실행까지 됐습니다.
-> 이슈에는 공식 새 버전의 [자동 점검](#새-버전-자동-점검) 결과가 올라옵니다.
+> 이슈에는 공식 새 버전의 [자동 점검](#새-버전-자동-점검) 결과가 올라옵니다. 질문은 [Discussions](https://github.com/emu-bgm1x/ff-bgm1x/discussions) 에 남겨 주세요.
 >
 > *English: see [English](#english) below.*
 
@@ -99,6 +99,19 @@ GitHub Actions(`.github/workflows/upstream-check.yml`)가 매주 월요일 다�
 
 Actions 탭에서 `Run workflow` 로 바로 돌려 볼 수도 있습니다.
 
+## GB/GBC 롬이 맞지 않을 때
+
+GBA 부터는 닌텐도 표준 사운드 데이터를 읽어 처리하므로 대부분의 게임에 그대로 적용됩니다.
+GB/GBC 는 표준이 없고 게임마다 사운드 드라이버가 달라서, 특정 롬에 정확히 맞춘 설정을 미리 만들어 둘 수 없습니다.
+특히 사운드 엔진을 개조한 롬에서는 동작하지 않을 확률이 높습니다.
+이럴 때는 다음 셋을 AI 코딩 도구에 함께 주세요.
+
+1. 직접 가진 그 롬
+2. [gb-generic/GB-GENERIC-AI.md](gb-generic/GB-GENERIC-AI.md) 의 프롬프트 (이 방식을 만들며 찾은 규칙과 진단 방법)
+3. 에뮬레이터 소스 (포크 저장소의 `gb-generic` 브랜치)
+
+AI 가 시험 도구로 원인을 찾아, 그 롬을 고치거나 에뮬레이터의 처리 방식을 고칩니다.
+
 ## 알아 둘 점
 
 - 새 버전에서 그대로 동작한다는 보장은 없습니다. 에뮬레이터의 오디오 내부 구조가 크게 바뀌면
@@ -115,6 +128,7 @@ When a new emulator version comes out, you can re-apply the mod yourself with an
 For example, in a trial port of Azahar 2126.2 → 2127.0-rc3, 28 of the 36 files in the hook patch applied unchanged, and the PC build
 ran for the first time after about 10 minutes, with only 3 conflicts and 1 API change to fix.
 Issues show the results of the [automatic upstream check](#새-버전-자동-점검) (described in Korean above).
+Questions go to [Discussions](https://github.com/emu-bgm1x/ff-bgm1x/discussions).
 
 ff-bgm1x is a set of emulator modifications that keep **BGM and sound effects playing at 1x speed while
 fast-forwarding**, so the game runs fast but sounds normal. This repository is a *porting kit*: it contains
@@ -181,6 +195,19 @@ official release of <emulator> and build it.
    game screen and sound myself.
 5. Do not add features or refactor. Keep the behavior exactly as described in FEATURES-ko.txt.
 ```
+
+### When a GB/GBC ROM does not work
+
+From GBA on, the mod reads Nintendo's standard sound data, so it works for most games as is.
+GB/GBC has no standard and every game has its own sound driver, so settings that exactly fit a particular ROM cannot be prepared in advance.
+ROMs with a modified sound engine are especially likely not to work.
+In that case, give an AI coding assistant these three together:
+
+1. The ROM, which you own yourself
+2. The prompt in [gb-generic/GB-GENERIC-AI.md](gb-generic/GB-GENERIC-AI.md) (the rules and diagnosis methods found while building this mode)
+3. The emulator source (the `gb-generic` branch of the fork)
+
+The AI finds the cause with the test tools and fixes either the ROM or the emulator's processing.
 
 ### Notes
 
